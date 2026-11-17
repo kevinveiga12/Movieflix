@@ -1,0 +1,137 @@
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+
+export function SignupPage() {
+  const { signUp } = useAuth()
+  const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (password.length < 6) {
+      setError('A senha precisa ter pelo menos 6 caracteres.')
+      return
+    }
+    if (password !== confirm) {
+      setError('As senhas não coincidem.')
+      return
+    }
+    setBusy(true)
+    const { error, needsConfirmation } = await signUp(email.trim(), password, name.trim())
+    setBusy(false)
+    if (error) {
+      setError(error)
+      return
+    }
+    if (needsConfirmation) setDone(true)
+    else navigate('/', { replace: true })
+  }
+
+  if (done) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <div className="auth-logo">
+            <img src="/icon-192.png" alt="" />
+            <span className="brand-word">MovieFlix</span>
+          </div>
+          <h1 className="auth-title">Confirme seu e-mail</h1>
+          <p className="auth-sub">
+            Enviamos um link de confirmação para <strong>{email}</strong>. Abra o link para ativar
+            sua conta e depois faça login.
+          </p>
+          <Link to="/login" className="btn btn--primary btn--block btn--lg">
+            Ir para o login
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="auth-logo">
+          <img src="/icon-192.png" alt="" />
+          <span className="brand-word">MovieFlix</span>
+        </div>
+        <h1 className="auth-title">Criar conta grátis</h1>
+        <p className="auth-sub">
+          O catálogo é livre. A conta serve para salvar favoritos e histórico.
+        </p>
+
+        {error && <div className="alert alert--error">{error}</div>}
+
+        <form onSubmit={onSubmit}>
+          <div className="field">
+            <label htmlFor="name">Nome</label>
+            <input
+              id="name"
+              className="input"
+              type="text"
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Seu nome"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="email">E-mail</label>
+            <input
+              id="email"
+              className="input"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="voce@email.com"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="password">Senha</label>
+            <input
+              id="password"
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mínimo 6 caracteres"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="confirm">Confirmar senha</label>
+            <input
+              id="confirm"
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Repita a senha"
+            />
+          </div>
+          <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={busy}>
+            {busy ? 'Criando…' : 'Criar conta grátis'}
+          </button>
+        </form>
+
+        <p className="auth-foot">
+          Já tem conta? <Link to="/login">Entrar</Link>
+        </p>
+      </div>
+    </div>
+  )
+}

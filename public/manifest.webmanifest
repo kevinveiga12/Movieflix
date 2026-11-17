@@ -1,0 +1,48 @@
+{
+  "name": "MovieFlix — Filmes e Séries Dublados em pt-BR",
+  "short_name": "MovieFlix",
+  "description": "Plataforma de streaming gratuita com filmes e séries dublados em pt-BR, sem anúncios.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "categories": ["entertainment", "video", "movies"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Filmes",
+      "url": "/filmes"
+    },
+    {
+      "name": "Séries",
+      "url": "/series"
+    },
+    {
+      "name": "Pesquisar",
+      "url": "/pesquisa"
+    }
+  ]
+}

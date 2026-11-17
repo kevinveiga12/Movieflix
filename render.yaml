@@ -1,0 +1,40 @@
+# MovieFlix 2.0 — Blueprint do Render
+#
+# Cria DOIS serviços novos, sem tocar nos serviços antigos:
+#   1. movieflix-web  → frontend + API (Node/Express servindo o build do Vite)
+#   2. movieflix-api  → opcional, se quiser separar a API do frontend
+#
+# Por padrão só o serviço web é criado: ele já serve o frontend E a API,
+# o que reduz custo e latência. Descomente o segundo serviço se precisar
+# escalar a API separadamente.
+
+services:
+  - type: web
+    name: movieflix-web
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: node server/index.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: TMDB_LANG
+        value: pt-BR
+      - key: CORS_ORIGINS
+        sync: false
