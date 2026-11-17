@@ -10,3 +10,6 @@ npm-debug.log*
 .idea/
 coverage/
 server/data/catalog-overrides.json
+
+# TS build cache
+*.tsbuildinfo
