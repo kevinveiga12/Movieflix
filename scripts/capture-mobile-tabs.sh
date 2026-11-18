@@ -17,10 +17,16 @@ W=${SIZE%x*}
 H=${SIZE#*x}
 echo "tela: ${W}x${H}"
 
-# A barra inferior tem 5 abas de largura igual. O centro da aba i (0..4) fica
-# em x = W*(2i+1)/10. A barra tem ~56dp de altura + navigation bar, entao
-# tocamos 60px acima da base.
-Y=$((H - 60))
+# A barra inferior tem 5 abas de largura igual: o centro da aba i (0..4) fica
+# em x = W*(2i+1)/10.
+#
+# A ALTURA importa: medindo o screenshot real (1080x2400), o fundo da barra
+# (#121218) comeca em y~2150 e os ICONES ficam em y~2200-2290. Tocar em
+# H-60 = 2340 cai no padding vazio abaixo dos icones e NAO troca de aba —
+# foi exatamente o que aconteceu na primeira tentativa. H-150 = 2250 acerta
+# o centro dos icones.
+Y=$((H - 150))
+echo "tocando na barra em y=$Y"
 
 # Aba 0 (Início) ja foi capturada como mobile-home.png.
 i=0
