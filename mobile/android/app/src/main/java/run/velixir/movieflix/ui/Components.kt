@@ -145,7 +145,7 @@ fun PosterCard(
 ) {
     Column(
         modifier = modifier
-            .width(width.dp)
+            .then(if (width > 0) Modifier.width(width.dp) else Modifier)
             .clip(RoundedCornerShape(12.dp))
             .background(MfColors.BgCard)
             .clickable(onClick = onClick),
@@ -273,7 +273,7 @@ fun TitleRow(
 /** Grade de pôsteres para as telas de catálogo. */
 @Composable
 fun PosterGrid(
-    items: List<Title>,
+    titles: List<Title>,
     onItemClick: (Title) -> Unit,
     modifier: Modifier = Modifier,
     header: (@Composable () -> Unit)? = null,
@@ -290,12 +290,12 @@ fun PosterGrid(
                 header()
             }
         }
-        items(items.size, key = { "${items[it].type}-${items[it].tmdbId}" }) { i ->
+        items(titles.size, key = { "${titles[it].type}-${titles[it].tmdbId}" }) { i ->
             PosterCard(
-                title = items[i],
-                onClick = { onItemClick(items[i]) },
+                title = titles[i],
+                onClick = { onItemClick(titles[i]) },
                 modifier = Modifier.fillMaxWidth(),
-                width = 200,
+                width = 0,
             )
         }
     }

@@ -130,8 +130,8 @@ fun TvHomeScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
                 }
             }
 
-            item { TvRow("Filmes", s.movies) { onOpen(it) } }
-            item { TvRow("Séries", s.series) { onOpen(it) } }
+            item { TvRow("Filmes", s.movies, onItemClick = { onOpen(it) }) }
+            item { TvRow("Séries", s.series, onItemClick = { onOpen(it) }) }
             item { Spacer(Modifier.height(30.dp)) }
         }
     }
@@ -236,7 +236,7 @@ fun TvWideCard(title: String, imageUrl: String, progress: Double, onClick: () ->
 @Composable
 fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
     val s by vm.state.collectAsState()
-    val items = if (kind == "tv") s.series else s.movies
+    val list = if (kind == "tv") s.series else s.movies
     var genre by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(kind) { vm.loadCatalog(kind) }
@@ -266,16 +266,16 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
         }
 
         when {
-            s.loading && items.isEmpty() -> TvLoading()
-            items.isEmpty() -> TvEmpty("Nada por aqui ainda.")
+            s.loading && list.isEmpty() -> TvLoading()
+            list.isEmpty() -> TvEmpty("Nada por aqui ainda.")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                 columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
                 contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                items(items.size, key = { "${items[it].type}-${items[it].tmdbId}" }) { i ->
-                    TvPosterCard(items[i], { onOpen(items[i]) }, width = 200)
+                items(list.size, key = { "${list[it].type}-${list[it].tmdbId}" }) { i ->
+                    TvPosterCard(list[i], { onOpen(list[i]) }, width = 200)
                 }
             }
         }

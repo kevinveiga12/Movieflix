@@ -179,8 +179,8 @@ fun HomeScreen(
             }
         }
 
-        item { TitleRow("Filmes", s.movies) { onOpen(it) } }
-        item { TitleRow("Séries", s.series) { onOpen(it) } }
+        item { TitleRow("Filmes", s.movies, onItemClick = { onOpen(it) }) }
+        item { TitleRow("Séries", s.series, onItemClick = { onOpen(it) }) }
 
         item { Spacer(Modifier.height(20.dp)) }
     }
@@ -194,7 +194,7 @@ fun CatalogScreen(
     onSearch: () -> Unit = {},
 ) {
     val s by vm.state.collectAsState()
-    val items = if (kind == "tv") s.series else s.movies
+    val list = if (kind == "tv") s.series else s.movies
     var genre by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(kind) { vm.loadCatalog(kind) }
@@ -202,11 +202,11 @@ fun CatalogScreen(
     Column(Modifier.fillMaxSize()) {
         MfTopBar(onSearch)
         when {
-            s.loading && items.isEmpty() -> LoadingBox()
-            s.error != null && items.isEmpty() -> ErrorBox(s.error!!) { vm.loadCatalog(kind, genre) }
-            items.isEmpty() -> EmptyState("Nada por aqui ainda.")
+            s.loading && list.isEmpty() -> LoadingBox()
+            s.error != null && list.isEmpty() -> ErrorBox(s.error!!) { vm.loadCatalog(kind, genre) }
+            list.isEmpty() -> EmptyState("Nada por aqui ainda.")
             else -> PosterGrid(
-                items = items,
+                titles = list,
                 onItemClick = onOpen,
                 header = {
                     Column {
@@ -343,7 +343,7 @@ fun SearchScreen(vm: AppViewModel, onOpen: (Title) -> Unit) {
             term.isBlank() -> EmptyState("Digite para buscar no catálogo.", "🔍")
             s.loading -> LoadingBox()
             s.searchResults.isEmpty() -> EmptyState("Nenhum resultado para \"$term\".", "🔍")
-            else -> PosterGrid(s.searchResults, onOpen)
+            else -> PosterGrid(titles = s.searchResults, onItemClick = onOpen)
         }
     }
 }
@@ -372,7 +372,7 @@ fun FavoritesScreen(vm: AppViewModel, onOpen: (Title) -> Unit, onSearch: () -> U
             )
         }
         PosterGrid(
-            items = titles,
+            titles = titles,
             onItemClick = onOpen,
             header = {
                 Text(
@@ -413,7 +413,7 @@ fun HistoryScreen(vm: AppViewModel, onOpen: (Title) -> Unit, onSearch: () -> Uni
             )
         }
         PosterGrid(
-            items = titles,
+            titles = titles,
             onItemClick = onOpen,
             header = {
                 Text(
