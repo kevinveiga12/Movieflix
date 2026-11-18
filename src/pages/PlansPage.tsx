@@ -52,10 +52,11 @@ export function PlansPage() {
       </button>
 
       <h1 className="section-title" style={{ fontSize: 'clamp(1.6rem,3vw,2.4rem)', marginBottom: 8 }}>
-        Escolha seu plano
+        Acesso gratuito
       </h1>
       <p className="muted" style={{ marginBottom: 24, fontSize: '0.95rem' }}>
-        Navegar pelo catálogo é livre. Para assistir, é preciso ter uma conta com plano ativo.
+        O MovieFlix 2.0 é gratuito. Navegar pelo catálogo é livre e assistir exige apenas uma conta
+        — não há plano para contratar nem cobrança.
       </p>
 
       {active && sub && (
@@ -78,9 +79,28 @@ export function PlansPage() {
       {loading ? (
         <div className="skeleton" style={{ height: 320 }} />
       ) : plans.length === 0 ? (
-        <div className="empty">
-          <h3>Planos indisponíveis</h3>
-          <p>Não foi possível carregar os planos agora. Tente novamente em instantes.</p>
+        <div className="panel" style={{ textAlign: 'center', padding: '40px 24px' }}>
+          <div style={{ fontSize: '2.2rem', marginBottom: 10 }}>🎬</div>
+          <h3 className="panel-title" style={{ marginBottom: 8 }}>
+            Nenhum plano necessário
+          </h3>
+          <p className="panel-sub" style={{ marginBottom: 20 }}>
+            O MovieFlix é gratuito. Crie sua conta e assista a filmes e séries sem pagar nada.
+          </p>
+          {user ? (
+            <Link to="/" className="btn btn--primary">
+              Explorar o catálogo
+            </Link>
+          ) : (
+            <div className="inline" style={{ justifyContent: 'center' }}>
+              <Link to="/cadastro" className="btn btn--primary">
+                Criar conta grátis
+              </Link>
+              <Link to="/login" className="btn btn--outline">
+                Já tenho conta
+              </Link>
+            </div>
+          )}
         </div>
       ) : (
         <div
@@ -145,11 +165,11 @@ export function PlansPage() {
       )}
 
       <div className="panel" style={{ marginTop: 24 }}>
-        <div className="panel-title">Como funciona a ativação</div>
+        <div className="panel-title">Como funciona</div>
         <p className="panel-sub" style={{ marginBottom: 10 }}>
-          A contratação é feita pelo WhatsApp <strong>{WHATSAPP_DISPLAY}</strong>. Depois da confirmação, o
-          plano é registrado na sua conta e liberado automaticamente em todos os dispositivos — site, app
-          mobile e TV usam a mesma assinatura.
+          Crie sua conta, entre e assista. Não há assinatura, cobrança ou período de teste — o
+          acesso é gratuito e sua conta guarda favoritos, histórico e o ponto onde você parou em
+          todos os dispositivos.
         </p>
         {!user && (
           <div className="inline">

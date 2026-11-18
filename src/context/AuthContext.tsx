@@ -40,38 +40,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
 
-  async function loadProfile(userId: string) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, email, name, avatar_url, is_admin, created_at')
-      .eq('id', userId)
-      .maybeSingle()
+  /**
+   * Carrega o perfil.
+   *
+   * O perfil é criado pelo SERVIDOR (POST /api/profile/ensure), não pelo
+   * navegador: o banco não tem trigger de criação e a RLS impede o cliente de
+   * inserir a própria linha de forma confiável. O servidor usa a Service Role e
+   * é o único que pode conceder `is_admin` (via ADMIN_EMAILS).
+   *
+   * A leitura usa `select('*')` porque a coluna de nome varia entre os
+   * projetos Supabase (`name` vs `full_name`) — nomear a errada devolve 42703.
+   */
+  async function loadProfile(userId: string, token?: string) {
+    const accessToken = token ?? session?.access_token
+
+    if (accessToken) {
+      try {
+        const res = await fetch('/api/profile/ensure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        })
+        if (res.ok) {
+          const data = (await res.json()) as { profile: Profile | null }
+          if (data.profile) {
+            setProfile(data.profile)
+            return
+          }
+        }
+      } catch {
+        // Servidor indisponível — cai na leitura direta abaixo.
+      }
+    }
+
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
     if (error) {
       console.warn('[MovieFlix] perfil não carregado:', error.message)
       setProfile(null)
       return
     }
-
-    // O banco NÃO tem trigger que crie `profiles` no signup (verificado em
-    // 2026-11-18: usuário novo fica sem linha). Sem perfil, o painel admin não
-    // reconhece ninguém. Criamos a linha do PRÓPRIO usuário — a RLS permite
-    // INSERT do próprio id, e `is_admin` nunca é enviado aqui.
     if (!data) {
-      const { data: created, error: insErr } = await supabase
-        .from('profiles')
-        .insert({ id: userId })
-        .select('id, email, name, avatar_url, is_admin, created_at')
-        .maybeSingle()
-      if (insErr) {
-        console.warn('[MovieFlix] perfil não criado:', insErr.message)
-        setProfile(null)
-        return
-      }
-      setProfile((created as Profile) ?? null)
+      setProfile(null)
       return
     }
-
-    setProfile(data as Profile)
+    const row = data as Record<string, unknown>
+    setProfile({
+      id: String(row.id),
+      email: (row.email as string) ?? null,
+      name: (row.name ?? row.full_name ?? row.display_name ?? null) as string | null,
+      avatar_url: (row.avatar_url as string) ?? null,
+      is_admin: Boolean(row.is_admin),
+      created_at: (row.created_at as string) ?? '',
+    })
   }
 
   useEffect(() => {
@@ -84,13 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return
       setSession(data.session)
-      if (data.session?.user) void loadProfile(data.session.user.id)
+      if (data.session?.user) void loadProfile(data.session.user.id, data.session.access_token)
       setLoading(false)
     })
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next)
-      if (next?.user) void loadProfile(next.user.id)
+      if (next?.user) void loadProfile(next.user.id, next.access_token)
       else setProfile(null)
     })
 
@@ -98,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false
       sub.subscription.unsubscribe()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const value = useMemo<AuthState>(
@@ -112,14 +132,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: error ? friendly(error.message) : null }
       },
       async signUp(email, password, fullName) {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { full_name: fullName } },
-        })
-        if (error) return { error: friendly(error.message), needsConfirmation: false }
-        // Sem sessão = confirmação de e-mail pendente.
-        return { error: null, needsConfirmation: !data.session }
+        // Cadastro pelo SERVIDOR: a conta nasce com o e-mail já confirmado.
+        // O signUp do navegador deixa o usuário preso em `email_not_confirmed`
+        // porque o SMTP padrão do Supabase não entrega para qualquer endereço.
+        try {
+          const res = await fetch('/api/auth/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, fullName }),
+          })
+          const data = (await res.json().catch(() => ({}))) as { error?: string }
+          if (!res.ok) {
+            return { error: friendly(data.error ?? `Falha no cadastro (HTTP ${res.status}).`), needsConfirmation: false }
+          }
+        } catch (e) {
+          return { error: friendly((e as Error).message), needsConfirmation: false }
+        }
+
+        // Conta criada e confirmada — entra direto.
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) {
+          return { error: friendly(error.message), needsConfirmation: false }
+        }
+        return { error: null, needsConfirmation: false }
       },
       async signOut() {
         await supabase.auth.signOut()
@@ -136,15 +171,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async updateProfile(patch) {
         if (!session?.user) return { error: 'Sessão expirada.' }
-        const { error } = await supabase.from('profiles').update(patch).eq('id', session.user.id)
-        if (error) return { error: friendly(error.message) }
-        await loadProfile(session.user.id)
-        return { error: null }
+        // A coluna de nome pode ser `name` ou `full_name`; tentamos as duas.
+        const attempts: Array<Record<string, unknown>> = []
+        if (patch.name !== undefined) {
+          attempts.push({ name: patch.name })
+          attempts.push({ full_name: patch.name })
+        }
+        if (patch.avatar_url !== undefined) attempts.push({ avatar_url: patch.avatar_url })
+
+        let lastError: string | null = null
+        for (const body of attempts) {
+          const { error } = await supabase.from('profiles').update(body).eq('id', session.user.id)
+          if (!error) {
+            await loadProfile(session.user.id)
+            return { error: null }
+          }
+          lastError = error.message
+        }
+        return { error: lastError ? friendly(lastError) : null }
       },
       async refreshProfile() {
         if (session?.user) await loadProfile(session.user.id)
       },
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [session, profile, loading],
   )
 

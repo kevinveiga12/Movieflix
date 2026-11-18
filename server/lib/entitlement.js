@@ -1,44 +1,31 @@
-import { createClient } from '@supabase/supabase-js'
+import { getAnonClient, getClientAsUser, hasDb as dbConfigured } from './supabase-server.js'
 
 /**
  * Autorização de reprodução — feita SEMPRE no servidor.
  *
- * Regra de negócio (verificada no banco em 2026-11-18):
- *   profiles(id, email, name, avatar_url, is_admin, created_at)
- *     -> ATENÇÃO: a coluna de nome é `name`, NÃO `full_name`. Consultar
- *        `full_name` devolve 42703 e derruba o carregamento do perfil.
- *   subscriptions(user_id, plan_id, plan_code, status, expires_at,
- *                 payment_id, created_at, updated_at)
- *   plans(id, name, code, description, price_cents, features,
- *         duration_days, is_active)
+ * REGRA DE NEGÓCIO ATUAL (definida pelo proprietário em 2026-11-18):
+ *   O MovieFlix 2.0 é GRATUITO. Não há planos, assinaturas nem pagamentos.
+ *   A única condição para assistir é ter conta e estar autenticado.
  *
- * Um usuário só assiste se, ao mesmo tempo:
- *   1. o token do Supabase Auth for válido (getUser);
- *   2. existir assinatura com status ativo;
- *   3. `expires_at` estiver no futuro;
- *   4. o plano dela cobrir o `required_plan` do título.
+ * O que mudou e por quê:
+ *   A versão anterior exigia uma linha em `subscriptions` com status ativo e
+ *   `expires_at` no futuro. Como o projeto Supabase atual
+ *   (zhsfqptngzgbcgiwwjug) NÃO tem a tabela `subscriptions`, TODA reprodução
+ *   era negada com `no_subscription` — o site parecia quebrado. O gate de
+ *   assinatura foi removido; a autenticação continua obrigatória e verificada
+ *   no servidor com o token do Supabase Auth.
  *
- * Hierarquia: simple (1) < standard (2) < premium (3).
+ * O que NÃO mudou:
+ *   - O token é validado no servidor (auth.getUser), nunca no cliente.
+ *   - A URL do vídeo só é devolvida depois da validação.
+ *   - Esconder o botão no navegador não contorna nada.
  */
-
-import { getAnonClient, getClientAsUser, hasDb as dbConfigured } from './supabase-server.js'
 
 export const hasDb = dbConfigured
 
-/** Cliente público (respeita RLS) — usado para catálogo e para validar tokens. */
+/** Cliente público (respeita RLS) — usado para validar tokens. */
 function publicClient() {
   return getAnonClient()
-}
-
-const PLAN_RANK = { simple: 1, standard: 2, premium: 3 }
-const PLAN_LABEL = { simple: 'Plano 1', standard: 'Plano 2', premium: 'Plano 3' }
-
-export function planRank(code) {
-  return PLAN_RANK[String(code ?? '').toLowerCase()] ?? 0
-}
-
-export function planLabel(code) {
-  return PLAN_LABEL[String(code ?? '').toLowerCase()] ?? 'Plano'
 }
 
 /** Extrai o Bearer token do header Authorization. */
@@ -64,33 +51,27 @@ export async function resolveUser(token) {
 }
 
 /**
- * Lê a assinatura vigente do usuário.
- * A tabela `subscriptions` é a MESMA que o app de TV e o site leem, então a
- * ativação é compartilhada entre dispositivos por construção.
+ * Decide se o usuário pode reproduzir um título.
+ *
+ * Plataforma gratuita: basta estar autenticado. A função continua existindo
+ * (e devolvendo o mesmo formato) para que o dia em que houver planos seja só
+ * reativar a checagem aqui, sem tocar no resto do código.
  */
-export async function loadSubscription(token, userId) {
-  const client = publicClient()
-  if (!client) return { subscription: null }
-
-  const asUser = getClientAsUser(token)
-  if (!asUser) return { subscription: null }
-
-  const { data, error } = await asUser
-    .from('subscriptions')
-    .select('id, user_id, plan_id, plan_code, status, expires_at, created_at, updated_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    // 42501/PGRST116 = sem permissão/nenhuma linha — não é erro fatal.
-    return { subscription: null, note: error.message }
+export async function authorizePlayback({ token }) {
+  const resolved = await resolveUser(token)
+  if (resolved.error) {
+    return { allowed: false, reason: 'unauthenticated', status: 401, message: resolved.error }
   }
-  return { subscription: data ?? null }
+  return { allowed: true, user: resolved.user, subscription: null }
 }
 
-/** Lê os planos ativos (público — não expõe nada sensível). */
+/**
+ * Planos — vazio por design.
+ *
+ * A tabela `plans` não existe no projeto atual e a plataforma é gratuita.
+ * Devolvemos lista vazia em vez de inventar preços: a UI mostra o aviso de
+ * acesso gratuito quando não há planos.
+ */
 export async function loadPlans() {
   const client = publicClient()
   if (!client) return []
@@ -103,54 +84,21 @@ export async function loadPlans() {
   return data ?? []
 }
 
-/** Assinatura está vigente? */
-export function subscriptionActive(sub) {
-  if (!sub) return false
-  const status = String(sub.status ?? '').toLowerCase()
-  if (status !== 'active') return false
-  if (!sub.expires_at) return false
-  const expires = new Date(sub.expires_at).getTime()
-  return Number.isFinite(expires) && expires > Date.now()
+/** Compatibilidade: assinatura vigente (sempre null na plataforma gratuita). */
+export async function loadSubscription() {
+  return { subscription: null }
 }
 
-/**
- * Decide se o usuário pode reproduzir um título.
- * Devolve um objeto com `allowed` e, quando negado, o `reason` que a UI usa.
- */
-export async function authorizePlayback({ token, requiredPlan }) {
-  const resolved = await resolveUser(token)
-  if (resolved.error) {
-    return { allowed: false, reason: 'unauthenticated', status: 401, message: resolved.error }
-  }
-
-  const { subscription } = await loadSubscription(token, resolved.user.id)
-  const active = subscriptionActive(subscription)
-
-  if (!active) {
-    return {
-      allowed: false,
-      reason: 'no_subscription',
-      status: 402,
-      message: 'É preciso um plano ativo para assistir. Escolha um plano para liberar a reprodução.',
-      user: resolved.user,
-      subscription,
-    }
-  }
-
-  const userRank = planRank(subscription?.plan_code)
-  const neededRank = planRank(requiredPlan)
-
-  if (neededRank > userRank) {
-    return {
-      allowed: false,
-      reason: 'plan_too_low',
-      status: 403,
-      message: `Este título exige o ${planLabel(requiredPlan)}. Seu plano atual é o ${planLabel(subscription?.plan_code)}.`,
-      user: resolved.user,
-      subscription,
-      requiredPlan,
-    }
-  }
-
-  return { allowed: true, user: resolved.user, subscription }
+export function subscriptionActive() {
+  return false
 }
+
+export function planLabel() {
+  return 'Acesso gratuito'
+}
+
+export function planRank() {
+  return 0
+}
+
+export { getClientAsUser }

@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import type { PlaybackAuth } from '../lib/types'
-import { WHATSAPP_DISPLAY, whatsappUrl } from '../lib/access'
 import { InfoIcon, PlayIcon, ArrowLeft } from '../components/Icons'
 
 /**
@@ -25,18 +24,18 @@ export function PlaybackGate({
   const config: Record<string, { heading: string; body: string; cta?: { label: string; to: string } }> = {
     unauthenticated: {
       heading: 'Crie sua conta para assistir',
-      body: 'Você pode navegar pelo catálogo livremente, mas a reprodução é liberada apenas para quem tem conta e plano ativo.',
+      body: 'Você pode navegar pelo catálogo livremente. A reprodução é liberada para quem tem conta — é grátis e leva menos de um minuto.',
       cta: { label: 'Criar conta grátis', to: '/cadastro' },
     },
     no_subscription: {
-      heading: 'Escolha um plano para assistir',
-      body: 'Sua conta ainda não tem um plano ativo. Escolha um plano e fale com a gente pelo WhatsApp para ativar.',
-      cta: { label: 'Ver planos', to: '/planos' },
+      heading: 'Entre na sua conta para assistir',
+      body: 'O MovieFlix é gratuito: basta ter uma conta. Entre para liberar a reprodução.',
+      cta: { label: 'Entrar', to: '/login' },
     },
     plan_too_low: {
-      heading: 'Seu plano não cobre este título',
-      body: auth.message ?? 'Este título exige um plano superior ao seu.',
-      cta: { label: 'Ver planos', to: '/planos' },
+      heading: 'Entre na sua conta para assistir',
+      body: 'O MovieFlix é gratuito: basta ter uma conta. Entre para liberar a reprodução.',
+      cta: { label: 'Entrar', to: '/login' },
     },
     no_source: {
       heading: 'Sem fonte de reprodução',
@@ -100,15 +99,8 @@ export function PlaybackGate({
           <div className="alert alert--info" style={{ marginTop: 20, textAlign: 'left' }}>
             <InfoIcon size={18} />
             <span>
-              Ativação pelo WhatsApp <strong>{WHATSAPP_DISPLAY}</strong>.{' '}
-              <a
-                href={whatsappUrl('Olá! Quero ativar meu plano no MovieFlix.')}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textDecoration: 'underline' }}
-              >
-                Abrir conversa
-              </a>
+              O MovieFlix é <strong>gratuito</strong>. Não há plano para contratar — só é preciso
+              estar logado.
             </span>
           </div>
         )}

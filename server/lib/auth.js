@@ -58,9 +58,12 @@ export async function requireAdmin(req, res, next) {
     const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token)
     if (userErr || !userData?.user) return res.status(401).json({ error: 'Sessão inválida.' })
 
+    // `select('*')`: a coluna de nome varia entre os projetos Supabase
+    // (`name` vs `full_name`). Aqui só precisamos de is_admin/email, mas
+    // nomear colunas inexistentes derruba a consulta com 42703.
     const { data: profile, error: profErr } = await supabaseAdmin
       .from('profiles')
-      .select('id, email, is_admin')
+      .select('*')
       .eq('id', userData.user.id)
       .maybeSingle()
 
