@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# MovieFlix 2.0 — configuração de build para a Velixir (e qualquer host Nixpacks)
+# ─────────────────────────────────────────────────────────────────────────────
+# POR QUE ESTE ARQUIVO EXISTE
+#
+# A Velixir detecta o tipo de projeto pelo conteúdo do repositório. Como existe
+# um `index.html` na raiz (o do Vite), o detector concluiu "site estático" e
+# passou a servir apenas o `dist/` por um CDN — sem nunca iniciar o Node.
+# Resultado observado em produção: /api/health devolvia o index.html.
+#
+# Este arquivo força o provider Node e declara explicitamente o comando de
+# start, para que o Express suba e sirva frontend + API na mesma porta.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node server/index.js"

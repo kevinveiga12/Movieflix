@@ -18,7 +18,10 @@ dotenv.config()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
-const PORT = Number(process.env.PORT ?? 3001)
+// A Velixir (e a maioria dos PaaS) injeta PORT e exige escuta em 0.0.0.0.
+// O padrão 8080 é o que a Velixir usa quando PORT não está definida.
+const PORT = Number(process.env.PORT ?? 8080)
+const HOST = process.env.HOST ?? '0.0.0.0'
 
 app.set('trust proxy', 1)
 
@@ -82,6 +85,35 @@ app.get('/api/health', async (_req, res) => {
   })
 })
 
+/**
+ * GET /api/config — configuração pública do frontend.
+ *
+ * Existe para o build NÃO depender de variáveis `VITE_*`. O Vite resolve
+ * `import.meta.env.VITE_*` em tempo de build; se a hospedagem não tiver essas
+ * variáveis no momento do `npm run build`, o bundle sai quebrado. Aqui o
+ * servidor entrega os valores que ele já tem em runtime, então trocar a chave
+ * no painel passa a valer sem rebuild.
+ *
+ * Só a URL e a chave ANON saem daqui — ambas públicas por design e protegidas
+ * por RLS. A SERVICE ROLE KEY nunca é exposta.
+ */
+app.get('/api/config', (_req, res) => {
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? null
+  const supabaseAnonKey =
+    process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY ?? null
+
+  res.set('Cache-Control', 'no-store')
+  res.json({
+    supabaseUrl,
+    supabaseAnonKey,
+    configured: Boolean(supabaseUrl && supabaseAnonKey),
+    whatsapp: {
+      number: process.env.WHATSAPP_NUMBER ?? '5511943750307',
+      display: process.env.WHATSAPP_DISPLAY ?? '(11) 94375-0307',
+    },
+  })
+})
+
 app.get('/api/health/catalog', async (_req, res) => {
   const [stats, orphans] = await Promise.all([catalogStats(), orphanSeasons()])
   res.json({ catalog: stats, orphanSeasons: orphans })
@@ -117,6 +149,16 @@ app.use((err, _req, res, _next) => {
   })
 })
 
-app.listen(PORT, () => {
-  console.log(`[MovieFlix] servidor em http://localhost:${PORT}`)
+app.listen(PORT, HOST, () => {
+  console.log(`[MovieFlix] servidor em http://${HOST}:${PORT}`)
+  // Diagnóstico de configuração no boot — mostra só SE existe, nunca o valor.
+  console.log(
+    '[MovieFlix] config:',
+    JSON.stringify({
+      supabaseUrl: Boolean(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL),
+      supabaseAnon: Boolean(process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY),
+      serviceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      tmdb: Boolean(process.env.TMDB_API_KEY),
+    }),
+  )
 })
