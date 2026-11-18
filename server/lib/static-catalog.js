@@ -19,6 +19,9 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC = path.join(__dirname, '..', '..', 'public', 'filmes')
 
+/** Provedor de embed (EmbedMovies). Ver src/lib/player.ts. */
+const EMBED_PROVIDER = 'https://myembed.biz'
+
 const cache = { movie: null, tv: null }
 const inflight = { movie: null, tv: null }
 
@@ -85,8 +88,18 @@ function normalizeRecord(t) {
   if (!t || typeof t !== 'object') return t
   const raw = String(t.type ?? t.media_type ?? '').toLowerCase()
   const type = raw === 'tv' || raw === 'series' || raw === 'show' ? 'tv' : 'movie'
-  if (t.type === type && t.media_type === type) return t
-  return { ...t, type, media_type: type }
+
+  // O JSON do catálogo foi gerado quando o provedor era o Streambetter e traz
+  // `video_url` apontando para lá. Reescrevemos para o EmbedMovies na leitura,
+  // sem tocar nos arquivos (18 mil registros) e sem depender de regeneração.
+  let video_url = t.video_url
+  if (typeof video_url === 'string' && /streambetter|strembetter/i.test(video_url)) {
+    const id = String(t.tmdb_id ?? t.id ?? '')
+    video_url = /^\d+$/.test(id) ? `${EMBED_PROVIDER}/filme/${id}` : ''
+  }
+
+  if (t.type === type && t.media_type === type && video_url === t.video_url) return t
+  return { ...t, type, media_type: type, video_url }
 }
 
 /**
