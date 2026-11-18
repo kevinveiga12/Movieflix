@@ -26,12 +26,14 @@ sleep 2
 adb shell am start -n run.velixir.movieflix.tv/.MainActivity
 sleep 12
 
-# Geometria do menu lateral, medida no screenshot real de 1920x1080:
-#   logo + subtitulo ocupam ate y~130; cada item tem ~40px de altura.
-#   x=110 cai sobre o texto do item.
+# Geometria do menu lateral, MEDIDA no screenshot real de 1920x1080
+# (docs/apps-evidencias/tv-real-home.png) por deteccao das faixas de texto
+# claro na coluna do menu. Os 10 itens ficam em:
+#   228 315 399 483 567 651 735 819 903 987
+# ou seja: primeiro em 228, passo de 84px. x=110 cai sobre o texto.
 X=110
-Y0=150
-STEP=40
+Y0=228
+STEP=84
 
 N=0
 for LABEL in filmes series categorias buscar favoritos historico planos conta configuracoes; do
