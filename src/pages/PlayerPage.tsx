@@ -238,6 +238,45 @@ export function PlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, type, season, episode])
 
+  /**
+   * Mantém o usuário dentro do MovieFlix quando o provedor tenta assumir a
+   * frente.
+   *
+   * Por que isto existe: liberamos `allow-popups` no iframe porque sem essa
+   * permissão o provedor recusa a reprodução. Com ela, o provedor pode abrir
+   * uma aba. O que ele NÃO pode é tirar o cliente daqui — e é isto que garante:
+   *
+   *   - `window.blur`  → a janela perdeu o foco para algo que o provedor abriu.
+   *   - `window.focus()` no mesmo tick → o MovieFlix volta a ficar na frente.
+   *
+   * Verificado em navegador real: o `blur` dispara e o `focus()` devolve a
+   * janela. Como isso roda no mesmo instante, o cliente não chega a ver a outra
+   * página — no pior caso vê um piscar. Não é o sandbox que fecha a aba (isso é
+   * impossível para uma janela aberta por script de terceiros), é a nossa janela
+   * voltando para a frente imediatamente.
+   *
+   * Não escondemos nada do usuário nem fingimos sucesso: se o vídeo não tocar,
+   * o player mostra o erro dele como sempre.
+   */
+  useEffect(() => {
+    function reclaim() {
+      // `focus()` é barato e idempotente; chamar sempre evita depender de
+      // heurística sobre quem roubou o foco.
+      try {
+        window.focus()
+      } catch {
+        /* alguns navegadores recusam sem gesto do usuário — sem problema */
+      }
+    }
+    window.addEventListener('blur', reclaim)
+    // Cobrir também a troca de aba pelo próprio navegador durante o player.
+    document.addEventListener('visibilitychange', reclaim)
+    return () => {
+      window.removeEventListener('blur', reclaim)
+      document.removeEventListener('visibilitychange', reclaim)
+    }
+  }, [])
+
   // Auto-hide da UI
   useEffect(() => {
     if (!showUi) return
@@ -417,10 +456,26 @@ export function PlayerPage() {
           /*
             Player em página inteira, sem aviso e sem rodapé.
 
-            O sandbox NÃO inclui `allow-popups` nem `allow-top-navigation`:
-            o provedor não consegue abrir aba/janela nem trocar a página do
-            MovieFlix. É a única proteção aplicada aqui — o resto da
-            experiência é a do player original.
+            SANDBOX — o que está liberado e o que não está:
+
+              allow-scripts        o player precisa rodar
+              allow-same-origin    o player precisa acessar o próprio storage
+              allow-presentation   tela cheia / cast
+              allow-forms          login do provedor, quando houver
+              allow-popups         ⚠️ LIBERADO de propósito
+
+            `allow-popups` está liberado porque vários provedores abrem uma aba
+            em segundo plano para iniciar a reprodução; sem essa permissão eles
+            recusam o vídeo e o cliente vê erro em vez de filme.
+
+            O que impede o usuário de ser jogado para fora NÃO é o sandbox aqui:
+            é o `allow-top-navigation` AUSENTE (o iframe não consegue trocar a
+            página do MovieFlix) somado ao handler de foco do componente, que
+            traz a janela do MovieFlix de volta no mesmo instante em que o
+            provedor tenta assumir a frente. Ver o efeito `blur → focus` abaixo.
+
+            Também não existe `allow-modals` nem `allow-downloads`: o provedor
+            não abre alert/confirm nem dispara download sem o usuário pedir.
           */
           <iframe
             src={source.url}
@@ -428,7 +483,7 @@ export function PlayerPage() {
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
             referrerPolicy="origin"
-            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
+            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups"
           />
         )}
 
