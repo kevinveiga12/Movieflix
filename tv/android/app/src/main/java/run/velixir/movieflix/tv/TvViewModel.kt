@@ -1,0 +1,210 @@
+package run.velixir.movieflix.tv
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import run.velixir.movieflix.tv.data.ApiException
+import run.velixir.movieflix.tv.data.FavoriteRow
+import run.velixir.movieflix.tv.data.HistoryRow
+import run.velixir.movieflix.tv.data.MovieFlixApi
+import run.velixir.movieflix.tv.data.Season
+import run.velixir.movieflix.tv.data.SessionStore
+import run.velixir.movieflix.tv.data.SubscriptionResponse
+import run.velixir.movieflix.tv.data.Title
+
+data class TvState(
+    val loading: Boolean = false,
+    val error: String? = null,
+    val movies: List<Title> = emptyList(),
+    val series: List<Title> = emptyList(),
+    val searchResults: List<Title> = emptyList(),
+    val favorites: List<FavoriteRow> = emptyList(),
+    val history: List<HistoryRow> = emptyList(),
+    val seasons: List<Season> = emptyList(),
+    val subscription: SubscriptionResponse? = null,
+    val loggedIn: Boolean = false,
+    val email: String? = null,
+    val toast: String? = null,
+)
+
+/**
+ * ViewModel da TV. Usa a MESMA API e as MESMAS tabelas do site e do mobile —
+ * favoritar na TV aparece no celular e no site, e o histórico é o mesmo.
+ */
+class TvViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val session = SessionStore(app)
+    private val api = MovieFlixApi(BuildConfig.API_BASE_URL, session)
+
+    private val _state = MutableStateFlow(
+        TvState(loggedIn = session.isLoggedIn, email = session.email),
+    )
+    val state: StateFlow<TvState> = _state.asStateFlow()
+
+    init {
+        loadHome()
+        if (session.isLoggedIn) {
+            loadUserData()
+            loadSubscription()
+        }
+    }
+
+    private fun update(block: (TvState) -> TvState) {
+        _state.value = block(_state.value)
+    }
+
+    fun clearToast() = update { it.copy(toast = null) }
+
+    fun loadHome() {
+        viewModelScope.launch {
+            update { it.copy(loading = true, error = null) }
+            try {
+                val m = api.movies(limit = 40)
+                val s = api.series(limit = 40)
+                update { it.copy(loading = false, movies = m.items, series = s.items) }
+            } catch (e: Exception) {
+                update { it.copy(loading = false, error = friendly(e)) }
+            }
+        }
+    }
+
+    fun loadCatalog(kind: String) {
+        viewModelScope.launch {
+            update { it.copy(loading = true, error = null) }
+            try {
+                val r = if (kind == "tv") api.series(limit = 60) else api.movies(limit = 60)
+                update {
+                    if (kind == "tv") it.copy(loading = false, series = r.items)
+                    else it.copy(loading = false, movies = r.items)
+                }
+            } catch (e: Exception) {
+                update { it.copy(loading = false, error = friendly(e)) }
+            }
+        }
+    }
+
+    fun search(term: String) {
+        if (term.isBlank()) {
+            update { it.copy(searchResults = emptyList()) }
+            return
+        }
+        viewModelScope.launch {
+            update { it.copy(loading = true) }
+            try {
+                val r = api.search(term)
+                update { it.copy(loading = false, searchResults = r.items) }
+            } catch (e: Exception) {
+                update { it.copy(loading = false, error = friendly(e)) }
+            }
+        }
+    }
+
+    fun loadSeasons(tmdbId: Long) {
+        viewModelScope.launch {
+            val r = runCatching { api.seasons(tmdbId) }.getOrNull()
+            update { it.copy(seasons = r?.seasons ?: emptyList()) }
+        }
+    }
+
+    fun login(email: String, password: String, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            update { it.copy(loading = true) }
+            try {
+                val r = api.login(email.trim(), password)
+                if (r.session == null) {
+                    update { it.copy(loading = false) }
+                    onDone(r.error ?: "Não foi possível entrar.")
+                    return@launch
+                }
+                update {
+                    it.copy(loading = false, loggedIn = true, email = r.user?.email ?: email)
+                }
+                loadUserData()
+                loadSubscription()
+                onDone(null)
+            } catch (e: Exception) {
+                update { it.copy(loading = false) }
+                onDone(friendly(e))
+            }
+        }
+    }
+
+    fun logout() {
+        session.clear()
+        update {
+            it.copy(loggedIn = false, email = null, favorites = emptyList(), history = emptyList())
+        }
+    }
+
+    fun loadUserData() {
+        if (!session.isLoggedIn) return
+        viewModelScope.launch {
+            val f = runCatching { api.favorites() }.getOrDefault(emptyList())
+            val h = runCatching { api.history() }.getOrDefault(emptyList())
+            update { it.copy(favorites = f, history = h) }
+        }
+    }
+
+    fun loadSubscription() {
+        if (!session.isLoggedIn) return
+        viewModelScope.launch {
+            val s = runCatching { api.subscription() }.getOrNull()
+            update { it.copy(subscription = s) }
+        }
+    }
+
+    fun isFavorite(tmdbId: Long) = _state.value.favorites.any { it.tmdbId == tmdbId }
+
+    fun toggleFavorite(t: Title) {
+        if (!session.isLoggedIn) {
+            update { it.copy(toast = "Entre na sua conta para salvar favoritos.") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val now = api.toggleFavorite(t, isFavorite(t.tmdbId))
+                update { it.copy(toast = if (now) "Adicionado aos favoritos" else "Removido") }
+                loadUserData()
+            } catch (e: Exception) {
+                update { it.copy(toast = friendly(e)) }
+            }
+        }
+    }
+
+    fun authorize(
+        tmdbId: Long,
+        season: Int?,
+        episode: Int?,
+        onResult: (String?, String?, String?) -> Unit,
+    ) {
+        if (!session.isLoggedIn) {
+            onResult(null, null, "Entre na sua conta para assistir.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val r = api.authorizePlayback(tmdbId, season, episode)
+                if (r.allowed && r.source != null) onResult(r.source.url, r.source.mode, null)
+                else onResult(null, null, r.message ?: "Não foi possível liberar este título.")
+            } catch (e: Exception) {
+                onResult(null, null, friendly(e))
+            }
+        }
+    }
+
+    fun saveProgress(t: Title, pos: Double, dur: Double, episodeId: String?) {
+        if (!session.isLoggedIn) return
+        viewModelScope.launch { runCatching { api.saveProgress(t, pos, dur, episodeId) } }
+    }
+
+    private fun friendly(e: Exception): String = when {
+        e is ApiException && e.status == 401 -> "Sua sessão expirou. Entre novamente."
+        e is ApiException && e.status >= 500 -> "O MovieFlix está instável. Tente em instantes."
+        e is java.net.UnknownHostException -> "Sem conexão com a internet."
+        else -> "Não foi possível concluir. Tente novamente."
+    }
+}

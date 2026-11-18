@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Banner da TV (320x180 dp). Marca MovieFlix sobre fundo escuro. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#0A0A0F" />
+        </shape>
+    </item>
+    <item android:gravity="center">
+        <shape android:shape="rectangle">
+            <solid android:color="#DF0A15" />
+            <corners android:radius="8dp" />
+            <size android:width="120dp" android:height="6dp" />
+        </shape>
+    </item>
+</layer-list>

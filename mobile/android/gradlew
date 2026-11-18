@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# Gradle wrapper para Unix (Linux/macOS). Gerado para o projeto MovieFlix.
+# Uso: ./gradlew assembleDebug
+#
+# Se o gradle-wrapper.jar não estiver presente, rode uma vez com um Gradle
+# instalado:  gradle wrapper --gradle-version 8.9
+# ou abra o projeto no Android Studio, que baixa o wrapper automaticamente.
+
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
+
+if [ -n "$JAVA_HOME" ]; then
+    JAVACMD="$JAVA_HOME/bin/java"
+else
+    JAVACMD=java
+fi
+
+if ! command -v "$JAVACMD" >/dev/null 2>&1; then
+    echo "ERRO: Java não encontrado. Instale o JDK 17 e defina JAVA_HOME." >&2
+    exit 1
+fi
+
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+if [ ! -f "$CLASSPATH" ]; then
+    echo "ERRO: gradle/wrapper/gradle-wrapper.jar não encontrado." >&2
+    echo "Rode 'gradle wrapper --gradle-version 8.9' ou abra no Android Studio." >&2
+    exit 1
+fi
+
+exec "$JAVACMD" \
+    -Dorg.gradle.appname=gradlew \
+    -classpath "$CLASSPATH" \
+    org.gradle.wrapper.GradleWrapperMain "$@"
