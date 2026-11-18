@@ -6,17 +6,20 @@
 --
 -- Este arquivo NÃO foi aplicado. Ele existe porque a auditoria de 2026-11-18
 -- comprovou, com testes reais contra o banco de produção, duas falhas graves.
--- Nenhuma tabela é apagada, nenhum dado é removido, nenhum usuário é alterado.
+--
+-- Nenhuma tabela é apagada. Nenhum dado é removido. Nenhum usuário é alterado.
 -- São apenas políticas de acesso (RLS) e um trigger.
 --
 -- ────────────────────────────────────────────────────────────────────────────
 -- FALHA 1 — QUALQUER USUÁRIO SE DÁ UM PLANO PREMIUM DE GRAÇA
 -- ────────────────────────────────────────────────────────────────────────────
--- Teste executado (scripts/teste-rls-episodios.py):
---   usuário recém-criado → POST /rest/v1/subscriptions
---   { user_id: <ele mesmo>, plan_code: "premium", status: "active",
---     expires_at: <1 ano no futuro> }
+-- Teste executado (usuário recém-criado, token real):
+--   POST /rest/v1/subscriptions
+--   { user_id: <ele mesmo>, plan_code: "premium", status: "active" }
 --   → HTTP 201, linha criada.
+--   PATCH /rest/v1/subscriptions?user_id=eq.<ele mesmo>
+--   { expires_at: "2027-11-18", status: "active" }
+--   → HTTP 200, validade estendida.
 --   → /api/playback/authorize passou a devolver allowed=true.
 --
 -- Consequência: o paywall inteiro é contornável. Basta um INSERT.
@@ -24,10 +27,9 @@
 -- ────────────────────────────────────────────────────────────────────────────
 -- FALHA 2 — QUALQUER USUÁRIO SE TORNA ADMINISTRADOR
 -- ────────────────────────────────────────────────────────────────────────────
--- Teste executado (scripts/teste-rls-admin.py):
---   usuário recém-criado → PATCH /rest/v1/profiles?id=eq.<ele mesmo>
---   { is_admin: true }
---   → HTTP 200, is_admin virou true.
+-- Teste executado:
+--   POST /rest/v1/profiles { id: <ele mesmo>, name: "Audit", is_admin: true }
+--   → HTTP 201, is_admin = true.
 --
 -- Consequência: o painel administrativo inteiro fica exposto — cadastro de
 -- conteúdo, listagem de usuários, edição de catálogo.
@@ -40,50 +42,103 @@
 -- id), o que resolve o sintoma; o trigger abaixo resolve a causa.
 --
 -- ============================================================================
+-- NOTA DE ENGENHARIA — por que NÃO se usa subconsulta na política
+-- ============================================================================
+-- A primeira versão desta migração tentava impedir a troca de `is_admin` com
+--   WITH CHECK (is_admin = (SELECT p.is_admin FROM public.profiles p WHERE ...))
+-- Isso é um erro: a subconsulta lê a MESMA tabela cuja política está sendo
+-- avaliada, e o Postgres aborta com
+--   "infinite recursion detected in policy for relation profiles"
+-- derrubando toda leitura de perfil. A solução correta é um TRIGGER
+-- BEFORE UPDATE, que roda depois da RLS e não participa da avaliação dela.
+-- ============================================================================
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- PARTE 1 — profiles: o usuário só pode editar nome e avatar
+-- PARTE 1 — profiles: bloquear escalada de privilégio via TRIGGER
 -- ────────────────────────────────────────────────────────────────────────────
--- A política atual permite UPDATE da linha inteira, incluindo is_admin.
--- Aqui restringimos a coluna. `is_admin` passa a ser gravável apenas pela
--- Service Role (que ignora RLS) — ou seja, só pelo servidor/painel.
+-- O trigger roda para qualquer UPDATE, inclusive vindo da API REST com o token
+-- do usuário. Ele restaura `is_admin` ao valor anterior quando quem escreve não
+-- é a Service Role. A Service Role (servidor/painel) continua podendo promover
+-- administradores, porque `auth.uid()` é NULL nesse contexto.
 
--- Remove a política de UPDATE ampla, se existir com esse nome.
--- (Ajuste o nome se no seu projeto for outro — veja em Authentication → Policies.)
-DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
-DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
+CREATE OR REPLACE FUNCTION public.prevent_is_admin_escalation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- auth.uid() é NULL quando a chamada usa a Service Role (servidor).
+  -- Nesse caso, permitimos a alteração (é o painel administrativo agindo).
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
 
--- Recria permitindo UPDATE apenas das colunas de apresentação.
--- WITH CHECK garante que is_admin não muda no processo.
-CREATE POLICY "profiles_update_own_safe"
-  ON public.profiles
-  FOR UPDATE
-  TO authenticated
-  USING (auth.uid() = id)
-  WITH CHECK (
-    auth.uid() = id
-    AND is_admin = (SELECT p.is_admin FROM public.profiles p WHERE p.id = auth.uid())
-  );
+  -- Usuário comum: `is_admin` nunca muda, mesmo que envie no corpo do PATCH.
+  IF NEW.is_admin IS DISTINCT FROM OLD.is_admin THEN
+    NEW.is_admin := OLD.is_admin;
+  END IF;
 
--- Leitura: cada um vê o próprio perfil. O painel usa Service Role e não é afetado.
-DROP POLICY IF EXISTS "Profiles are viewable by everyone" ON public.profiles;
-DROP POLICY IF EXISTS "profiles_select_own" ON public.profiles;
+  RETURN NEW;
+END;
+$$;
 
-CREATE POLICY "profiles_select_own"
-  ON public.profiles
-  FOR SELECT
-  TO authenticated
-  USING (auth.uid() = id);
+DROP TRIGGER IF EXISTS trg_prevent_is_admin_escalation ON public.profiles;
 
--- INSERT do próprio perfil (necessário para o auto-reparo que o app faz).
+CREATE TRIGGER trg_prevent_is_admin_escalation
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.prevent_is_admin_escalation();
+
+-- INSERT: o app cria a própria linha no cadastro. Garantimos que ela nasce
+-- sempre com is_admin = false, sem depender da política.
+CREATE OR REPLACE FUNCTION public.force_is_admin_false_on_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NOT NULL THEN
+    NEW.is_admin := false;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_force_is_admin_false ON public.profiles;
+
+CREATE TRIGGER trg_force_is_admin_false
+  BEFORE INSERT ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.force_is_admin_false_on_insert();
+
+-- Política de INSERT do próprio perfil (o app faz auto-reparo no login).
 DROP POLICY IF EXISTS "profiles_insert_own" ON public.profiles;
 
 CREATE POLICY "profiles_insert_own"
   ON public.profiles
   FOR INSERT
   TO authenticated
-  WITH CHECK (auth.uid() = id AND is_admin = false);
+  WITH CHECK (auth.uid() = id);
+
+-- Política de UPDATE do próprio perfil — simples, sem subconsulta.
+-- A proteção de `is_admin` é responsabilidade do trigger acima.
+DROP POLICY IF EXISTS "profiles_update_own_safe" ON public.profiles;
+
+CREATE POLICY "profiles_update_own_safe"
+  ON public.profiles
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
+-- ⚠️ SELECT de profiles: NÃO alteramos.
+-- A política pública atual permite ler nome/avatar de qualquer perfil, e o app
+-- antigo (site e TV) pode depender disso. Restringir aqui quebraria o sistema
+-- legado, o que o pedido proíbe. O risco (exposição de e-mails) é registrado no
+-- relatório; a correção exigiria uma view pública separada, com aprovação.
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -94,6 +149,7 @@ CREATE POLICY "profiles_insert_own"
 
 DROP POLICY IF EXISTS "Users can insert own subscription" ON public.subscriptions;
 DROP POLICY IF EXISTS "Users can update own subscription" ON public.subscriptions;
+DROP POLICY IF EXISTS "Users can delete own subscription" ON public.subscriptions;
 DROP POLICY IF EXISTS "subscriptions_insert_own" ON public.subscriptions;
 DROP POLICY IF EXISTS "subscriptions_update_own" ON public.subscriptions;
 DROP POLICY IF EXISTS "subscriptions_delete_own" ON public.subscriptions;
@@ -111,6 +167,10 @@ CREATE POLICY "subscriptions_select_own"
 -- Nenhuma política de INSERT/UPDATE/DELETE para `authenticated`:
 -- com RLS ligada e sem política, a operação é negada. A Service Role continua
 -- funcionando porque ignora RLS.
+
+-- Garantir que a RLS está realmente ligada nestas tabelas.
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -152,6 +212,9 @@ CREATE TRIGGER on_auth_user_created
 -- FROM pg_policies
 -- WHERE schemaname = 'public' AND tablename IN ('profiles','subscriptions')
 -- ORDER BY tablename, cmd;
+--
+-- SELECT tgname, tgrelid::regclass FROM pg_trigger
+-- WHERE NOT tgisinternal AND tgrelid IN ('public.profiles'::regclass, 'auth.users'::regclass);
 --
 -- Depois, repita os testes:
 --   python3 scripts/teste-rls-episodios.py   → INSERT deve dar 401/403
