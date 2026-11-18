@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import run.velixir.movieflix.data.AdminStats
 import run.velixir.movieflix.data.ApiException
 import run.velixir.movieflix.data.FavoriteRow
 import run.velixir.movieflix.data.HistoryRow
@@ -33,6 +34,8 @@ data class UiState(
     val email: String? = null,
     val isAdmin: Boolean = false,
     val seasons: List<Season> = emptyList(),
+    val adminStats: AdminStats? = null,
+    val adminError: String? = null,
     val toast: String? = null,
 )
 
@@ -42,7 +45,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val api = MovieFlixApi(BuildConfig.API_BASE_URL, session)
 
     private val _state = MutableStateFlow(
-        UiState(loggedIn = session.isLoggedIn, email = session.email),
+        UiState(
+            loggedIn = session.isLoggedIn,
+            email = session.email,
+            isAdmin = session.isLoggedIn && session.isAdmin,
+        ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -146,6 +153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         isAdmin = r.isAdmin,
                     )
                 }
+                session.isAdmin = r.isAdmin
                 loadUserData()
                 loadSubscription()
                 onDone(null)
@@ -199,6 +207,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 loggedIn = false,
                 email = null,
                 isAdmin = false,
+                adminStats = null,
+                adminError = null,
                 favorites = emptyList(),
                 history = emptyList(),
                 subscription = null,
@@ -227,6 +237,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val p = runCatching { api.plans(session.email) }.getOrNull()
             update { it.copy(plans = p?.plans ?: emptyList()) }
+        }
+    }
+
+    /**
+     * Carrega os números do painel administrativo.
+     *
+     * Só é chamado quando `isAdmin` é verdadeiro, e mesmo assim o servidor
+     * revalida: um 403 aqui significa que a conta perdeu o privilégio, e a
+     * tela mostra isso em vez de inventar números.
+     */
+    fun loadAdminStats() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            try {
+                val st = api.adminStats()
+                update { it.copy(adminStats = st, adminError = null) }
+            } catch (e: Exception) {
+                update { it.copy(adminStats = null, adminError = friendly(e)) }
+            }
         }
     }
 

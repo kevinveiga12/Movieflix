@@ -48,6 +48,8 @@ import run.velixir.movieflix.tv.ui.theme.MovieFlixTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Gancho de captura: `adb shell am start -n ... --es mf_route plans`.
+        val initialRoute = intent?.getStringExtra("mf_route")
         setContent {
             MovieFlixTheme {
                 Box(
@@ -55,7 +57,7 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(MfColors.Bg),
                 ) {
-                    MovieFlixTvApp()
+                    MovieFlixTvApp(initialRoute = initialRoute)
                 }
             }
         }
@@ -74,15 +76,26 @@ sealed interface TvRoute {
     data object Account : TvRoute
     data object Profiles : TvRoute
     data object Settings : TvRoute
+    data object Admin : TvRoute
     data object Login : TvRoute
     data class Detail(val title: Title) : TvRoute
     data class Player(val title: Title, val season: Int?, val episode: Int?) : TvRoute
 }
 
 @Composable
-fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
+fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) {
     var route by remember { mutableStateOf<TvRoute>(TvRoute.Home) }
     val s by vm.state.collectAsState()
+
+    // Rota inicial vinda do intent (captura no CI).
+    LaunchedEffect(initialRoute, s.movies.isNotEmpty()) {
+        when (initialRoute) {
+            "plans" -> route = TvRoute.Plans
+            "account" -> route = TvRoute.Account
+            "admin" -> route = TvRoute.Admin
+            "player" -> s.movies.firstOrNull()?.let { route = TvRoute.Player(it, null, null) }
+        }
+    }
 
     LaunchedEffect(s.toast) {
         if (s.toast != null) {
@@ -125,6 +138,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                     TvRoute.Account, TvRoute.Login -> "account"
                     TvRoute.Profiles -> "profiles"
                     TvRoute.Settings -> "settings"
+                    TvRoute.Admin -> "admin"
                     is TvRoute.Detail -> "home"
                     else -> "home"
                 }
@@ -140,10 +154,11 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                         "plans" -> TvRoute.Plans
                         "profiles" -> if (s.loggedIn) TvRoute.Profiles else TvRoute.Login
                         "settings" -> TvRoute.Settings
+                        "admin" -> TvRoute.Admin
                         "account" -> if (s.loggedIn) TvRoute.Account else TvRoute.Login
                         else -> TvRoute.Home
                     }
-                }, s.email)
+                }, s.email, s.isAdmin)
 
                 Box(Modifier.weight(1f)) {
                     when (r) {
@@ -158,6 +173,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                         TvRoute.Account -> TvAccountScreen(vm) { route = TvRoute.Login }
                         TvRoute.Profiles -> TvProfilesScreen(vm) { route = TvRoute.Login }
                         TvRoute.Settings -> TvSettingsScreen(vm)
+                        TvRoute.Admin -> TvAdminScreen(vm)
                         TvRoute.Login -> TvLoginScreen(vm) { route = TvRoute.Account }
                         is TvRoute.Detail -> TvDetailScreen(
                             vm, r.title,

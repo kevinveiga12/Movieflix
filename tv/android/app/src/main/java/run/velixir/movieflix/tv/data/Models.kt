@@ -159,6 +159,18 @@ data class Plan(
 @Serializable
 data class PlansResponse(val plans: List<Plan> = emptyList())
 
+/** Números do painel administrativo (GET /api/admin/stats). */
+@Serializable
+data class AdminStats(
+    val users: Int = 0,
+    val favorites: Int = 0,
+    val history: Int = 0,
+    val editedMovies: Int = 0,
+    val editedSeries: Int = 0,
+    val hidden: Int = 0,
+    val updatedAt: String? = null,
+)
+
 @Serializable
 data class SubscriptionResponse(
     val allowed: Boolean = false,

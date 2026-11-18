@@ -63,6 +63,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Gancho de captura: `adb shell am start -n ... --es mf_route plans`
+        // abre direto uma tela. Serve para o emulador do CI fotografar telas
+        // que exigem login ou varios toques. Sem o extra, o app abre normal.
+        val initialRoute = intent?.getStringExtra("mf_route")
         setContent {
             MovieFlixTheme {
                 Box(
@@ -71,7 +75,7 @@ class MainActivity : ComponentActivity() {
                         .background(MfColors.Bg)
                         .statusBarsPadding(),
                 ) {
-                    MovieFlixRoot()
+                    MovieFlixRoot(initialRoute = initialRoute)
                 }
             }
         }
@@ -91,6 +95,7 @@ sealed interface Route {
     data object Profiles : Route
     data object Settings : Route
     data object Plans : Route
+    data object Admin : Route
     data object Login : Route
     data object Signup : Route
     data object Forgot : Route
@@ -110,9 +115,20 @@ sealed interface Route {
  * abria em tela preta. Nome distinto elimina a ambiguidade.
  */
 @Composable
-fun MovieFlixRoot(vm: AppViewModel = viewModel()) {
+fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) {
     var route by remember { mutableStateOf<Route>(Route.Home) }
     val s by vm.state.collectAsState()
+
+    // Rota inicial vinda do intent (captura no CI). "player" usa o primeiro
+    // filme do catálogo, para a tela do player ser fotografada de verdade.
+    androidx.compose.runtime.LaunchedEffect(initialRoute, s.movies.isNotEmpty()) {
+        when (initialRoute) {
+            "plans" -> route = Route.Plans
+            "account" -> route = Route.Account
+            "admin" -> route = Route.Admin
+            "player" -> s.movies.firstOrNull()?.let { route = Route.Player(it, null, null) }
+        }
+    }
 
     // Toast curto para ações (favorito salvo, erro de rede).
     androidx.compose.runtime.LaunchedEffect(s.toast) {
@@ -158,10 +174,12 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel()) {
                     onHistory = { route = Route.History },
                     onSettings = { route = Route.Settings },
                     onProfiles = { route = Route.Profiles },
+                    onAdmin = { route = Route.Admin },
                 )
                 Route.Profiles -> ProfilesScreen(vm) { route = Route.Account }
                 Route.Settings -> SettingsScreen(vm) { route = Route.Account }
                 Route.Plans -> PlansScreen(vm)
+                Route.Admin -> AdminScreen(vm) { route = Route.Account }
                 Route.Login -> LoginScreen(
                     vm,
                     onDone = { route = Route.Home },
@@ -242,6 +260,7 @@ private fun BottomBar(current: Route, onSelect: (Route) -> Unit) {
                 Route.Search -> current is Route.Search
                 Route.Account -> current is Route.Account || current is Route.Profiles ||
                     current is Route.Settings || current is Route.Plans ||
+                    current is Route.Admin ||
                     current is Route.Favorites || current is Route.History
                 else -> false
             }

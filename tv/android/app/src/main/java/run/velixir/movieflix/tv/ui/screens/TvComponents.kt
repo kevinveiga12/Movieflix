@@ -308,20 +308,24 @@ fun TvSidebar(
     current: String,
     onSelect: (String) -> Unit,
     email: String?,
+    isAdmin: Boolean = false,
 ) {
-    val items = listOf(
-        "home" to "Início",
-        "movies" to "Filmes",
-        "series" to "Séries",
-        "genres" to "Categorias",
-        "search" to "Buscar",
-        "favorites" to "Favoritos",
-        "history" to "Histórico",
-        "plans" to "Planos",
-        "account" to "Conta",
-        "profiles" to "Perfis",
-        "settings" to "Configurações",
-    )
+    val items = buildList {
+        add("home" to "Início")
+        add("movies" to "Filmes")
+        add("series" to "Séries")
+        add("genres" to "Categorias")
+        add("search" to "Buscar")
+        add("favorites" to "Favoritos")
+        add("history" to "Histórico")
+        add("plans" to "Planos")
+        add("account" to "Conta")
+        add("profiles" to "Perfis")
+        add("settings" to "Configurações")
+        // Só para administrador. `isAdmin` vem do servidor (profiles.is_admin),
+        // nunca de um campo que o usuário edite no próprio perfil.
+        if (isAdmin) add("admin" to "Painel Admin")
+    }
 
     Column(
         modifier = Modifier

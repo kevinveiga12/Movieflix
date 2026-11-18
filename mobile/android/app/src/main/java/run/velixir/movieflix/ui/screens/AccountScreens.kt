@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -403,6 +404,7 @@ fun AccountScreen(
     onHistory: () -> Unit = {},
     onSettings: () -> Unit = {},
     onProfiles: () -> Unit = {},
+    onAdmin: () -> Unit = {},
 ) {
     val s by vm.state.collectAsState()
 
@@ -523,6 +525,11 @@ fun AccountScreen(
             AccountRow("🕒", "Histórico", onClick = onHistory)
             AccountRow("💳", "Planos e assinatura", onClick = onPlans)
             AccountRow("⚙", "Configurações", onClick = onSettings)
+            // Só aparece para administrador. `isAdmin` vem do servidor
+            // (profiles.is_admin), nunca de um campo que o usuário edite.
+            if (s.isAdmin) {
+                AccountRow("🛡", "Painel Admin", detail = "Administrador", onClick = onAdmin)
+            }
         }
 
         Spacer(Modifier.height(18.dp))
@@ -726,11 +733,33 @@ private fun SettingSwitch(label: String, detail: String, checked: Boolean, onCha
     }
 }
 
+/**
+ * Abre uma URL no navegador/WhatsApp do aparelho.
+ *
+ * O link já vem pronto do servidor (`whatsapp_url` de cada período), com o
+ * e-mail da conta, o plano, a duração e o valor na mensagem — exatamente como
+ * o site monta em `server/routes/plans.js`. O app não remonta a mensagem para
+ * não divergir do site.
+ */
+private fun openExternal(context: android.content.Context, url: String) {
+    if (url.isBlank()) return
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+}
+
 /** Planos — a rota /planos do site, com os descontos de 3 meses e 1 ano. */
 @Composable
 fun PlansScreen(vm: AppViewModel) {
     val s by vm.state.collectAsState()
+    val context = LocalContext.current
     LaunchedEffect(Unit) { vm.loadPlans() }
+
+    // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
+    var period by remember { mutableStateOf("1m") }
 
     Column(
         modifier = Modifier
@@ -754,7 +783,7 @@ fun PlansScreen(vm: AppViewModel) {
             fontFamily = MfSans,
             fontSize = 12.sp,
         )
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
 
         if (s.plans.isEmpty()) {
             Text(
@@ -765,7 +794,38 @@ fun PlansScreen(vm: AppViewModel) {
             )
         }
 
+        // Seletor de período — .btn--sm do site.
+        if (s.plans.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("1m" to "1 mês", "3m" to "3 meses", "12m" to "1 ano").forEach { (code, label) ->
+                    val on = period == code
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (on) MfColors.Red else MfColors.BgCard)
+                            .then(
+                                if (!on) Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(8.dp))
+                                else Modifier,
+                            )
+                            .clickable { period = code }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            label,
+                            color = if (on) Color.White else MfColors.TextSoft,
+                            fontFamily = MfSans,
+                            fontSize = 12.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
         s.plans.forEach { plan ->
+            val chosen = plan.periods.firstOrNull { it.code == period } ?: plan.periods.firstOrNull()
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -786,7 +846,7 @@ fun PlansScreen(vm: AppViewModel) {
                         )
                         Spacer(Modifier.weight(1f))
                         Text(
-                            plan.priceLabel,
+                            chosen?.priceLabel ?: plan.priceLabel,
                             color = MfColors.Red,
                             fontFamily = MfSans,
                             fontSize = 15.sp,
@@ -845,6 +905,88 @@ fun PlansScreen(vm: AppViewModel) {
                                 )
                             }
                         }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    // Botão de contratação — o "Assinar pelo WhatsApp" do site.
+                    // O link vem do servidor com e-mail, plano, duração e valor.
+                    val waUrl = chosen?.whatsappUrl.orEmpty()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (waUrl.isBlank()) MfColors.BgHover else MfColors.Red)
+                            .clickable(enabled = waUrl.isNotBlank()) {
+                                openExternal(context, waUrl)
+                            }
+                            .padding(vertical = 13.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Assinar pelo WhatsApp",
+                            color = if (waUrl.isBlank()) MfColors.TextDim else Color.White,
+                            fontFamily = MfSans,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Contato direto — o painel "Falar com a gente" do site.
+        if (s.plans.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MfColors.BgCard)
+                    .border(1.dp, MfColors.Border, RoundedCornerShape(14.dp))
+                    .padding(16.dp),
+            ) {
+                Column {
+                    Text(
+                        "Falar com a gente",
+                        color = MfColors.Text,
+                        fontFamily = MfSans,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Dúvidas sobre planos, pagamento ou acesso? Chame no WhatsApp (11) 94375-0307 — respondemos por lá.",
+                        color = MfColors.TextMuted,
+                        fontFamily = MfSans,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MfColors.Red)
+                            .clickable {
+                                openExternal(
+                                    context,
+                                    "https://wa.me/5511943750307?text=" +
+                                        java.net.URLEncoder.encode(
+                                            "Olá! Preciso de ajuda com o MovieFlix.",
+                                            "UTF-8",
+                                        ),
+                                )
+                            }
+                            .padding(vertical = 13.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "WhatsApp (11) 94375-0307",
+                            color = Color.White,
+                            fontFamily = MfSans,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }

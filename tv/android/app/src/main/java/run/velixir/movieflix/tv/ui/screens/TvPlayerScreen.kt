@@ -206,10 +206,21 @@ private fun TvDirectPlayer(
     }
 }
 
+/**
+ * Origem do site oficial — o provedor só entrega o player com este Referer.
+ *
+ * Verificado em 2026-11-18 com curl: sem Referer, myembed.biz devolve 94.951
+ * bytes do site de cloaking "Investidor.blog"; com Referer do MovieFlix,
+ * devolve 3.746 bytes do player real. Era essa a página branca com texto.
+ */
+private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun TvEmbedPlayer(url: String) {
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var ready by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -220,57 +231,109 @@ private fun TvEmbedPlayer(url: String) {
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            WebView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-                setBackgroundColor(android.graphics.Color.BLACK)
-                isFocusable = true
-                isFocusableInTouchMode = true
-                requestFocus()
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    requestFocus()
 
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    javaScriptCanOpenWindowsAutomatically = false
-                    setSupportMultipleWindows(false)
-                    allowFileAccess = false
-                    allowContentAccess = false
-                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                    userAgentString = "$userAgentString MovieFlixTV/1.0"
-                }
-
-                webChromeClient = object : WebChromeClient() {
-                    override fun onCreateWindow(
-                        view: WebView?,
-                        isDialog: Boolean,
-                        isUserGesture: Boolean,
-                        resultMsg: android.os.Message?,
-                    ): Boolean = false
-                }
-
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView?,
-                        request: WebResourceRequest?,
-                    ): Boolean {
-                        val host = request?.url?.host ?: return true
-                        val allowed = host.contains("myembed") ||
-                            host.contains("streambetter") ||
-                            host.contains("cloudflare") ||
-                            host.contains("challenges.")
-                        return !allowed
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        javaScriptCanOpenWindowsAutomatically = false
+                        setSupportMultipleWindows(false)
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        userAgentString = "$userAgentString MovieFlixTV/1.0"
                     }
-                }
 
-                loadUrl(url)
-                webView = this
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: android.os.Message?,
+                        ): Boolean = false
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean {
+                            val host = request?.url?.host ?: return true
+                            return !isProviderHost(host)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            ready = true
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            if (request?.isForMainFrame == true) failed = true
+                        }
+                    }
+
+                    // O Referer é o que faz o provedor entregar o player.
+                    loadUrl(url, mapOf("Referer" to SITE_ORIGIN))
+                    webView = this
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        if (!ready && !failed) {
+            Text(
+                "Abrindo o player…",
+                color = MfColors.TextMuted,
+                fontSize = 18.sp,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
+        if (failed) {
+            Column(
+                Modifier
+                    .align(Alignment.Center)
+                    .padding(40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "Não foi possível abrir o player agora.",
+                    color = MfColors.TextSoft,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Verifique a conexão e tente novamente em instantes.",
+                    color = MfColors.TextMuted,
+                    fontSize = 16.sp,
+                )
             }
-        },
-        modifier = Modifier.fillMaxSize(),
-    )
+        }
+    }
 }
+
+/** Hosts do provedor que podem navegar dentro do WebView. */
+private fun isProviderHost(host: String): Boolean =
+    host.contains("myembed") ||
+        host.contains("playerflix") ||
+        host.contains("streambetter") ||
+        host.contains("cloudflare") ||
+        host.contains("challenges.")

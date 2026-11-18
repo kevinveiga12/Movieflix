@@ -37,6 +37,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -455,11 +456,23 @@ fun TvHistoryScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
     }
 }
 
-/** Planos — a rota /planos do site, com os descontos de 3 meses e 1 ano. */
+/**
+ * Planos — a rota /planos do site, com os descontos de 3 meses e 1 ano.
+ *
+ * Cada plano tem o botão "Assinar pelo WhatsApp", acionável pelo controle
+ * remoto (D-pad até o botão + OK). O link vem pronto do servidor
+ * (`whatsapp_url` de cada período), com o e-mail da conta, o plano, a duração
+ * e o valor na mensagem — o mesmo texto que o site monta em
+ * `server/routes/plans.js`. O app não remonta a mensagem para não divergir.
+ */
 @Composable
 fun TvPlansScreen(vm: TvViewModel) {
     val s by vm.state.collectAsState()
+    val context = LocalContext.current
     LaunchedEffect(Unit) { vm.loadPlans() }
+
+    // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
+    var period by remember { mutableStateOf("1m") }
 
     Column(Modifier.fillMaxSize()) {
         TvPageTitle("Planos")
@@ -468,7 +481,7 @@ fun TvPlansScreen(vm: TvViewModel) {
             color = MfColors.TextMuted,
             fontFamily = MfSans,
             fontSize = 14.sp,
-            modifier = Modifier.padding(start = 48.dp, bottom = 20.dp),
+            modifier = Modifier.padding(start = 48.dp, bottom = 14.dp),
         )
 
         if (s.plans.isEmpty()) {
@@ -476,22 +489,54 @@ fun TvPlansScreen(vm: TvViewModel) {
             return@Column
         }
 
+        // Seletor de período — .btn--sm do site, navegável pelo D-pad.
+        Row(
+            modifier = Modifier.padding(start = 48.dp, bottom = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            listOf("1m" to "1 mês", "3m" to "3 meses", "12m" to "1 ano").forEach { (code, label) ->
+                var f by remember { mutableStateOf(false) }
+                val on = period == code
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) MfColors.Red else MfColors.BgCard)
+                        .then(
+                            when {
+                                f -> Modifier.border(3.dp, MfColors.RedBright, RoundedCornerShape(8.dp))
+                                !on -> Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(8.dp))
+                                else -> Modifier
+                            },
+                        )
+                        .onFocusChanged { f = it.isFocused }
+                        .clickable { period = code }
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        label,
+                        color = if (on || f) Color.White else MfColors.TextSoft,
+                        fontFamily = MfSans,
+                        fontSize = 14.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(s.plans) { plan ->
-                var focused by remember { mutableStateOf(false) }
+                val chosen = plan.periods.firstOrNull { it.code == period }
+                    ?: plan.periods.firstOrNull()
+
                 Column(
                     modifier = Modifier
                         .width(340.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(MfColors.BgCard)
-                        .then(
-                            if (focused) Modifier.border(3.dp, MfColors.Red, RoundedCornerShape(16.dp))
-                            else Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(16.dp)),
-                        )
-                        .onFocusChanged { focused = it.isFocused }
+                        .border(1.dp, MfColors.Border, RoundedCornerShape(16.dp))
                         .padding(22.dp),
                 ) {
                     Text(
@@ -503,7 +548,7 @@ fun TvPlansScreen(vm: TvViewModel) {
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        plan.priceLabel,
+                        chosen?.priceLabel ?: plan.priceLabel,
                         color = MfColors.Red,
                         fontFamily = MfSans,
                         fontSize = 17.sp,
@@ -562,9 +607,92 @@ fun TvPlansScreen(vm: TvViewModel) {
                             }
                         }
                     }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Botão de contratação — foco evidente para o controle remoto.
+                    val waUrl = chosen?.whatsappUrl.orEmpty()
+                    var btnFocused by remember { mutableStateOf(false) }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                when {
+                                    waUrl.isBlank() -> MfColors.BgHover
+                                    btnFocused -> MfColors.RedBright
+                                    else -> MfColors.Red
+                                },
+                            )
+                            .then(
+                                if (btnFocused) {
+                                    Modifier.border(3.dp, Color.White, RoundedCornerShape(10.dp))
+                                } else Modifier,
+                            )
+                            .onFocusChanged { btnFocused = it.isFocused }
+                            .clickable(enabled = waUrl.isNotBlank()) {
+                                openExternal(context, waUrl)
+                            }
+                            .padding(vertical = 14.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Assinar pelo WhatsApp",
+                            color = if (waUrl.isBlank()) MfColors.TextDim else Color.White,
+                            fontFamily = MfSans,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
         }
+
+        Spacer(Modifier.height(20.dp))
+
+        // Contato direto — o painel "Falar com a gente" do site.
+        var contactFocused by remember { mutableStateOf(false) }
+        Box(
+            modifier = Modifier
+                .padding(start = 48.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (contactFocused) MfColors.RedBright else MfColors.Red)
+                .then(
+                    if (contactFocused) Modifier.border(3.dp, Color.White, RoundedCornerShape(10.dp))
+                    else Modifier,
+                )
+                .onFocusChanged { contactFocused = it.isFocused }
+                .clickable {
+                    openExternal(
+                        context,
+                        "https://wa.me/5511943750307?text=" +
+                            java.net.URLEncoder.encode(
+                                "Olá! Preciso de ajuda com o MovieFlix.",
+                                "UTF-8",
+                            ),
+                    )
+                }
+                .padding(horizontal = 24.dp, vertical = 14.dp),
+        ) {
+            Text(
+                "WhatsApp (11) 94375-0307",
+                color = Color.White,
+                fontFamily = MfSans,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+/** Abre uma URL no navegador/WhatsApp do aparelho. */
+private fun openExternal(context: android.content.Context, url: String) {
+    if (url.isBlank()) return
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 }
 

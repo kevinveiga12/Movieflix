@@ -193,15 +193,38 @@ private fun DirectPlayer(
 }
 
 /**
+ * Origem do site oficial.
+ *
+ * O provedor EmbedMovies só entrega o player quando recebe o Referer do site
+ * que o incorporou. Verificado em 2026-11-18 com curl:
+ *
+ *   GET https://myembed.biz/filme/1292035            → 94.951 bytes, HTML do
+ *                                                      "Investidor.blog"
+ *   GET ... com Referer: https://movieflix.velixir.run/ → 3.746 bytes, o
+ *                                                      player de verdade
+ *
+ * Era exatamente isso a "página branca com um monte de texto": o WebView
+ * carregava a URL sem Referer, o provedor devolvia o site de cloaking e o app
+ * renderizava aquilo cru. O site não sofre disso porque o <iframe> usa
+ * referrerPolicy="origin".
+ */
+private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
+
+/**
  * Página do provedor em WebView, com o mesmo princípio do sandbox do site:
  * o conteúdo roda, mas não abre janela, não navega para fora e não dispara
  * intent externo.
+ *
+ * O Referer é enviado explicitamente — sem ele o provedor devolve a página de
+ * cloaking (ver SITE_ORIGIN). Se a página falhar de verdade, mostramos uma
+ * mensagem curta em português em vez de deixar a tela em branco.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun EmbedPlayer(url: String) {
-    val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var ready by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -212,63 +235,112 @@ private fun EmbedPlayer(url: String) {
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            WebView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    setBackgroundColor(android.graphics.Color.BLACK)
+
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        // Bloqueio de pop-up: nenhuma janela nova é criada.
+                        javaScriptCanOpenWindowsAutomatically = false
+                        setSupportMultipleWindows(false)
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        userAgentString = "$userAgentString MovieFlixApp/1.0"
+                    }
+
+                    webChromeClient = object : WebChromeClient() {
+                        // Sem onCreateWindow: qualquer window.open() é descartado.
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: android.os.Message?,
+                        ): Boolean = false
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean {
+                            // Só o próprio provedor navega dentro do WebView.
+                            // Qualquer outro destino é bloqueado — nada abre fora.
+                            val host = request?.url?.host ?: return true
+                            return !isProviderHost(host)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            ready = true
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            // Só a navegação principal interessa: erro em um
+                            // recurso secundário não derruba o player.
+                            if (request?.isForMainFrame == true) failed = true
+                        }
+                    }
+
+                    // O Referer é o que faz o provedor entregar o player.
+                    loadUrl(url, mapOf("Referer" to SITE_ORIGIN))
+                    webView = this
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        if (!ready && !failed) {
+            Text(
+                "Abrindo o player…",
+                color = MfColors.TextMuted,
+                fontSize = 14.sp,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
+        if (failed) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "Não foi possível abrir o player agora.",
+                    color = MfColors.TextSoft,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
                 )
-                setBackgroundColor(android.graphics.Color.BLACK)
-
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    // Bloqueio de pop-up: nenhuma janela nova é criada.
-                    javaScriptCanOpenWindowsAutomatically = false
-                    setSupportMultipleWindows(false)
-                    allowFileAccess = false
-                    allowContentAccess = false
-                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                    userAgentString = "$userAgentString MovieFlixApp/1.0"
-                }
-
-                webChromeClient = object : WebChromeClient() {
-                    // Sem onCreateWindow: qualquer window.open() é descartado.
-                    override fun onCreateWindow(
-                        view: WebView?,
-                        isDialog: Boolean,
-                        isUserGesture: Boolean,
-                        resultMsg: android.os.Message?,
-                    ): Boolean = false
-                }
-
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView?,
-                        request: WebResourceRequest?,
-                    ): Boolean {
-                        val target = request?.url?.toString() ?: return true
-                        // Só o próprio provedor navega dentro do WebView.
-                        // Qualquer outro destino é bloqueado — nada abre fora.
-                        val host = request.url.host ?: return true
-                        val allowed = host.contains("myembed") ||
-                            host.contains("streambetter") ||
-                            host.contains("cloudflare") ||
-                            host.contains("challenges.")
-                        return !allowed
-                    }
-
-                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                        super.onPageStarted(view, url, favicon)
-                    }
-                }
-
-                loadUrl(url)
-                webView = this
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Verifique sua conexão e tente novamente em instantes.",
+                    color = MfColors.TextMuted,
+                    fontSize = 13.sp,
+                )
             }
-        },
-        modifier = Modifier.fillMaxSize(),
-    )
+        }
+    }
 }
+
+/** Hosts do provedor que podem navegar dentro do WebView. */
+private fun isProviderHost(host: String): Boolean =
+    host.contains("myembed") ||
+        host.contains("playerflix") ||
+        host.contains("streambetter") ||
+        host.contains("cloudflare") ||
+        host.contains("challenges.")

@@ -85,3 +85,20 @@ done
 
 rm -f "$OUT/_tv-menu-ref.png"
 echo "OK: abas da TV capturadas"
+
+# ── Telas que exigem rota direta ────────────────────────────────────────────
+echo "=== Planos (rota direta) ==="
+adb shell am force-stop run.velixir.movieflix.tv
+sleep 2
+adb shell am start -n run.velixir.movieflix.tv/.MainActivity --es mf_route plans
+sleep 10
+bash scripts/shot.sh "$OUT/tv-planos.png" "tv planos"
+
+echo "=== Player (rota direta) ==="
+adb shell am force-stop run.velixir.movieflix.tv
+sleep 2
+adb shell am start -n run.velixir.movieflix.tv/.MainActivity --es mf_route player
+sleep 14
+bash scripts/shot.sh "$OUT/tv-player.png" "tv player" || echo "AVISO: player escuro (video) — nao falha o build"
+
+echo "OK: telas extras da TV capturadas"

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import run.velixir.movieflix.tv.data.AdminStats
 import run.velixir.movieflix.tv.data.ApiException
 import run.velixir.movieflix.tv.data.FavoriteRow
 import run.velixir.movieflix.tv.data.HistoryRow
@@ -31,6 +32,9 @@ data class TvState(
     val subscription: SubscriptionResponse? = null,
     val loggedIn: Boolean = false,
     val email: String? = null,
+    val isAdmin: Boolean = false,
+    val adminStats: AdminStats? = null,
+    val adminError: String? = null,
     val toast: String? = null,
 )
 
@@ -44,7 +48,11 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val api = MovieFlixApi(BuildConfig.API_BASE_URL, session)
 
     private val _state = MutableStateFlow(
-        TvState(loggedIn = session.isLoggedIn, email = session.email),
+        TvState(
+            loggedIn = session.isLoggedIn,
+            email = session.email,
+            isAdmin = session.isLoggedIn && session.isAdmin,
+        ),
     )
     val state: StateFlow<TvState> = _state.asStateFlow()
 
@@ -133,8 +141,9 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 update {
-                    it.copy(loading = false, loggedIn = true, email = r.user?.email ?: email)
+                    it.copy(loading = false, loggedIn = true, email = r.user?.email ?: email, isAdmin = r.isAdmin)
                 }
+                session.isAdmin = r.isAdmin
                 loadUserData()
                 loadSubscription()
                 onDone(null)
@@ -148,7 +157,7 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     fun logout() {
         session.clear()
         update {
-            it.copy(loggedIn = false, email = null, favorites = emptyList(), history = emptyList())
+            it.copy(loggedIn = false, email = null, isAdmin = false, adminStats = null, favorites = emptyList(), history = emptyList())
         }
     }
 
@@ -173,6 +182,19 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val p = runCatching { api.plans(session.email) }.getOrNull()
             update { it.copy(plans = p?.plans ?: emptyList()) }
+        }
+    }
+
+    /** Números do painel — só para admin; o servidor revalida a cada chamada. */
+    fun loadAdminStats() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            try {
+                val st = api.adminStats()
+                update { it.copy(adminStats = st, adminError = null) }
+            } catch (e: Exception) {
+                update { it.copy(adminStats = null, adminError = friendly(e)) }
+            }
         }
     }
 

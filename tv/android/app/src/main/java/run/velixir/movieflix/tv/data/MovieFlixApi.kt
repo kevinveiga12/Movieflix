@@ -124,6 +124,10 @@ class MovieFlixApi(
         return json.decodeFromString(get(q))
     }
 
+    /** Números do painel administrativo — o servidor responde 403 se não for admin. */
+    suspend fun adminStats(): AdminStats =
+        json.decodeFromString(get("/api/admin/stats", auth = true))
+
     // ── Reprodução ──────────────────────────────────────────────────────────
 
     /**

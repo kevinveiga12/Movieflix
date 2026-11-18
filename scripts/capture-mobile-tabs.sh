@@ -71,3 +71,25 @@ adb exec-out screencap -p > "$OUT/mobile-perfis.png"
 python3 scripts/check-screenshot.py "$OUT/mobile-perfis.png" "mobile perfis"
 
 echo "OK: abas do mobile capturadas"
+
+# ── Telas que exigem rota direta ────────────────────────────────────────────
+# Planos e Player nao sao alcancaveis por toque simples no estado deslogado
+# (Planos fica dentro de Conta, e o Player exige login). O app aceita o extra
+# `mf_route` no intent justamente para o CI poder fotografar essas telas.
+echo "=== Planos (rota direta) ==="
+adb shell am force-stop run.velixir.movieflix
+sleep 2
+adb shell am start -n run.velixir.movieflix/.MainActivity --es mf_route plans
+sleep 8
+adb exec-out screencap -p > "$OUT/mobile-planos.png"
+python3 scripts/check-screenshot.py "$OUT/mobile-planos.png" "mobile planos"
+
+echo "=== Player (rota direta) ==="
+adb shell am force-stop run.velixir.movieflix
+sleep 2
+adb shell am start -n run.velixir.movieflix/.MainActivity --es mf_route player
+sleep 12
+adb exec-out screencap -p > "$OUT/mobile-player.png"
+python3 scripts/check-screenshot.py "$OUT/mobile-player.png" "mobile player" || echo "AVISO: player escuro (video) — nao falha o build"
+
+echo "OK: telas extras do mobile capturadas"

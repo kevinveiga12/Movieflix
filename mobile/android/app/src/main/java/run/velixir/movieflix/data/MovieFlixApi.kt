@@ -124,6 +124,16 @@ class MovieFlixApi(
         return json.decodeFromString(get(q))
     }
 
+    /**
+     * Números do painel administrativo.
+     *
+     * O servidor responde 403 para quem não é admin — o app não tem como
+     * forjar isso, porque a checagem é feita em `profiles.is_admin` com a
+     * Service Role, nunca com dado que o cliente envia.
+     */
+    suspend fun adminStats(): AdminStats =
+        json.decodeFromString(get("/api/admin/stats", auth = true))
+
     // ── Reprodução ──────────────────────────────────────────────────────────
 
     /**
