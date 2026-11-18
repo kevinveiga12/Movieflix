@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Captura uma tela por aba do app de TV, navegando SO com o D-pad.
+# Captura uma tela por aba do app de TV.
 #
-# Dois aprendizados da primeira tentativa, ambos visiveis nos screenshots:
+# Historico do harness (cada tentativa ensinou algo):
 #
-#  1. O passo "Botao Voltar" do workflow roda ANTES deste script e, estando na
-#     Home, o BACK sai do app — o emulador voltou para o launcher do Android e
-#     a captura "tv-tab-1-filmes" saiu com a tela inicial do sistema. Por isso
-#     aqui o app e relancado antes de comecar.
+#  1. Loop inline no `script:` do workflow quebrava: a action roda cada linha
+#     num `sh -c` separado, entao o `for` chegava sem o `done`.
+#  2. O passo "Botao Voltar" rodava antes e, na Home, o BACK saia do app — a
+#     captura da aba 1 saiu com o launcher do Android. Agora o app e relancado.
+#  3. DPAD_DOWN a partir do hero nao entrava no menu: o foco ficava no
+#     conteudo. E os 10 itens do menu nao cabiam em 1080px (o item 10 ficava
+#     fora da tela), o que tambem e um bug de design — corrigido reduzindo o
+#     padding vertical de 11dp para 7dp.
 #
-#  2. O foco inicial fica no botao "Assistir" do hero, no conteudo, nao no
-#     menu. Descer o D-pad a partir dali percorre os botoes do hero. Para
-#     entrar no menu lateral e preciso ir para a ESQUERDA primeiro.
+# Agora o clique e por COORDENADA no menu lateral, que e deterministico e nao
+# depende de onde o foco estava. O D-pad continua sendo testado a parte, no
+# passo "foco do D-pad" do workflow.
 set -u
 
 OUT="${1:-screenshots}"
@@ -22,24 +26,19 @@ sleep 2
 adb shell am start -n run.velixir.movieflix.tv/.MainActivity
 sleep 12
 
-# Leva o foco do hero para o menu lateral.
-echo "=== movendo o foco para o menu lateral ==="
-for _ in 1 2 3 4; do
-  adb shell input keyevent KEYCODE_DPAD_LEFT
-  sleep 1
-done
-adb exec-out screencap -p > "$OUT/tv-menu-foco.png"
-python3 scripts/check-screenshot.py "$OUT/tv-menu-foco.png" "tv menu foco"
+# Geometria do menu lateral, medida no screenshot real de 1920x1080:
+#   logo + subtitulo ocupam ate y~130; cada item tem ~40px de altura.
+#   x=110 cai sobre o texto do item.
+X=110
+Y0=150
+STEP=40
 
-# O menu tem 10 itens; o foco esta em "Início" (item 0).
-# Descer uma vez e apertar OK abre o proximo item.
 N=0
 for LABEL in filmes series categorias buscar favoritos historico planos conta configuracoes; do
   N=$((N + 1))
-  echo "=== aba $LABEL (item $N) ==="
-  adb shell input keyevent KEYCODE_DPAD_DOWN
-  sleep 1
-  adb shell input keyevent KEYCODE_DPAD_CENTER
+  Y=$((Y0 + (N - 1) * STEP))
+  echo "=== aba $LABEL em ($X,$Y) ==="
+  adb shell input tap "$X" "$Y"
   sleep 4
   adb exec-out screencap -p > "$OUT/tv-tab-$N-$LABEL.png"
   python3 scripts/check-screenshot.py "$OUT/tv-tab-$N-$LABEL.png" "tv $LABEL"

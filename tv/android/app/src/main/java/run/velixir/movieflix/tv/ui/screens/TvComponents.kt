@@ -321,19 +321,19 @@ fun TvSidebar(
             .width(232.dp)
             .fillMaxHeight()
             .background(MfColors.BgElev)
-            .padding(vertical = 28.dp),
+            .padding(vertical = 18.dp),
     ) {
         Box(Modifier.padding(start = 22.dp)) {
-            MfLogo(fontSize = 28, iconSize = 36)
+            MfLogo(fontSize = 26, iconSize = 34)
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             "FILMES E SÉRIES",
             color = MfColors.TextDim,
             fontFamily = MfSans,
             fontSize = 9.sp,
             letterSpacing = 1.6.sp,
-            modifier = Modifier.padding(start = 22.dp, bottom = 24.dp),
+            modifier = Modifier.padding(start = 22.dp, bottom = 14.dp),
         )
 
         items.forEach { (key, label) ->
@@ -357,14 +357,14 @@ fun TvSidebar(
                     )
                     .onFocusChanged { focused = it.isFocused }
                     .clickable { onSelect(key) }
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Barrinha de ativo, como o .nav-link.active do site.
                 Box(
                     Modifier
                         .width(3.dp)
-                        .height(15.dp)
+                        .height(13.dp)
                         .clip(RoundedCornerShape(3.dp))
                         .background(
                             if (active || focused) Color.White
@@ -376,7 +376,7 @@ fun TvSidebar(
                     label,
                     color = if (focused || active) Color.White else MfColors.TextMuted,
                     fontFamily = MfSans,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = if (focused || active) FontWeight.Bold else FontWeight.Normal,
                 )
             }
