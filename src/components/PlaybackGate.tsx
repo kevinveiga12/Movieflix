@@ -24,12 +24,12 @@ export function PlaybackGate({
   const config: Record<string, { heading: string; body: string; cta?: { label: string; to: string } }> = {
     unauthenticated: {
       heading: 'Crie sua conta para assistir',
-      body: 'Você pode navegar pelo catálogo livremente. A reprodução é liberada para quem tem conta — é grátis e leva menos de um minuto.',
+      body: 'Você pode navegar pelo catálogo livremente. Crie sua conta e assista 1 mês grátis — leva menos de um minuto.',
       cta: { label: 'Criar conta grátis', to: '/cadastro' },
     },
     no_subscription: {
       heading: 'Entre na sua conta para assistir',
-      body: 'O MovieFlix é gratuito: basta ter uma conta. Entre para liberar a reprodução.',
+      body: 'Entre para liberar a reprodução. Toda conta tem 1 mês grátis.',
       cta: { label: 'Entrar', to: '/login' },
     },
     trial_expired: {
@@ -43,9 +43,9 @@ export function PlaybackGate({
       cta: { label: 'Entrar', to: '/login' },
     },
     plan_too_low: {
-      heading: 'Entre na sua conta para assistir',
-      body: 'O MovieFlix é gratuito: basta ter uma conta. Entre para liberar a reprodução.',
-      cta: { label: 'Entrar', to: '/login' },
+      heading: 'Seu mês grátis terminou',
+      body: 'Para continuar assistindo, escolha um plano — a contratação é pelo WhatsApp.',
+      cta: { label: 'Ver planos', to: '/planos' },
     },
     no_source: {
       heading: 'Sem fonte de reprodução',
