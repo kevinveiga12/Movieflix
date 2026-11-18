@@ -25,6 +25,52 @@ const inflight = { movie: null, tv: null }
 const FILES = { movie: 'filmes.light.json', tv: 'series.light.json' }
 
 /**
+ * Disponibilidade verificada no provedor (EmbedMovies).
+ *
+ * `public/filmes/disponibilidade.json` é gerado por
+ * `scripts/validar-disponibilidade.cjs`, que pergunta ao player, título a
+ * título, se existe fonte de reprodução. O catálogo publicado tem 18.080
+ * filmes e 8.093 séries; nem todos estão disponíveis no provedor.
+ *
+ * Regra: se o arquivo existir e tiver entradas, o catálogo mostra SOMENTE o
+ * que foi verificado como disponível. Se o arquivo não existir (ou estiver
+ * vazio), não filtramos nada — melhor mostrar o catálogo inteiro do que um
+ * site vazio por causa de um arquivo ausente.
+ */
+let availability = null
+
+async function loadAvailability() {
+  if (availability) return availability
+  try {
+    const raw = await fs.readFile(path.join(PUBLIC, 'disponibilidade.json'), 'utf8')
+    const data = JSON.parse(raw)
+    const movies = new Set((data.filmes ?? []).map(String))
+    const series = new Set((data.series_verificadas ?? Object.keys(data.series ?? {})).map(String))
+    availability = {
+      movies,
+      series,
+      // Só filtra quando houve verificação de fato.
+      active: movies.size > 0 || series.size > 0,
+      geradoEm: data.gerado_em ?? null,
+    }
+  } catch {
+    availability = { movies: new Set(), series: new Set(), active: false, geradoEm: null }
+  }
+  return availability
+}
+
+/** Estatísticas da disponibilidade, para o painel/health. */
+export async function availabilityStats() {
+  const a = await loadAvailability()
+  return {
+    active: a.active,
+    movies: a.movies.size,
+    series: a.series.size,
+    geradoEm: a.geradoEm,
+  }
+}
+
+/**
  * Normaliza o `type` de um registro do catálogo estático.
  *
  * Os arquivos gravam `type: "series"` nas séries, mas TODO o servidor compara
@@ -56,7 +102,16 @@ export async function loadStatic(kind) {
       const raw = await fs.readFile(path.join(PUBLIC, FILES[kind]), 'utf8')
       const list = JSON.parse(raw)
       // Normaliza uma única vez, no parse — o resto do servidor só vê 'tv'/'movie'.
-      cache[kind] = Array.isArray(list) ? list.map(normalizeRecord) : []
+      let out = Array.isArray(list) ? list.map(normalizeRecord) : []
+
+      // Filtra pelo que o provedor realmente entrega. Sem verificação, mantém tudo.
+      const avail = await loadAvailability()
+      if (avail.active) {
+        const allowed = kind === 'movie' ? avail.movies : avail.series
+        if (allowed.size) out = out.filter((t) => allowed.has(String(t.tmdb_id)))
+      }
+
+      cache[kind] = out
       return cache[kind]
     } catch {
       cache[kind] = []

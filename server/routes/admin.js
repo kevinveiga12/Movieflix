@@ -2,11 +2,39 @@ import { Router } from 'express'
 import { requireAdmin, supabaseAdmin } from '../lib/auth.js'
 import { readOverrides, writeOverrides, readAdminConfig, writeAdminConfig } from '../lib/store.js'
 import { normalizeProfile } from '../lib/profile.js'
+import { availabilityStats, loadStatic } from '../lib/static-catalog.js'
 
 const router = Router()
 
 // Todas as rotas exigem admin verificado no banco.
 router.use(requireAdmin)
+
+/**
+ * GET /api/admin/availability — situação do catálogo no provedor.
+ *
+ * O catálogo publicado tem 18.080 filmes e 8.093 séries; o EmbedMovies não
+ * entrega todos. Este endpoint mostra quantos foram verificados como
+ * disponíveis e quando foi a última verificação, para o admin saber se precisa
+ * rodar `node scripts/validar-disponibilidade.cjs` de novo.
+ */
+router.get('/availability', async (_req, res, next) => {
+  try {
+    const [stats, movies, series] = await Promise.all([
+      availabilityStats(),
+      loadStatic('movie'),
+      loadStatic('tv'),
+    ])
+    res.json({
+      ...stats,
+      // O que o site está exibindo agora (já filtrado pela disponibilidade).
+      exibindo: { filmes: movies.length, series: series.length },
+      provedor: 'embedmovies',
+      comoAtualizar: 'node scripts/validar-disponibilidade.cjs',
+    })
+  } catch (e) {
+    next(e)
+  }
+})
 
 /** GET /api/admin/stats — números do painel */
 router.get('/stats', async (_req, res, next) => {

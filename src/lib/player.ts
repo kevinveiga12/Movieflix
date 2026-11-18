@@ -3,15 +3,23 @@ import type { Title } from './types'
 /**
  * Resolução da fonte de reprodução.
  *
- * O MovieFlix original usa o provedor StreamBetter, que entrega uma página de
- * embed (não um arquivo .mp4/.m3u8 direto). Por isso o player tem dois modos:
+ * Provedor: EmbedMovies (https://embedmovies.org). Contrato oficial, conforme
+ * o guia rápido:
  *
- *  - 'direct'  → URL de arquivo (MP4/HLS). Usa <video> nativo + hls.js.
- *  - 'embed'   → página do provedor. Usa <iframe> com sandbox restritivo.
+ *   Filme            https://myembed.biz/filme/{tmdb_id}
+ *   Filme (IMDb)     https://myembed.biz/filme/tt{imdb_id}
+ *   Série (lista)    https://myembed.biz/serie/{tmdb_id}
+ *   Série (episódio) https://myembed.biz/serie/{tmdb_id}/{temporada}/{episodio}
  *
- * O administrador pode cadastrar uma URL direta em `video_url`; se ela for um
- * arquivo, o player usa o modo nativo (melhor experiência: legendas, áudio,
- * retomada precisa). Caso contrário cai no embed.
+ * A reprodução funciona EXCLUSIVAMENTE via iframe — o provedor não entrega
+ * .mp4/.m3u8. Por isso o player tem dois modos:
+ *
+ *  - 'direct'  → URL de arquivo (MP4/HLS) cadastrada pelo admin. <video> nativo.
+ *  - 'embed'   → página do provedor. <iframe> com sandbox restritivo.
+ *
+ * O admin pode cadastrar uma URL direta em `video_url`; se ela for um arquivo,
+ * o player usa o modo nativo (melhor experiência: legendas, áudio, retomada
+ * precisa). Caso contrário cai no embed do EmbedMovies.
  */
 
 export type PlaybackMode = 'direct' | 'embed'
@@ -23,42 +31,77 @@ export interface PlaybackSource {
   label?: string
 }
 
+/** Domínio do provedor de embed. */
+export const EMBED_PROVIDER = 'https://myembed.biz'
+
 const DIRECT_EXT = /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i
 
 export function isDirectUrl(url: string): boolean {
   return DIRECT_EXT.test(url)
 }
 
+/**
+ * URL de embed de um filme.
+ *
+ * Aceita o id numérico do TMDB ou um id IMDb ("tt..."). O catálogo guarda
+ * `tmdb_id` numérico, então o caminho normal é o numérico.
+ */
+export function movieEmbedUrl(id: string | number): string | null {
+  const raw = String(id ?? '').trim()
+  if (!raw) return null
+  if (/^tt\d+$/i.test(raw)) return `${EMBED_PROVIDER}/filme/${raw.toLowerCase()}`
+  if (!/^\d+$/.test(raw)) return null
+  return `${EMBED_PROVIDER}/filme/${raw}`
+}
+
+/** URL de embed de um episódio específico. */
+export function episodeEmbedUrl(
+  id: string | number,
+  season: number,
+  episode: number,
+): string | null {
+  const raw = String(id ?? '').trim()
+  if (!/^\d+$/.test(raw)) return null
+  if (!Number.isFinite(season) || !Number.isFinite(episode)) return null
+  if (season < 1 || episode < 1) return null
+  return `${EMBED_PROVIDER}/serie/${raw}/${season}/${episode}`
+}
+
+/** URL de embed da série (mostra a lista de temporadas/episódios). */
+export function seriesEmbedUrl(id: string | number): string | null {
+  const raw = String(id ?? '').trim()
+  if (!/^\d+$/.test(raw)) return null
+  return `${EMBED_PROVIDER}/serie/${raw}`
+}
+
 export function movieSource(t: Title): PlaybackSource | null {
-  if (!t.video_url) return null
-  return {
-    mode: isDirectUrl(t.video_url) ? 'direct' : 'embed',
-    url: t.video_url,
+  // URL direta cadastrada pelo admin tem prioridade.
+  if (t.video_url && isDirectUrl(t.video_url)) {
+    return { mode: 'direct', url: t.video_url }
   }
+  const url = movieEmbedUrl(t.tmdb_id ?? t.id)
+  return url ? { mode: 'embed', url } : null
 }
 
 /**
- * Monta a URL de um episódio.
+ * Monta a fonte de um episódio.
  *
  * O catálogo guarda `episodes_available` como ["1/1", "1/2", ...] (temporada/
- * episódio). O provedor usa o padrão /serie/{tmdb_id}/{temporada}/{episodio}.
+ * episódio). Só liberamos o episódio que está nessa lista — evita mandar o
+ * cliente para um episódio que o provedor não tem.
  */
 export function episodeSource(t: Title, season: number, episode: number): PlaybackSource | null {
   const available = t.episodes_available ?? []
   const key = `${season}/${episode}`
-  if (!available.includes(key)) return null
+  if (available.length && !available.includes(key)) return null
 
   // Se o admin cadastrou uma URL direta por episódio, ela tem prioridade.
   if (t.video_url && isDirectUrl(t.video_url)) {
     return { mode: 'direct', url: t.video_url, label: `T${season} E${episode}` }
   }
 
-  const base = t.video_url || `https://streambetter.shop/serie/${t.tmdb_id}`
-  const url = t.video_url
-    ? `${base.replace(/\/$/, '')}/${season}/${episode}?lang=pt-BR`
-    : `${base}/${season}/${episode}?lang=pt-BR`
-
-  return { mode: 'embed', url, label: `T${season} E${episode}` }
+  const url = episodeEmbedUrl(t.tmdb_id ?? t.id, season, episode)
+  return url ? { mode: 'embed', url, label: `T${season} E${episode}` } : null
 }
 
 export function firstEpisode(t: Title): { season: number; episode: number } | null {

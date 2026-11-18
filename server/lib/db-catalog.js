@@ -28,8 +28,17 @@ const SELECT =
   'id, tmdb_id, title, description, poster_url, backdrop_url, video_url, ' +
   'language, quality, type, required_plan, category, duration, year'
 
-/** Provedor de embed usado pelo catálogo (mesmo do site original). */
-const PROVIDER = 'https://streambetter.shop'
+/**
+ * Provedor de embed usado pelo catálogo: EmbedMovies.
+ *
+ * Contrato oficial (https://embedmovies.org/#guia-rapido):
+ *   filme            /filme/{tmdb_id}
+ *   série (episódio) /serie/{tmdb_id}/{temporada}/{episodio}
+ *
+ * Não existe API pública de catálogo em massa — a disponibilidade é verificada
+ * título a título (ver scripts/validar-disponibilidade.cjs).
+ */
+const PROVIDER = 'https://myembed.biz'
 
 // ── Detecção das tabelas do Supabase ─────────────────────────────────────────
 
@@ -217,7 +226,7 @@ export async function seriesEpisodes(tmdbId) {
           episode_number: e,
           title: `Episódio ${e}`,
           description: null,
-          video_url: `${PROVIDER}/serie/${t.tmdb_id}/${s}/${e}?lang=pt-BR`,
+          video_url: `${PROVIDER}/serie/${t.tmdb_id}/${s}/${e}`,
           duration_seconds: null,
           thumbnail_url: null,
         })),

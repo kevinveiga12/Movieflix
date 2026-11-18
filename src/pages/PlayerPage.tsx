@@ -462,20 +462,18 @@ export function PlayerPage() {
               allow-same-origin    o player precisa acessar o próprio storage
               allow-presentation   tela cheia / cast
               allow-forms          login do provedor, quando houver
-              allow-popups         ⚠️ LIBERADO de propósito
 
-            `allow-popups` está liberado porque vários provedores abrem uma aba
-            em segundo plano para iniciar a reprodução; sem essa permissão eles
-            recusam o vídeo e o cliente vê erro em vez de filme.
+            `allow-popups` NÃO está liberado. Era ele que deixava o anúncio do
+            provedor abrir aba nova (Shopee, lojas) no primeiro toque — o toque
+            destinado ao play virava clique de anúncio. Sem essa permissão o
+            navegador bloqueia a abertura e o toque continua sendo do player.
 
-            O que impede o usuário de ser jogado para fora NÃO é o sandbox aqui:
-            é o `allow-top-navigation` AUSENTE (o iframe não consegue trocar a
-            página do MovieFlix) somado ao handler de foco do componente, que
-            traz a janela do MovieFlix de volta no mesmo instante em que o
-            provedor tenta assumir a frente. Ver o efeito `blur → focus` abaixo.
+            `allow-top-navigation` também está ausente: o iframe não consegue
+            trocar a página do MovieFlix.
 
-            Também não existe `allow-modals` nem `allow-downloads`: o provedor
-            não abre alert/confirm nem dispara download sem o usuário pedir.
+            `referrerPolicy="origin"` é obrigatório: o provedor EmbedMovies só
+            entrega o player quando recebe o Referer do site que o incorporou.
+            Sem ele devolve uma página de cloaking em vez do vídeo.
           */
           <iframe
             src={source.url}
@@ -483,7 +481,7 @@ export function PlayerPage() {
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
             referrerPolicy="origin"
-            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups"
+            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
           />
         )}
 

@@ -5,7 +5,7 @@ import { loadCatalog, getAll } from '../lib/catalog'
 import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon } from '../components/Icons'
 import type { Title } from '../lib/types'
 
-type Tab = 'overview' | 'catalog' | 'users' | 'plans'
+type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability'
 
 interface Stats {
   users: number
@@ -188,6 +188,7 @@ export function AdminPage() {
             ['catalog', 'Catálogo'],
             ['users', 'Usuários'],
             ['plans', 'Planos'],
+            ['availability', 'Disponibilidade'],
           ] as const
         ).map(([k, label]) => (
           <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
@@ -294,6 +295,8 @@ export function AdminPage() {
         />
       )}
 
+      {tab === 'availability' && <AvailabilityTab api={api} />}
+
       {tab === 'plans' && (
         <PlansTab
           api={api}
@@ -323,6 +326,74 @@ export function AdminPage() {
 /* ──────────────────────────────────────────────────────────────────────────
  * ABA PLANOS — preço mensal, descontos de 3 meses / 1 ano, ativar-desativar
  * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Disponibilidade do catálogo no provedor (EmbedMovies).
+ *
+ * O catálogo base tem 18.080 filmes e 8.093 séries, mas o provedor não entrega
+ * todos. `scripts/validar-disponibilidade.cjs` pergunta ao player, título a
+ * título, e grava o resultado em `public/filmes/disponibilidade.json`; o
+ * servidor filtra o catálogo por esse arquivo. Esta aba só mostra o resultado —
+ * não existe API pública de catálogo em massa para consultar em tempo real.
+ */
+function AvailabilityTab({ api }: { api: (p: string, i?: RequestInit) => Promise<any> }) {
+  const [data, setData] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api('/availability')
+      .then(setData)
+      .catch((e) => setError(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (error) return <p className="muted">Não foi possível carregar: {error}</p>
+  if (!data) return <p className="muted">Carregando…</p>
+
+  return (
+    <>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
+        {[
+          ['Filmes disponíveis', data.movies ?? 0],
+          ['Séries disponíveis', data.series ?? 0],
+          ['Filmes exibidos', data.exibindo?.filmes ?? 0],
+          ['Séries exibidas', data.exibindo?.series ?? 0],
+        ].map(([label, value]) => (
+          <div key={String(label)} className="panel" style={{ marginBottom: 0 }}>
+            <div style={{ fontSize: '1.9rem', fontWeight: 800 }}>{value}</div>
+            <div className="muted" style={{ fontSize: '0.82rem' }}>
+              {label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel" style={{ marginTop: 20 }}>
+        <div className="panel-title">Como a disponibilidade é verificada</div>
+        <p className="panel-sub">
+          Provedor: <strong>{data.provedor ?? 'embedmovies'}</strong>. O EmbedMovies não publica uma
+          API de catálogo em massa, então cada título é consultado individualmente no player e o
+          resultado é gravado em <code>public/filmes/disponibilidade.json</code>. O catálogo exibe
+          apenas o que foi confirmado com fonte de reprodução.
+        </p>
+        <p className="panel-sub" style={{ marginBottom: 0 }}>
+          {data.geradoEm ? (
+            <>
+              Última verificação: {new Date(data.geradoEm).toLocaleString('pt-BR')}
+              <br />
+            </>
+          ) : (
+            <>
+              Nenhuma verificação registrada — o catálogo completo está sendo exibido.
+              <br />
+            </>
+          )}
+          Para atualizar: <code>{data.comoAtualizar ?? 'node scripts/validar-disponibilidade.cjs'}</code>
+        </p>
+      </div>
+    </>
+  )
+}
 
 function PlansTab({
   api,
