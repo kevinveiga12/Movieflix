@@ -6,18 +6,25 @@ import { trialFromMetadata } from './trial-claims.js'
  * Autorização de reprodução — feita SEMPRE no servidor.
  *
  * REGRA DE NEGÓCIO ATUAL (definida pelo proprietário em 2026-11-18):
- *   O MovieFlix 2.0 é GRATUITO. Não há planos, assinaturas nem pagamentos.
- *   A única condição para assistir é ter conta e estar autenticado.
+ *   1. Assistir exige conta autenticada.
+ *   2. O MÊS GRÁTIS NÃO É AUTOMÁTICO. Criar conta não concede nada.
+ *      Quem libera 30 dias é o ADMINISTRADOR, gerando um código de 6 dígitos
+ *      para o cliente (ver server/lib/trial-codes.js). O cliente digita o
+ *      código na aba de contas.
+ *   3. Depois do mês grátis, só com plano pago.
+ *   4. Administrador é isento de tudo.
  *
- * O que mudou e por quê:
- *   A versão anterior exigia uma linha em `subscriptions` com status ativo e
- *   `expires_at` no futuro. Como o projeto Supabase atual
- *   (zhsfqptngzgbcgiwwjug) NÃO tem a tabela `subscriptions`, TODA reprodução
- *   era negada com `no_subscription` — o site parecia quebrado. O gate de
- *   assinatura foi removido; a autenticação continua obrigatória e verificada
- *   no servidor com o token do Supabase Auth.
+ * Onde a decisão é tomada (sempre no servidor):
+ *   - `app_metadata` é lido, nunca `user_metadata`. O cliente CONSEGUE escrever
+ *     `user_metadata` pelo SDK do navegador; `app_metadata` só a Service Role
+ *     escreve. Confiar no primeiro permitiria "assinar" sem pagar.
+ *   - Contas criadas ANTES desta regra não têm marca em `app_metadata` e
+ *     continuam com o mês grátis calculado por `created_at` até o fim: ninguém
+ *     perde o benefício em curso.
+ *   - Contas criadas DEPOIS levam a marca `{granted:false, reason:'no_trial'}`
+ *     e por isso não caem no cálculo legado.
  *
- * O que NÃO mudou:
+ * O que NÃO muda:
  *   - O token é validado no servidor (auth.getUser), nunca no cliente.
  *   - A URL do vídeo só é devolvida depois da validação.
  *   - Esconder o botão no navegador não contorna nada.
@@ -56,8 +63,9 @@ export async function resolveUser(token) {
  * Decide se o usuário pode reproduzir um título.
  *
  * REGRA DE NEGÓCIO (definida pelo proprietário em 2026-11-18):
- *   Toda conta nova ganha 1 MÊS GRÁTIS contado da criação da conta.
- *   Depois de completar o mês, o acesso é bloqueado até contratar um plano.
+ *   Criar conta NÃO concede mês grátis. O benefício é liberado pelo
+ *   administrador por código de 6 dígitos; depois de 30 dias, só com plano.
+ *   Contas antigas (sem marca) mantêm o cálculo por `created_at` até o fim.
  *
  * Onde a decisão é tomada:
  *   - A data de criação vem de `user.created_at` do Supabase Auth, que o

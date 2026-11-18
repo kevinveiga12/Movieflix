@@ -12,7 +12,7 @@ import {
   adminEmails,
 } from '../lib/profile.js'
 import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-server.js'
-import { grantTrialForNewUser, applyTrialMetadata } from '../lib/trial-claims.js'
+import { applyTrialMetadata } from '../lib/trial-claims.js'
 import { redeemTrialCode, TRIAL_CODE_MAX_ATTEMPTS } from '../lib/trial-codes.js'
 
 /**
