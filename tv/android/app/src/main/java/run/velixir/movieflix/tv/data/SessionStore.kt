@@ -51,6 +51,17 @@ class SessionStore(context: Context) {
         get() = prefs.getString(KEY_USER, null)
         set(value) = prefs.edit().putString(KEY_USER, value).apply()
 
+    /**
+     * Último `is_admin` conhecido, vindo do servidor no login.
+     *
+     * Guardado só para o menu não piscar ao reabrir o app. NÃO é fonte de
+     * verdade: toda rota /api/admin revalida no servidor. Alterar este valor
+     * no aparelho não dá acesso a nada.
+     */
+    var isAdmin: Boolean
+        get() = prefs.getBoolean(KEY_ADMIN, false)
+        set(value) = prefs.edit().putBoolean(KEY_ADMIN, value).apply()
+
     val isLoggedIn: Boolean get() = !accessToken.isNullOrBlank()
 
     fun save(session: Session, userEmail: String?, uid: String?) {
@@ -71,5 +82,6 @@ class SessionStore(context: Context) {
         const val KEY_REFRESH = "refresh_token"
         const val KEY_EMAIL = "email"
         const val KEY_USER = "user_id"
+        const val KEY_ADMIN = "is_admin"
     }
 }
