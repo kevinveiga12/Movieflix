@@ -1,26 +1,18 @@
 import { Router } from 'express'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { readOverrides, applyOverrides } from '../lib/store.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PUBLIC = path.join(__dirname, '..', '..', 'public', 'filmes')
+import { loadStatic } from '../lib/static-catalog.js'
 
 const router = Router()
 
-let cache = { movies: null, series: null, at: 0 }
-const TTL = 60_000
-
+/**
+ * Catálogo estático (metadados do TMDB publicados em public/filmes/).
+ *
+ * O cache é ÚNICO e vive em lib/static-catalog.js — antes cada módulo tinha o
+ * seu, e os 27 MB do catálogo eram parseados duas vezes, estourando a memória
+ * do plano Free da Velixir.
+ */
 async function loadBase(kind) {
-  const now = Date.now()
-  if (cache[kind] && now - cache.at < TTL) return cache[kind]
-  const file = kind === 'movie' ? 'filmes.light.json' : 'series.light.json'
-  const raw = await fs.readFile(path.join(PUBLIC, file), 'utf8')
-  const list = JSON.parse(raw)
-  cache[kind] = list
-  cache.at = now
-  return list
+  return loadStatic(kind)
 }
 
 /** GET /api/catalog/movies?genre=&sort=&q=&limit=&offset= */

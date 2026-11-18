@@ -1,7 +1,5 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { getAnonClient, hasDb } from './supabase-server.js'
+import { loadStatic, findStatic } from './static-catalog.js'
 
 /**
  * Catálogo de reprodução — com DOIS backends.
@@ -24,9 +22,6 @@ import { getAnonClient, hasDb } from './supabase-server.js'
  * catálogo estático responde. Nenhuma tabela é criada e nenhum dado é alterado.
  */
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PUBLIC = path.join(__dirname, '..', '..', 'public', 'filmes')
-
 export const hasDbCatalog = hasDb
 
 const SELECT =
@@ -35,25 +30,6 @@ const SELECT =
 
 /** Provedor de embed usado pelo catálogo (mesmo do site original). */
 const PROVIDER = 'https://streambetter.shop'
-
-// ── Catálogo estático ────────────────────────────────────────────────────────
-
-const staticCache = { movie: null, tv: null, at: 0 }
-const STATIC_TTL = 60_000
-
-async function loadStatic(kind) {
-  const now = Date.now()
-  if (staticCache[kind] && now - staticCache.at < STATIC_TTL) return staticCache[kind]
-  const file = kind === 'movie' ? 'filmes.light.json' : 'series.light.json'
-  try {
-    const raw = await fs.readFile(path.join(PUBLIC, file), 'utf8')
-    staticCache[kind] = JSON.parse(raw)
-    staticCache.at = now
-    return staticCache[kind]
-  } catch {
-    return []
-  }
-}
 
 // ── Detecção das tabelas do Supabase ─────────────────────────────────────────
 
@@ -146,9 +122,7 @@ export async function findTitle(tmdbId) {
     if (!error && data) return toTitle(data)
   }
 
-  const [movies, series] = await Promise.all([loadStatic('movie'), loadStatic('tv')])
-  const hit =
-    movies.find((t) => Number(t.tmdb_id) === id) ?? series.find((t) => Number(t.tmdb_id) === id)
+  const hit = await findStatic(id)
   return hit ? { ...hit, source: 'catalog' } : null
 }
 
