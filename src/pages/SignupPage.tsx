@@ -32,7 +32,23 @@ export function SignupPage() {
       return
     }
     if (needsConfirmation) setDone(true)
-    else navigate('/', { replace: true })
+    else {
+      /**
+       * Conta criada. Se o benefício de 30 dias NÃO foi concedido (o aparelho
+       * já consumiu), o cliente vai direto para a tela de planos — é o
+       * comportamento pedido pelo proprietário. Caso contrário, entra no site.
+       */
+      let trialGranted = true
+      try {
+        const raw = sessionStorage.getItem('mf_signup_trial')
+        sessionStorage.removeItem('mf_signup_trial')
+        const parsed = raw ? (JSON.parse(raw) as { granted?: boolean } | null) : null
+        if (parsed && parsed.granted === false) trialGranted = false
+      } catch {
+        /* sem sessionStorage: assume o caminho normal */
+      }
+      navigate(trialGranted ? '/' : '/planos', { replace: true })
+    }
   }
 
   if (done) {

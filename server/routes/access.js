@@ -12,6 +12,7 @@ import {
   adminEmails,
 } from '../lib/profile.js'
 import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-server.js'
+import { grantTrialForNewUser, applyTrialMetadata } from '../lib/trial-claims.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -217,11 +218,47 @@ router.post('/auth/signup', strict, async (req, res, next) => {
       return res.status(result.status ?? 400).json({ error: result.error })
     }
 
+    /**
+     * Benefício de 30 dias — decidido AQUI, no servidor, no momento do cadastro.
+     *
+     * Regra: um benefício por E-MAIL e um por DISPOSITIVO. Se o aparelho já
+     * consumiu, a conta é criada normalmente mas nasce sem os 30 dias e o
+     * cliente cai direto na tela de planos.
+     *
+     * O identificador do dispositivo é emitido pelo servidor (cookie HttpOnly)
+     * e combinado com uma impressão de rede (IP + User-Agent + Accept-Language),
+     * então limpar os dados do navegador não devolve o benefício.
+     *
+     * Falha aqui NÃO derruba o cadastro: a conta já existe e o cliente precisa
+     * conseguir entrar. Nesse caso o trial fica como legado (calculado por
+     * created_at), que é o comportamento anterior — nunca pior que antes.
+     */
+    let trial = null
+    try {
+      const decision = await grantTrialForNewUser({ req, res, email })
+      if (decision.reason !== 'admin_exempt') {
+        const applied = await applyTrialMetadata({
+          userId: result.user?.id,
+          email,
+          granted: decision.granted,
+          deviceKeys: decision.deviceKeys,
+        })
+        trial = applied.ok
+          ? { granted: decision.granted, endsAt: applied.trial?.ends_at ?? null }
+          : null
+      }
+    } catch (e) {
+      console.warn('[MovieFlix] trial no cadastro:', e?.message ?? e)
+    }
+
     res.status(201).json({
       ok: true,
       email,
       profile: result.profile,
-      message: 'Conta criada. Faça login para assistir.',
+      trial,
+      message: trial?.granted
+        ? 'Conta criada com 30 dias grátis. Faça login para assistir.'
+        : 'Conta criada. Faça login para assistir.',
     })
   } catch (e) {
     next(e)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { PosterCard } from '../components/PosterCard'
+import { useHistory } from '../lib/userData'
 import {
   loadCatalog,
   playableMovies,
@@ -22,6 +23,18 @@ export function CatalogPage({ kind }: Props) {
   const [params, setParams] = useSearchParams()
   const [ready, setReady] = useState(false)
   const [visible, setVisible] = useState(PAGE_SIZE)
+  const { progressFor } = useHistory()
+
+  /**
+   * Barrinha de progresso nos cards de catálogo.
+   * null quando não há progresso ou a duração é desconhecida (modo embed).
+   */
+  const progressOf = (tmdbId: string | number): number | null => {
+    const h = progressFor(tmdbId)
+    if (!h || !h.duration_seconds) return null
+    const pct = h.position_seconds / h.duration_seconds
+    return pct > 0.01 && pct < 0.98 ? pct : null
+  }
 
   const genre = params.get('genero') ?? 'Todos'
   const sort = (params.get('ordem') as SortKey) ?? 'popular'
@@ -102,7 +115,7 @@ export function CatalogPage({ kind }: Props) {
         <>
           <div className="grid">
             {filtered.slice(0, visible).map((t) => (
-              <PosterCard key={`${t.type}-${t.tmdb_id}`} title={t} />
+              <PosterCard key={`${t.type}-${t.tmdb_id}`} title={t} progress={progressOf(t.tmdb_id)} />
             ))}
           </div>
           {visible < filtered.length && (

@@ -37,6 +37,11 @@ export function PlaybackGate({
       body: 'Você assistiu de graça por 1 mês. Para continuar, escolha um plano — a contratação é pelo WhatsApp.',
       cta: { label: 'Ver planos', to: '/planos' },
     },
+    trial_used: {
+      heading: 'O período grátis deste aparelho já foi usado',
+      body: 'Este aparelho já utilizou os 30 dias gratuitos em outra conta. Sua conta está criada e você pode entrar normalmente — para assistir, escolha um plano.',
+      cta: { label: 'Ver planos', to: '/planos' },
+    },
     trial_unknown: {
       heading: 'Entre novamente para continuar',
       body: 'Não foi possível confirmar o período gratuito desta conta. Saia e entre de novo para renovar a sessão.',

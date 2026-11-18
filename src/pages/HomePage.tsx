@@ -12,7 +12,19 @@ export function HomePage() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { user } = useAuth()
-  const { continueWatching } = useHistory()
+  const { continueWatching, progressFor } = useHistory()
+
+  /**
+   * Fração assistida de um título, para a barrinha do card.
+   * Devolve null quando não há progresso ou quando a duração é desconhecida
+   * (modo embed) — nesse caso o card não mostra barra, em vez de mostrar 0%.
+   */
+  const progressOf = (tmdbId: string | number): number | null => {
+    const h = progressFor(tmdbId)
+    if (!h || !h.duration_seconds) return null
+    const pct = h.position_seconds / h.duration_seconds
+    return pct > 0.01 && pct < 0.98 ? pct : null
+  }
 
   useEffect(() => {
     let alive = true
@@ -32,11 +44,18 @@ export function HomePage() {
       .map((h) => {
         const t = getById(String(h.tmdb_id), h.media_type)
         if (!t) return null
-        const pct = h.duration_seconds ? h.position_seconds / h.duration_seconds : 0
-        return { t, pct, h }
+        // Duração desconhecida (modo embed) → sem porcentagem inventada.
+        const known = h.duration_seconds > 0
+        const pct = known ? h.position_seconds / h.duration_seconds : 0
+        return { t, pct, known, h }
       })
       .filter(Boolean)
-      .slice(0, 12) as Array<{ t: NonNullable<ReturnType<typeof getById>>; pct: number; h: any }>
+      .slice(0, 12) as Array<{
+      t: NonNullable<ReturnType<typeof getById>>
+      pct: number
+      known: boolean
+      h: any
+    }>
   }, [ready, user, continueWatching])
 
   if (error) {
@@ -73,7 +92,7 @@ export function HomePage() {
       <div className="page">
         {resume.length > 0 && (
           <CarouselRow title="Continuar assistindo">
-            {resume.map(({ t, pct, h }) => {
+            {resume.map(({ t, pct, known, h }) => {
               const ep = parseEpisodeId(h.episode_id)
               return (
               <Link
@@ -90,15 +109,17 @@ export function HomePage() {
                       <PlayIcon size={20} />
                     </span>
                   </div>
-                  <div className="card-progress">
-                    <span style={{ width: `${Math.min(100, pct * 100)}%` }} />
-                  </div>
+                  {known && (
+                    <div className="card-progress">
+                      <span style={{ width: `${Math.min(100, pct * 100)}%` }} />
+                    </div>
+                  )}
                 </div>
                 <div className="card-info">
                   <div className="card-title">{t.title}</div>
                   <div className="card-sub">
                     {ep ? <span>T{ep.season} E{ep.episode}</span> : <span>Filme</span>}
-                    <span>· {Math.round(pct * 100)}% assistido</span>
+                    {known && <span>· {Math.round(pct * 100)}% assistido</span>}
                   </div>
                 </div>
               </Link>
@@ -120,7 +141,7 @@ export function HomePage() {
             }
           >
             {row.items.map((t) => (
-              <PosterCard key={`${t.type}-${t.tmdb_id}`} title={t} />
+              <PosterCard key={`${t.type}-${t.tmdb_id}`} title={t} progress={progressOf(t.tmdb_id)} />
             ))}
           </CarouselRow>
         ))}

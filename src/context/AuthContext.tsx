@@ -171,9 +171,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password, fullName }),
           })
-          const data = (await res.json().catch(() => ({}))) as { error?: string }
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string
+            trial?: { granted: boolean; endsAt: string | null } | null
+          }
           if (!res.ok) {
             return { error: friendly(data.error ?? `Falha no cadastro (HTTP ${res.status}).`), needsConfirmation: false }
+          }
+          // Guarda o resultado do benefício para a tela de cadastro informar
+          // com honestidade se os 30 dias foram concedidos ou não.
+          try {
+            sessionStorage.setItem('mf_signup_trial', JSON.stringify(data.trial ?? null))
+          } catch {
+            /* modo privado pode bloquear — não é crítico */
           }
         } catch (e) {
           return { error: friendly((e as Error).message), needsConfirmation: false }

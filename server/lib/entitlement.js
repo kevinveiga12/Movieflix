@@ -1,4 +1,6 @@
 import { getAnonClient, getClientAsUser, hasDb as dbConfigured } from './supabase-server.js'
+import { adminEmails } from './profile.js'
+import { trialFromMetadata } from './trial-claims.js'
 
 /**
  * Autorização de reprodução — feita SEMPRE no servidor.
@@ -121,13 +123,40 @@ export function accessState(user) {
     return { allowed: false, reason: 'account_disabled', plan: null, trialEndsAt: null, daysLeft: null }
   }
 
+  // Administrador é isento de período gratuito e de vencimento.
+  const email = String(user?.email ?? '').toLowerCase()
+  if (email && adminEmails().includes(email)) {
+    return { allowed: true, reason: 'admin', plan: null, trialEndsAt: null, daysLeft: null }
+  }
+
   const plan = paidPlanFromAppMetadata(user)
   if (plan) {
     return { allowed: true, reason: 'plan', plan, trialEndsAt: null, daysLeft: null }
   }
 
-  const ends = trialEndsAt(user)
-  if (!ends) {
+  /**
+   * Benefício registrado pelo servidor no cadastro (e-mail + dispositivo).
+   *
+   * `trialFromMetadata` devolve `undefined` para contas criadas ANTES desta
+   * regra. Nesse caso caímos no cálculo por `created_at` — é o que PRESERVA o
+   * mês grátis de quem já está dentro dele. Ninguém perde o benefício em curso
+   * por causa da mudança.
+   */
+  const recorded = trialFromMetadata(user)
+
+  if (recorded && recorded.granted === false) {
+    // Conta criada em dispositivo que já consumiu o benefício: sem 30 dias.
+    return {
+      allowed: false,
+      reason: 'trial_used',
+      plan: null,
+      trialEndsAt: null,
+      daysLeft: 0,
+    }
+  }
+
+  const ends = recorded?.endsAt ? new Date(recorded.endsAt) : trialEndsAt(user)
+  if (!ends || !Number.isFinite(ends.getTime())) {
     // Sem data de criação não há como provar o período gratuito. Negar é o
     // lado seguro: liberar "para sempre" seria pior que pedir para entrar de novo.
     return { allowed: false, reason: 'trial_unknown', plan: null, trialEndsAt: null, daysLeft: null }
@@ -168,9 +197,11 @@ export async function authorizePlayback({ token }) {
       message:
         state.reason === 'trial_expired'
           ? 'Seu mês grátis terminou. Contrate um plano para continuar assistindo.'
-          : state.reason === 'account_disabled'
-            ? 'Esta conta está desativada. Fale com o suporte.'
-            : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
+          : state.reason === 'trial_used'
+            ? 'O período grátis deste aparelho já foi utilizado. Escolha um plano para assistir.'
+            : state.reason === 'account_disabled'
+              ? 'Esta conta está desativada. Fale com o suporte.'
+              : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
       access: state,
     }
   }

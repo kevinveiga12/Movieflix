@@ -6,10 +6,28 @@ import { loadCatalog, getById } from '../lib/catalog'
 import { PosterCard } from '../components/PosterCard'
 import { HeartIcon, ClockIcon, LogoutIcon, SettingsIcon, UserIcon, PlayIcon } from '../components/Icons'
 
+/** "1h 12min" / "12min" / "40s" — tempo assistido legível. */
+function formatWatched(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds || 0))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}min`
+  return `${Math.floor(m / 60)}h ${m % 60}min`
+}
+
 export function FavoritesPage() {
   const { user } = useAuth()
   const { favorites, loading } = useFavorites()
+  const { progressFor } = useHistory()
   const [ready, setReady] = useState(false)
+
+  /** Barrinha nos cards de favoritos; null quando a duração é desconhecida. */
+  const progressOf = (tmdbId: string | number): number | null => {
+    const h = progressFor(tmdbId)
+    if (!h || !h.duration_seconds) return null
+    const pct = h.position_seconds / h.duration_seconds
+    return pct > 0.01 && pct < 0.98 ? pct : null
+  }
 
   useEffect(() => {
     loadCatalog().then(() => setReady(true))
@@ -70,7 +88,7 @@ export function FavoritesPage() {
       ) : (
         <div className="grid">
           {items.map((t) => (
-            <PosterCard key={`${t!.type}-${t!.tmdb_id}`} title={t!} />
+            <PosterCard key={`${t!.type}-${t!.tmdb_id}`} title={t!} progress={progressOf(t!.tmdb_id)} />
           ))}
         </div>
       )}
@@ -137,7 +155,20 @@ export function HistoryPage() {
           {history.map((h) => {
             const t = getById(String(h.tmdb_id), h.media_type)
             const ep = parseEpisodeId(h.episode_id)
-            const pct = h.duration_seconds ? Math.min(100, (h.position_seconds / h.duration_seconds) * 100) : 0
+            /**
+             * Porcentagem só quando a duração é conhecida.
+             *
+             * No modo embed o provedor não expõe a duração do vídeo, então
+             * `duration_seconds` fica 0 e não há como calcular uma porcentagem
+             * honesta. Nesse caso mostramos o tempo assistido, não uma barra
+             * inventada.
+             */
+            const known = h.duration_seconds > 0
+            const pct = known ? Math.min(100, (h.position_seconds / h.duration_seconds) * 100) : 0
+            const watched = formatWatched(h.position_seconds)
+            const base = `/assistir/${h.tmdb_id}?type=${h.media_type}${
+              ep ? `&season=${ep.season}&episode=${ep.episode}` : ''
+            }`
             return (
               <div key={h.id} className="episode" style={{ cursor: 'default' }}>
                 <img
@@ -149,25 +180,25 @@ export function HistoryPage() {
                   <div className="episode-title">{h.title}</div>
                   <div className="episode-sub">
                     {ep ? `T${ep.season} E${ep.episode} · ` : ''}
-                    {Math.round(pct)}% assistido
+                    {known ? `${Math.round(pct)}% assistido` : `${watched} assistidos`}
                   </div>
                   <div className="progress-track" style={{ height: 3, marginTop: 8, maxWidth: 260 }}>
-                    <div className="progress-fill" style={{ width: `${pct}%` }} />
+                    <div className="progress-fill" style={{ width: `${known ? pct : 0}%` }} />
                   </div>
                 </div>
-                <div className="inline">
+                <div className="inline" style={{ flexWrap: 'wrap' }}>
                   {t && (
-                    <Link
-                      to={`/assistir/${h.tmdb_id}?type=${h.media_type}${
-                        ep ? `&season=${ep.season}&episode=${ep.episode}` : ''
-                      }`}
-                      className="btn btn--primary btn--sm"
-                    >
-                      <PlayIcon size={15} /> Continuar
-                    </Link>
+                    <>
+                      <Link to={base} className="btn btn--primary btn--sm">
+                        <PlayIcon size={15} /> Continuar de onde parou
+                      </Link>
+                      <Link to={`${base}&from=start`} className="btn btn--outline btn--sm">
+                        Assistir do início
+                      </Link>
+                    </>
                   )}
                   <button
-                    className="btn btn--outline btn--sm"
+                    className="btn btn--ghost btn--sm"
                     onClick={() => void remove(h.id)}
                     aria-label={`Remover ${h.title} do histórico`}
                   >

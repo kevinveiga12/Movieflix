@@ -20,7 +20,33 @@ import {
   SubtitlesIcon,
 } from '../components/Icons'
 
-const SAVE_INTERVAL = 10_000
+/**
+ * Intervalo de gravação do progresso.
+ *
+ * O proprietário pediu 15 segundos. É o intervalo usado nos dois modos.
+ */
+const SAVE_INTERVAL = 15_000
+
+/**
+ * Progresso no modo EMBED — o que é tecnicamente possível.
+ *
+ * O player do provedor roda em iframe de OUTRO domínio. Verificado em
+ * 2026-11-18: a página do playerflix.ink não expõe `postMessage`, não lê
+ * `window.parent` e não publica `timeupdate`/`currentTime` para quem o
+ * incorpora. Sem um desses canais, a posição real do vídeo é INALCANÇÁVEL
+ * pela página do MovieFlix — não é falta de esforço, é a política de origem
+ * do navegador.
+ *
+ * O que fazemos então, sem inventar dado: contamos o TEMPO DECORRIDO com a
+ * página do player aberta e visível, e gravamos isso como posição. É uma
+ * aproximação — se o cliente pausar dentro do iframe, o contador continua
+ * andando, porque não temos como saber da pausa. Por isso o modo embed NÃO
+ * retoma sozinho: seria pular para um ponto errado.
+ *
+ * No modo DIRETO (arquivo .mp4/.m3u8 cadastrado pelo admin) a posição é real,
+ * lida do <video>, e a retomada funciona exatamente.
+ */
+const EMBED_TICK_MS = 1_000
 
 export function PlayerPage() {
   const { id } = useParams<{ id: string }>()
@@ -48,6 +74,10 @@ export function PlayerPage() {
   const hlsRef = useRef<Hls | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const lastSave = useRef(0)
+  /** Tempo decorrido no modo embed (segundos) — aproximação declarada. */
+  const embedElapsed = useRef(0)
+  /** `?from=start` → ignora o ponto salvo e começa do zero. */
+  const fromStart = params.get('from') === 'start'
 
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -183,8 +213,8 @@ export function PlayerPage() {
       video.src = source.url
     }
 
-    // Retoma de onde parou
-    const saved = progressFor(String(title?.tmdb_id ?? ''))
+    // Retoma de onde parou — exceto quando o cliente escolheu "Assistir do início".
+    const saved = fromStart ? null : progressFor(String(title?.tmdb_id ?? ''))
     if (saved && saved.position_seconds > 5) {
       const onMeta = () => {
         if (video.duration && saved.position_seconds < video.duration - 10) {
@@ -202,7 +232,7 @@ export function PlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source])
 
-  // Salva progresso periodicamente
+  // Salva progresso periodicamente — modo DIRETO (posição real do <video>)
   useEffect(() => {
     if (!user || !title || source?.mode !== 'direct') return
     const id = setInterval(() => {
@@ -219,6 +249,53 @@ export function PlayerPage() {
       })
     }, 5000)
     return () => clearInterval(id)
+  }, [user, title, source, type, season, episode, saveProgress])
+
+  /**
+   * Salva progresso periodicamente — modo EMBED.
+   *
+   * A posição real do vídeo está dentro de um iframe de outro domínio e não é
+   * legível (ver comentário de EMBED_TICK_MS). Contamos o tempo decorrido com a
+   * aba visível e gravamos a cada 15 s. `duration` fica 0 porque não a
+   * conhecemos: o histórico mostra "assistindo" em vez de uma porcentagem
+   * inventada.
+   *
+   * Só grava quando há tempo real decorrido — nunca inventa progresso para
+   * quem abriu a página e saiu.
+   */
+  useEffect(() => {
+    if (!user || !title || source?.mode !== 'embed') return
+
+    embedElapsed.current = 0
+    const tick = setInterval(() => {
+      if (document.visibilityState === 'visible') embedElapsed.current += EMBED_TICK_MS / 1000
+    }, EMBED_TICK_MS)
+
+    const save = setInterval(() => {
+      if (embedElapsed.current < 5) return
+      void saveProgress({
+        title,
+        season: type === 'tv' ? season : null,
+        episode: type === 'tv' ? episode : null,
+        position: embedElapsed.current,
+        duration: 0,
+      })
+    }, SAVE_INTERVAL)
+
+    return () => {
+      clearInterval(tick)
+      clearInterval(save)
+      // Grava o que já foi assistido ao sair da página.
+      if (embedElapsed.current >= 5) {
+        void saveProgress({
+          title,
+          season: type === 'tv' ? season : null,
+          episode: type === 'tv' ? episode : null,
+          position: embedElapsed.current,
+          duration: 0,
+        })
+      }
+    }
   }, [user, title, source, type, season, episode, saveProgress])
 
   // Salva ao sair
