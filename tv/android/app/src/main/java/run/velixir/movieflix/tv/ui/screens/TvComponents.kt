@@ -133,7 +133,7 @@ fun TvRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(items, key = { "${it.type}-${it.tmdbId}" }) { t ->
-                TvPosterCard(t) { onItemClick(t) }
+                TvPosterCard(t, onClick = { onItemClick(t) })
             }
         }
     }
