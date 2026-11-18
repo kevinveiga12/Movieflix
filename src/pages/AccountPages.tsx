@@ -123,6 +123,7 @@ function TrialSection({ email, name }: { email: string | null | undefined; name?
           href={whatsappUrl(trialRequestMessage(email, name))}
           target="_blank"
           rel="noopener noreferrer"
+          style={{ height: 44, whiteSpace: 'nowrap' }}
         >
           Pedir código no WhatsApp
         </a>
@@ -132,19 +133,28 @@ function TrialSection({ email, name }: { email: string | null | undefined; name?
           style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}
         >
           <div className="field" style={{ margin: 0, minWidth: 150 }}>
-            <label htmlFor="trial-code">Código de 6 dígitos</label>
+            <label htmlFor="trial-code" className="sr-only">
+              Código de 6 dígitos
+            </label>
             <input
               id="trial-code"
               className="input"
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={6}
-              placeholder="000000"
+              placeholder="Código de 6 dígitos"
+              aria-label="Código de 6 dígitos"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              style={{ height: 44 }}
             />
           </div>
-          <button className="btn btn--outline" type="submit" disabled={busy || code.length !== 6}>
+          <button
+            className="btn btn--outline"
+            type="submit"
+            disabled={busy || code.length !== 6}
+            style={{ height: 44, whiteSpace: 'nowrap' }}
+          >
             {busy ? 'Validando…' : 'Confirmar código'}
           </button>
         </form>
