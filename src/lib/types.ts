@@ -22,12 +22,73 @@ export interface Title {
   episodes?: number
   episodes_available?: string[]
   dublado_ptbr?: boolean
+  /** Plano exigido para reproduzir: 'simple' | 'standard' | 'premium'. */
+  required_plan?: string | null
+  /** 'database' = cadastrado no painel e com fonte real; ausente = só metadados. */
+  source?: 'database'
+}
+
+export interface Plan {
+  id: string
+  name: string
+  code: string
+  description: string | null
+  price_cents: number
+  price_label?: string
+  features: string[] | null
+  duration_days: number
+  is_active: boolean
+  whatsapp_url?: string
+}
+
+export interface Subscription {
+  id?: string
+  user_id?: string
+  plan_id?: string | null
+  plan_code: string | null
+  status: string
+  expires_at: string | null
+  active?: boolean
+  plan_label?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface DbEpisode {
+  id: number
+  season_id: number
+  episode_number: number
+  title: string | null
+  description: string | null
+  video_url: string | null
+  duration_seconds: number | null
+  thumbnail_url: string | null
+}
+
+export interface DbSeason {
+  id: number
+  season_number: number
+  title: string | null
+  poster_url: string | null
+  episodes: DbEpisode[]
+}
+
+/** Resposta de POST /api/playback/authorize */
+export interface PlaybackAuth {
+  allowed: boolean
+  title?: { tmdb_id: number; title: string; quality: string | null }
+  reason?: 'unauthenticated' | 'no_subscription' | 'plan_too_low' | 'no_source' | 'not_in_catalog' | 'episode_not_found' | 'bad_request' | 'episode_required'
+  message?: string
+  source?: { url: string; label: string | null; mode: 'direct' | 'embed' }
+  plan?: { code: string | null; label: string; expires_at: string | null }
+  requiredPlan?: string | null
+  subscription?: { plan_code: string | null; status: string; expires_at: string | null } | null
 }
 
 export interface Profile {
   id: string
   email: string | null
-  full_name: string | null
+  name: string | null
   avatar_url: string | null
   is_admin: boolean
   created_at: string

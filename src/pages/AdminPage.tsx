@@ -21,7 +21,7 @@ interface Stats {
 interface AdminUser {
   id: string
   email: string | null
-  full_name: string | null
+  name: string | null
   is_admin: boolean
   created_at: string
 }
@@ -248,10 +248,10 @@ export function AdminPage() {
           {users.map((u) => (
             <div key={u.id} className="episode" style={{ cursor: 'default' }}>
               <div className="episode-num" style={{ background: 'rgba(139,92,246,.14)', color: '#c4b5fd' }}>
-                {(u.full_name || u.email || '?').charAt(0).toUpperCase()}
+                {(u.name || u.email || '?').charAt(0).toUpperCase()}
               </div>
               <div className="episode-info">
-                <div className="episode-title">{u.full_name || 'Sem nome'}</div>
+                <div className="episode-title">{u.name || 'Sem nome'}</div>
                 <div className="episode-sub">
                   {u.email} · desde {new Date(u.created_at).toLocaleDateString('pt-BR')}
                 </div>

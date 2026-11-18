@@ -12,6 +12,8 @@ import { SignupPage } from './pages/SignupPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordPages'
 import { FavoritesPage, HistoryPage, ProfilePage } from './pages/AccountPages'
 import { SettingsPage, DownloadPage } from './pages/SettingsPages'
+import { PlansPage } from './pages/PlansPage'
+import { SeriesPage } from './pages/SeriesPage'
 
 // Player e admin são pesados — carregados sob demanda.
 const PlayerPage = lazy(() => import('./pages/PlayerPage').then((m) => ({ default: m.PlayerPage })))
@@ -69,6 +71,7 @@ export default function App() {
                   <Route path="/series" element={<CatalogPage kind="tv" />} />
                   <Route path="/pesquisa" element={<SearchPage />} />
                   <Route path="/titulo/:type/:id" element={<TitleDetailPage />} />
+                  <Route path="/serie/:id" element={<SeriesPage />} />
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/cadastro" element={<SignupPage />} />
                   <Route path="/recuperar-senha" element={<ForgotPasswordPage />} />
@@ -77,6 +80,7 @@ export default function App() {
                   <Route path="/historico" element={<HistoryPage />} />
                   <Route path="/perfil" element={<ProfilePage />} />
                   <Route path="/configuracoes" element={<SettingsPage />} />
+                  <Route path="/planos" element={<PlansPage />} />
                   <Route path="/baixar-app" element={<DownloadPage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/tv" element={<Navigate to="/baixar-app" replace />} />

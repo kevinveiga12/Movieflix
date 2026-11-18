@@ -9,6 +9,10 @@ import { fileURLToPath } from 'node:url'
 import { adminRouter } from './routes/admin.js'
 import { catalogRouter } from './routes/catalog.js'
 import { tmdbRouter } from './routes/tmdb.js'
+import { accessRouter } from './routes/access.js'
+import { dbCatalogRouter } from './routes/db-catalog.js'
+import { plansRouter } from './routes/plans.js'
+import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
 
 dotenv.config()
 
@@ -57,19 +61,39 @@ app.use(
   }),
 )
 
-app.get('/api/health', (_req, res) => {
+// Checagens de configuração expostas aqui para diagnosticar produção sem
+// precisar de acesso ao painel. Mostra só SE a variável existe, nunca o valor.
+app.get('/api/health', async (_req, res) => {
+  const stats = hasDbCatalog ? await catalogStats() : null
   res.json({
     status: 'ok',
     service: 'movieflix',
     version: '2.0.0',
     startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
+    node: process.version,
+    config: {
+      supabaseUrl: Boolean(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL),
+      supabaseAnon: Boolean(process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY),
+      serviceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      tmdb: Boolean(process.env.TMDB_API_KEY),
+    },
+    catalog: stats,
   })
+})
+
+app.get('/api/health/catalog', async (_req, res) => {
+  const [stats, orphans] = await Promise.all([catalogStats(), orphanSeasons()])
+  res.json({ catalog: stats, orphanSeasons: orphans })
 })
 
 app.use('/api/catalog', catalogRouter)
 app.use('/api/tmdb', tmdbRouter)
 app.use('/api/admin', adminRouter)
+app.use('/api/db', dbCatalogRouter)
+app.use('/api/plans', plansRouter)
+// Autorização de reprodução e assinatura (rotas /playback/authorize e /subscription).
+app.use('/api', accessRouter)
 
 // Frontend estático (build do Vite)
 const dist = path.join(__dirname, '..', 'dist')

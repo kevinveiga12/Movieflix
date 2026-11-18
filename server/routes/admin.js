@@ -36,7 +36,7 @@ router.get('/users', async (req, res, next) => {
     const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200)
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, email, full_name, is_admin, created_at')
+      .select('id, email, name, is_admin, created_at')
       .order('created_at', { ascending: false })
       .limit(limit)
     if (error) return res.status(500).json({ error: error.message })

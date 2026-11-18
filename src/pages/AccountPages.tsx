@@ -188,13 +188,13 @@ export function ProfilePage() {
   const navigate = useNavigate()
   const { favorites } = useFavorites()
   const { history } = useHistory()
-  const [name, setName] = useState(profile?.full_name ?? '')
+  const [name, setName] = useState(profile?.name ?? '')
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    setName(profile?.full_name ?? '')
-  }, [profile?.full_name])
+    setName(profile?.name ?? '')
+  }, [profile?.name])
 
   if (!user) {
     return (
@@ -213,7 +213,7 @@ export function ProfilePage() {
     )
   }
 
-  const initial = (profile?.full_name || user.email || '?').charAt(0).toUpperCase()
+  const initial = (profile?.name || user.email || '?').charAt(0).toUpperCase()
 
   return (
     <div className="page" style={{ paddingTop: 32, maxWidth: 820 }}>
@@ -227,7 +227,7 @@ export function ProfilePage() {
             <div className="avatar-lg">{initial}</div>
             <div>
               <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                {profile?.full_name || 'Sem nome'}
+                {profile?.name || 'Sem nome'}
               </div>
               <div className="muted" style={{ fontSize: '0.87rem' }}>
                 {user.email}
@@ -281,7 +281,7 @@ export function ProfilePage() {
           onSubmit={async (e) => {
             e.preventDefault()
             setBusy(true)
-            const { error } = await updateProfile({ full_name: name.trim() })
+            const { error } = await updateProfile({ name: name.trim() })
             setBusy(false)
             if (!error) {
               setSaved(true)

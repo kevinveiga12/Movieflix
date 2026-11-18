@@ -9,6 +9,7 @@ const LINKS = [
   { to: '/series', label: 'Séries', icon: TvIcon },
   { to: '/favoritos', label: 'Favoritos', icon: HeartIcon },
   { to: '/historico', label: 'Histórico', icon: ClockIcon },
+  { to: '/planos', label: 'Planos', icon: UserIcon },
 ]
 
 export function Navbar() {
@@ -27,7 +28,7 @@ export function Navbar() {
   const isHome = pathname === '/'
   const transparent = isHome && !scrolled
 
-  const initial = (profile?.full_name || user?.email || '?').trim().charAt(0).toUpperCase()
+  const initial = (profile?.name || user?.email || '?').trim().charAt(0).toUpperCase()
 
   return (
     <>

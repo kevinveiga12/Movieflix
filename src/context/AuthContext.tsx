@@ -18,7 +18,7 @@ interface AuthState {
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<{ error: string | null }>
   updatePassword: (password: string) => Promise<{ error: string | null }>
-  updateProfile: (patch: Partial<Pick<Profile, 'full_name' | 'avatar_url'>>) => Promise<{ error: string | null }>
+  updateProfile: (patch: Partial<Pick<Profile, 'name' | 'avatar_url'>>) => Promise<{ error: string | null }>
   refreshProfile: () => Promise<void>
 }
 
@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadProfile(userId: string) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, full_name, avatar_url, is_admin, created_at')
+      .select('id, email, name, avatar_url, is_admin, created_at')
       .eq('id', userId)
       .maybeSingle()
     if (error) {
@@ -51,7 +51,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null)
       return
     }
-    setProfile((data as Profile) ?? null)
+
+    // O banco NÃO tem trigger que crie `profiles` no signup (verificado em
+    // 2026-11-18: usuário novo fica sem linha). Sem perfil, o painel admin não
+    // reconhece ninguém. Criamos a linha do PRÓPRIO usuário — a RLS permite
+    // INSERT do próprio id, e `is_admin` nunca é enviado aqui.
+    if (!data) {
+      const { data: created, error: insErr } = await supabase
+        .from('profiles')
+        .insert({ id: userId })
+        .select('id, email, name, avatar_url, is_admin, created_at')
+        .maybeSingle()
+      if (insErr) {
+        console.warn('[MovieFlix] perfil não criado:', insErr.message)
+        setProfile(null)
+        return
+      }
+      setProfile((created as Profile) ?? null)
+      return
+    }
+
+    setProfile(data as Profile)
   }
 
   useEffect(() => {

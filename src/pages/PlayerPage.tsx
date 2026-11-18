@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import Hls from 'hls.js'
 import { loadCatalog, getById } from '../lib/catalog'
-import { movieSource, episodeSource, nextEpisode, formatTime, type PlaybackSource } from '../lib/player'
+import { nextEpisode, formatTime, type PlaybackSource } from '../lib/player'
+import { authorizePlayback } from '../lib/access'
+import { PlaybackGate } from '../components/PlaybackGate'
+import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useHistory } from '../lib/userData'
 import {
@@ -33,6 +36,11 @@ export function PlayerPage() {
   const [ready, setReady] = useState(false)
   const [source, setSource] = useState<PlaybackSource | null>(null)
   const [notFound, setNotFound] = useState(false)
+  // Resultado da autorização do SERVIDOR. null = ainda verificando.
+  const [auth, setAuth] = useState<PlaybackAuth | null>(null)
+  const [authChecking, setAuthChecking] = useState(true)
+  // Incrementar força uma nova checagem (botão "Verificar novamente").
+  const [authAttempt, setAuthAttempt] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -50,31 +58,80 @@ export function PlayerPage() {
   const [error, setError] = useState<string | null>(null)
   const [subsOn, setSubsOn] = useState(false)
 
-  const title = useMemo(() => (ready ? getById(id ?? '', type) : undefined), [ready, id, type])
+  // Título em exibição. Prefere o catálogo estático (metadados completos) e cai
+  // para o título da resposta autorizada quando o item só existe no banco.
+  const title = useMemo<Title | undefined>(() => {
+    if (!ready) return undefined
+    const found = getById(id ?? '', type)
+    if (found) return found
+    if (auth?.allowed && auth.title) {
+      return {
+        id: String(auth.title.tmdb_id),
+        tmdb_id: auth.title.tmdb_id,
+        title: auth.title.title,
+        description: '',
+        poster_url: '',
+        backdrop_url: '',
+        video_url: '',
+        vote_average: null,
+        popularity: 0,
+        release_date: '',
+        category: '',
+        language: '',
+        quality: auth.title.quality ?? '',
+        type,
+        media_type: type,
+        year: '',
+        duration: null,
+      }
+    }
+    return undefined
+  }, [ready, id, type, auth])
 
   useEffect(() => {
     loadCatalog().then(() => setReady(true))
   }, [])
 
-  // Resolve a fonte de reprodução
+  // ── GATE REAL DE REPRODUÇÃO ─────────────────────────────────────────
+  // O navegador não decide nada. Envia o token e o título; o servidor valida
+  // conta, assinatura, validade e plano exigido, e só então devolve a URL.
+  // Sem resposta autorizada, não existe fonte para tocar.
   useEffect(() => {
-    if (!ready) return
-    if (!title) {
-      setNotFound(true)
-      return
+    if (!ready || !id) return
+    let cancelled = false
+
+    setAuthChecking(true)
+    setAuth(null)
+    setSource(null)
+    setError(null)
+    setNotFound(false)
+
+    authorizePlayback({
+      tmdbId: id,
+      season: type === 'tv' ? season : undefined,
+      episode: type === 'tv' ? episode : undefined,
+    }).then((result) => {
+      if (cancelled) return
+      setAuth(result)
+      setAuthChecking(false)
+
+      if (result.allowed && result.source) {
+        setSource({
+          mode: result.source.mode,
+          url: result.source.url,
+          label: result.source.label ?? undefined,
+        })
+        setLoading(true)
+      } else {
+        setLoading(false)
+        if (result.reason === 'not_in_catalog') setNotFound(true)
+      }
+    })
+
+    return () => {
+      cancelled = true
     }
-    const src = type === 'tv' ? episodeSource(title, season, episode) : movieSource(title)
-    if (!src) {
-      setError(
-        type === 'tv'
-          ? 'Este episódio não está disponível.'
-          : 'Este título ainda não tem fonte de reprodução configurada.',
-      )
-      setLoading(false)
-      return
-    }
-    setSource(src)
-  }, [ready, title, type, season, episode])
+  }, [ready, id, type, season, episode, authAttempt])
 
   // Inicializa o <video> para fontes diretas
   useEffect(() => {
@@ -255,6 +312,27 @@ export function PlayerPage() {
   const pct = duration ? (current / duration) * 100 : 0
   const bufPct = duration ? (buffered / duration) * 100 : 0
 
+  // Verificando autorização — ainda não há decisão para mostrar.
+  if (authChecking) {
+    return (
+      <div className="player-page">
+        <div className="player-spinner" />
+      </div>
+    )
+  }
+
+  // Negado: mostra o motivo e a saída (criar conta, assinar, ver planos).
+  if (auth && !auth.allowed) {
+    return (
+      <PlaybackGate
+        auth={auth}
+        titleName={title?.title}
+        onRetry={() => setAuthAttempt((n) => n + 1)}
+        backTo={id ? `/titulo/${type}/${id}` : '/'}
+      />
+    )
+  }
+
   if (notFound) {
     return (
       <div className="player-page">
@@ -318,14 +396,29 @@ export function PlayerPage() {
         )}
 
         {source?.mode === 'embed' && (
-          <iframe
-            src={source.url}
-            title={title?.title ?? 'Player'}
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            allowFullScreen
-            referrerPolicy="origin"
-            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups"
-          />
+          <>
+            {/*
+              Fonte externa (embed). O requisito do projeto é reproduzir DENTRO
+              do MovieFlix, sem anúncios nem redirecionamentos. Um embed de
+              terceiro não garante isso — então avisamos em vez de fingir que
+              está tudo certo. O administrador deve cadastrar um arquivo
+              próprio (.mp4/.m3u8) para o título sair deste modo.
+            */}
+            <div className="player-embed-warning">
+              <strong>Fonte externa</strong> — este título usa um player de
+              terceiros. Se houver anúncios ou redirecionamento, é o provedor
+              externo, não o MovieFlix. Para reprodução dentro da plataforma, o
+              administrador precisa cadastrar um arquivo próprio (.mp4 ou .m3u8).
+            </div>
+            <iframe
+              src={source.url}
+              title={title?.title ?? 'Player'}
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              allowFullScreen
+              referrerPolicy="origin"
+              sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups"
+            />
+          </>
         )}
 
         {loading && source?.mode === 'direct' && (
