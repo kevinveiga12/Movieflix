@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.ui.screens.TvAccountScreen
+import run.velixir.movieflix.tv.ui.screens.TvAdminScreen
 import run.velixir.movieflix.tv.ui.screens.TvCatalogScreen
 import run.velixir.movieflix.tv.ui.screens.TvDetailScreen
 import run.velixir.movieflix.tv.ui.screens.TvFavoritesScreen
