@@ -11,6 +11,11 @@ set -u
 OUT="${1:-screenshots}"
 mkdir -p "$OUT"
 
+# O emulador as vezes mostra "Pixel Launcher isn't responding" por cima do app.
+# Nao e defeito do MovieFlix, mas polui a evidencia visual.
+adb shell settings put global hide_error_dialogs 1 >/dev/null 2>&1 || true
+adb shell settings put secure anr_show_background 0 >/dev/null 2>&1 || true
+
 # Tamanho real da tela do emulador (ex.: "1080x2400").
 SIZE=$(adb shell wm size | sed 's/.*: //' | tr -d '\r')
 W=${SIZE%x*}
@@ -28,7 +33,7 @@ echo "tela: ${W}x${H}"
 Y=$((H - 150))
 echo "tocando na barra em y=$Y"
 
-# Aba 0 (Início) ja foi capturada como mobile-home.png.
+# Aba 0 (Inicio) ja foi capturada como mobile-home.png.
 i=0
 for TAB in filmes series buscar conta; do
   i=$((i + 1))
@@ -41,11 +46,19 @@ for TAB in filmes series buscar conta; do
 done
 
 # Dentro de Conta, rola para baixo para mostrar o menu completo
-# (Perfis, Favoritos, Histórico, Planos, Configurações).
+# (Perfis, Favoritos, Historico, Planos, Configuracoes).
 echo "=== rolando a tela de Conta ==="
 adb shell input swipe $((W / 2)) $((H * 3 / 4)) $((W / 2)) $((H / 3)) 300
 sleep 2
 adb exec-out screencap -p > "$OUT/mobile-conta-menu.png"
 python3 scripts/check-screenshot.py "$OUT/mobile-conta-menu.png" "mobile conta menu"
+
+# Perfis: a partir do menu de Conta, o primeiro item e "Perfis". Tocar nele
+# abre a tela de perfis — que antes nao tinha captura nenhuma.
+echo "=== abrindo Perfis ==="
+adb shell input tap $((W / 2)) $((H * 2 / 5))
+sleep 3
+adb exec-out screencap -p > "$OUT/mobile-perfis.png"
+python3 scripts/check-screenshot.py "$OUT/mobile-perfis.png" "mobile perfis"
 
 echo "OK: abas do mobile capturadas"

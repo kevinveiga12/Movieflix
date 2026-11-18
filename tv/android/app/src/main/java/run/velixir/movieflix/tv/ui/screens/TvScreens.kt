@@ -987,6 +987,88 @@ fun TvSettingsScreen(vm: TvViewModel) {
     }
 }
 
+/**
+ * Perfis — a rota /perfil do site.
+ *
+ * O site usa UM perfil por conta (tabela `profiles`), não vários perfis por
+ * assinatura como a Netflix. Então mostramos o perfil real da conta logada e
+ * o estado de acesso dela — não inventamos perfis que não existem no banco.
+ */
+@Composable
+fun TvProfilesScreen(vm: TvViewModel, onLogin: () -> Unit) {
+    val s by vm.state.collectAsState()
+
+    Column(Modifier.fillMaxSize().padding(48.dp)) {
+        TvPageTitle("Perfis")
+        Spacer(Modifier.height(8.dp))
+
+        if (!s.loggedIn) {
+            Text(
+                "Entre na sua conta para gerenciar perfis.",
+                color = MfColors.TextMuted,
+                fontFamily = MfSans,
+                fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(20.dp))
+            TvActionButton("Entrar", primary = true) { onLogin() }
+            return@Column
+        }
+
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(MfColors.BgCard)
+                .border(2.dp, MfColors.Red, RoundedCornerShape(16.dp))
+                .padding(24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .width(72.dp)
+                    .height(72.dp)
+                    .clip(RoundedCornerShape(36.dp))
+                    .background(MfColors.Red),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    (s.email ?: "?").trim().firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    fontFamily = MfSans,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Spacer(Modifier.width(22.dp))
+            Column {
+                Text(
+                    s.email ?: "",
+                    color = MfColors.Text,
+                    fontFamily = MfSans,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Perfil principal",
+                    color = MfColors.TextMuted,
+                    fontFamily = MfSans,
+                    fontSize = 14.sp,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "O MovieFlix usa um perfil por conta. Para assistir em outra pessoa, " +
+                "use outra conta — favoritos e histórico são compartilhados entre " +
+                "site, celular e TV.",
+            color = MfColors.TextDim,
+            fontFamily = MfSans,
+            fontSize = 14.sp,
+        )
+    }
+}
+
 @Composable
 private fun TvSettingRow(label: String, value: String) {
     var focused by remember { mutableStateOf(false) }

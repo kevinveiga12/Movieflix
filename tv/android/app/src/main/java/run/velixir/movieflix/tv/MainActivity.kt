@@ -38,6 +38,7 @@ import run.velixir.movieflix.tv.ui.screens.TvHomeScreen
 import run.velixir.movieflix.tv.ui.screens.TvLoginScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlansScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlayerScreen
+import run.velixir.movieflix.tv.ui.screens.TvProfilesScreen
 import run.velixir.movieflix.tv.ui.screens.TvSearchScreen
 import run.velixir.movieflix.tv.ui.screens.TvSettingsScreen
 import run.velixir.movieflix.tv.ui.screens.TvSidebar
@@ -71,6 +72,7 @@ sealed interface TvRoute {
     data object History : TvRoute
     data object Plans : TvRoute
     data object Account : TvRoute
+    data object Profiles : TvRoute
     data object Settings : TvRoute
     data object Login : TvRoute
     data class Detail(val title: Title) : TvRoute
@@ -121,6 +123,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                     TvRoute.History -> "history"
                     TvRoute.Plans -> "plans"
                     TvRoute.Account, TvRoute.Login -> "account"
+                    TvRoute.Profiles -> "profiles"
                     TvRoute.Settings -> "settings"
                     is TvRoute.Detail -> "home"
                     else -> "home"
@@ -135,6 +138,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                         "favorites" -> TvRoute.Favorites
                         "history" -> TvRoute.History
                         "plans" -> TvRoute.Plans
+                        "profiles" -> if (s.loggedIn) TvRoute.Profiles else TvRoute.Login
                         "settings" -> TvRoute.Settings
                         "account" -> if (s.loggedIn) TvRoute.Account else TvRoute.Login
                         else -> TvRoute.Home
@@ -152,6 +156,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                         TvRoute.History -> TvHistoryScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.Plans -> TvPlansScreen(vm)
                         TvRoute.Account -> TvAccountScreen(vm) { route = TvRoute.Login }
+                        TvRoute.Profiles -> TvProfilesScreen(vm) { route = TvRoute.Login }
                         TvRoute.Settings -> TvSettingsScreen(vm)
                         TvRoute.Login -> TvLoginScreen(vm) { route = TvRoute.Account }
                         is TvRoute.Detail -> TvDetailScreen(

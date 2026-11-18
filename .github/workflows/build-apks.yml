@@ -21,6 +21,10 @@ on:
       - 'tv/android/**'
       - 'scripts/verify-apk.py'
       - 'scripts/check-screenshot.py'
+      - 'scripts/find-menu-rows.py'
+      - 'scripts/capture-tv-tabs.sh'
+      - 'scripts/capture-mobile-tabs.sh'
+      - 'scripts/shot.sh'
       - '.github/workflows/build-apks.yml'
 
 jobs:
@@ -126,6 +130,11 @@ jobs:
           script: |
             mkdir -p screenshots
 
+            # Dialogos de erro do sistema ("Pixel Launcher isn't responding")
+            # aparecem por cima do app no emulador e poluem a evidencia.
+            adb shell settings put global hide_error_dialogs 1 || true
+            adb shell settings put secure anr_show_background 0 || true
+
             echo "=== Instalando APK mobile ==="
             adb install -r out/movieflix-mobile-release.apk
 
@@ -182,6 +191,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             mkdir -p screenshots
+
+            adb shell settings put global hide_error_dialogs 1 || true
+            adb shell settings put secure anr_show_background 0 || true
 
             echo "=== Instalando APK TV ==="
             adb install -r out/movieflix-tv-release.apk

@@ -8,17 +8,25 @@
 #  2. O passo "Botao Voltar" rodava antes e, na Home, o BACK saia do app — a
 #     captura da aba 1 saiu com o launcher do Android. Agora o app e relancado.
 #  3. DPAD_DOWN a partir do hero nao entrava no menu: o foco ficava no
-#     conteudo. E os 10 itens do menu nao cabiam em 1080px (o item 10 ficava
-#     fora da tela), o que tambem e um bug de design — corrigido reduzindo o
-#     padding vertical de 11dp para 7dp.
+#     conteudo. Por isso o clique passou a ser por COORDENADA.
+#  4. As coordenadas eram FIXAS (228, passo 84). Quando o menu ganhou o item
+#     "Perfis" e o padding/fonte mudaram para caber 11 itens, todas as
+#     coordenadas antigas passaram a apontar para o item errado — a captura da
+#     aba "Configuracoes" saiu mostrando a tela de login.
 #
-# Agora o clique e por COORDENADA no menu lateral, que e deterministico e nao
-# depende de onde o foco estava. O D-pad continua sendo testado a parte, no
-# passo "foco do D-pad" do workflow.
+# Agora a posicao de cada item e MEDIDA na imagem por find-menu-rows.py, que
+# detecta as faixas de texto claro na coluna do menu. Se o layout mudar de
+# novo, a captura continua correta sem ninguem recalcular nada.
 set -u
 
 OUT="${1:-screenshots}"
 mkdir -p "$OUT"
+
+# O emulador as vezes mostra "Pixel Launcher isn't responding" por cima do app.
+# Nao e defeito do MovieFlix, mas polui a evidencia visual. Desligar os
+# dialogos de erro do sistema resolve.
+adb shell settings put global hide_error_dialogs 1 >/dev/null 2>&1 || true
+adb shell settings put secure anr_show_background 0 >/dev/null 2>&1 || true
 
 echo "=== relancando o app de TV ==="
 adb shell am force-stop run.velixir.movieflix.tv
@@ -26,19 +34,32 @@ sleep 2
 adb shell am start -n run.velixir.movieflix.tv/.MainActivity
 sleep 12
 
-# Geometria do menu lateral, MEDIDA no screenshot real de 1920x1080
-# (docs/apps-evidencias/tv-real-home.png) por deteccao das faixas de texto
-# claro na coluna do menu. Os 10 itens ficam em:
-#   228 315 399 483 567 651 735 819 903 987
-# ou seja: primeiro em 228, passo de 84px. x=110 cai sobre o texto.
+# Captura de referencia para medir o menu.
+adb exec-out screencap -p > "$OUT/_tv-menu-ref.png" 2>/dev/null
+
+# Mede as linhas do menu. O --min-y 190 corta o cabecalho (logo + subtitulo).
+ROWS=$(python3 scripts/find-menu-rows.py "$OUT/_tv-menu-ref.png" --min-y 190)
+COUNT=$(echo "$ROWS" | grep -c . || true)
+echo "=== itens de menu detectados: $COUNT ==="
+echo "$ROWS" | tr '\n' ' '
+echo
+
+if [ "$COUNT" -lt 11 ]; then
+  echo "AVISO: esperados 11 itens (Inicio..Configuracoes), detectados $COUNT."
+  echo "       O menu pode estar cortando itens — verificar o layout."
+fi
+
+# x=110 cai sobre o texto do menu (o menu tem 232dp de largura).
 X=110
-Y0=228
-STEP=84
 
 N=0
-for LABEL in filmes series categorias buscar favoritos historico planos conta configuracoes; do
+for LABEL in filmes series categorias buscar favoritos historico planos conta perfis configuracoes; do
   N=$((N + 1))
-  Y=$((Y0 + (N - 1) * STEP))
+  Y=$(echo "$ROWS" | sed -n "${N}p")
+  if [ -z "$Y" ]; then
+    echo "AVISO: sem coordenada para a aba $LABEL (item $N) — pulando"
+    continue
+  fi
   echo "=== aba $LABEL em ($X,$Y) ==="
   adb shell input tap "$X" "$Y"
   sleep 4
@@ -46,4 +67,5 @@ for LABEL in filmes series categorias buscar favoritos historico planos conta co
   python3 scripts/check-screenshot.py "$OUT/tv-tab-$N-$LABEL.png" "tv $LABEL"
 done
 
+rm -f "$OUT/_tv-menu-ref.png"
 echo "OK: abas da TV capturadas"

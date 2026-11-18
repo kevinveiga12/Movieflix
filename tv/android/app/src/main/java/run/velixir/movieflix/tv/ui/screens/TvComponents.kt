@@ -295,7 +295,13 @@ fun TvRow(
  * Menu lateral fixo — navegação principal da TV, com a logo real do site.
  *
  * Lista TODAS as abas do site: Início, Filmes, Séries, Categorias, Buscar,
- * Favoritos, Histórico, Planos, Conta e Configurações.
+ * Favoritos, Histórico, Planos, Conta, Perfis e Configurações.
+ *
+ * São 11 itens. Em 1080p o menu tem 1080dp de altura e o cabeçalho (logo +
+ * subtítulo) consome ~82dp. Com o padding antigo (7dp) cada item ocupava
+ * ~42dp e o 11º item encostava na borda inferior. Reduzido para 5dp de
+ * padding e 12sp de fonte: cada item fica em ~36dp, 11 × 36 = 396dp, com
+ * folga de sobra mesmo em 720p.
  */
 @Composable
 fun TvSidebar(
@@ -313,6 +319,7 @@ fun TvSidebar(
         "history" to "Histórico",
         "plans" to "Planos",
         "account" to "Conta",
+        "profiles" to "Perfis",
         "settings" to "Configurações",
     )
 
@@ -357,7 +364,7 @@ fun TvSidebar(
                     )
                     .onFocusChanged { focused = it.isFocused }
                     .clickable { onSelect(key) }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                    .padding(horizontal = 14.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Barrinha de ativo, como o .nav-link.active do site.
@@ -376,7 +383,7 @@ fun TvSidebar(
                     label,
                     color = if (focused || active) Color.White else MfColors.TextMuted,
                     fontFamily = MfSans,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = if (focused || active) FontWeight.Bold else FontWeight.Normal,
                 )
             }
