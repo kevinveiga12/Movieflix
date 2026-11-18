@@ -100,8 +100,8 @@ export function publicCodes(user) {
  * Gera um código novo para o cliente.
  * Devolve o código em texto puro UMA ÚNICA VEZ — depois só existe o hash.
  */
-export async function generateTrialCode({ userId, email, createdBy }) {
-  const admin = getAdminClient()
+export async function generateTrialCode({ userId, email, createdBy, admin: injected }) {
+  const admin = injected ?? getAdminClient()
   if (!admin) return { ok: false, reason: 'service_role_ausente' }
 
   const { data, error } = await admin.auth.admin.getUserById(userId)
@@ -148,8 +148,8 @@ export async function generateTrialCode({ userId, email, createdBy }) {
  * Motivos: invalid | used | expired | too_many_attempts | already_active |
  *          user_not_found | service_role_ausente | write_failed
  */
-export async function redeemTrialCode({ userId, code }) {
-  const admin = getAdminClient()
+export async function redeemTrialCode({ userId, code, admin: injected }) {
+  const admin = injected ?? getAdminClient()
   if (!admin) return { ok: false, reason: 'service_role_ausente' }
 
   const clean = String(code ?? '').replace(/\D/g, '')
