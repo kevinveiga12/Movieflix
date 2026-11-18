@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { loadCatalog, getAll, getById } from '../lib/catalog'
-import { supabase } from '../lib/supabase'
+import { loadCatalog, getAll } from '../lib/catalog'
 import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon } from '../components/Icons'
 import type { Title } from '../lib/types'
 
-type Tab = 'overview' | 'catalog' | 'users'
+type Tab = 'overview' | 'catalog' | 'users' | 'plans'
 
 interface Stats {
   users: number
@@ -26,13 +25,48 @@ interface AdminUser {
   created_at: string
 }
 
+/** Linha de plano editável no painel. */
+interface PlanRow {
+  code: string
+  name: string
+  price_cents: number
+  discount_3m: number
+  discount_12m: number
+  is_active: boolean
+}
+
+/** Configuração vinda de /api/admin/plans (só o que o painel alterou). */
+type PlanConfig = Record<
+  string,
+  { price_cents?: number; discount_3m?: number; discount_12m?: number; is_active?: boolean }
+>
+
+/**
+ * Configuração canônica — precisa refletir DEFAULT_PLANS de
+ * server/routes/plans.js. Serve só como valor inicial do formulário; o que vale
+ * é o que o servidor devolve em /api/plans depois de salvar.
+ */
+const PLAN_DEFAULTS: PlanRow[] = [
+  { code: 'basico', name: 'Básico', price_cents: 1990, discount_3m: 0.2, discount_12m: 0.5, is_active: true },
+  { code: 'standard', name: 'Médio', price_cents: 2990, discount_3m: 0.2, discount_12m: 0.5, is_active: true },
+  { code: 'premium', name: 'Premium', price_cents: 3990, discount_3m: 0.2, discount_12m: 0.5, is_active: true },
+]
+
+const PERIODS = [
+  { code: '1m', label: '1 mês', days: 30 },
+  { code: '3m', label: '3 meses', days: 90 },
+  { code: '12m', label: '1 ano', days: 365 },
+] as const
+
+const brl = (cents: number) => `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`
+
 export function AdminPage() {
   const { user, profile, loading, session } = useAuth()
-  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('overview')
   const [stats, setStats] = useState<Stats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Title | null>(null)
@@ -57,22 +91,20 @@ export function AdminPage() {
     return data
   }
 
+  async function loadAll() {
+    try {
+      const s = await api('/stats')
+      setStats(s)
+      const u = await api('/users?limit=100')
+      setUsers(u.users ?? [])
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
   useEffect(() => {
     if (!token || !profile?.is_admin) return
-    let alive = true
-    ;(async () => {
-      try {
-        const s = await api('/stats')
-        if (alive) setStats(s)
-        const u = await api('/users?limit=100')
-        if (alive) setUsers(u.users ?? [])
-      } catch (e) {
-        if (alive) setError((e as Error).message)
-      }
-    })()
-    return () => {
-      alive = false
-    }
+    void loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, profile?.is_admin])
 
@@ -142,6 +174,12 @@ export function AdminPage() {
       </div>
 
       {error && <div className="alert alert--error">{error}</div>}
+      {notice && (
+        <div className="alert alert--success">
+          <CheckIcon size={17} />
+          <span>{notice}</span>
+        </div>
+      )}
 
       <div className="filters">
         {(
@@ -149,6 +187,7 @@ export function AdminPage() {
             ['overview', 'Visão geral'],
             ['catalog', 'Catálogo'],
             ['users', 'Usuários'],
+            ['plans', 'Planos'],
           ] as const
         ).map(([k, label]) => (
           <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
@@ -243,23 +282,24 @@ export function AdminPage() {
       )}
 
       {tab === 'users' && (
-        <div className="episode-list">
-          {users.length === 0 && <p className="muted">Nenhum usuário carregado.</p>}
-          {users.map((u) => (
-            <div key={u.id} className="episode" style={{ cursor: 'default' }}>
-              <div className="episode-num" style={{ background: 'rgba(139,92,246,.14)', color: '#c4b5fd' }}>
-                {(u.name || u.email || '?').charAt(0).toUpperCase()}
-              </div>
-              <div className="episode-info">
-                <div className="episode-title">{u.name || 'Sem nome'}</div>
-                <div className="episode-sub">
-                  {u.email} · desde {new Date(u.created_at).toLocaleDateString('pt-BR')}
-                </div>
-              </div>
-              {u.is_admin && <span className="badge badge--red">Admin</span>}
-            </div>
-          ))}
-        </div>
+        <UsersTab
+          users={users}
+          api={api}
+          onChanged={async (msg) => {
+            setNotice(msg)
+            await loadAll()
+          }}
+          onError={(m) => setError(m)}
+          selfId={user.id}
+        />
+      )}
+
+      {tab === 'plans' && (
+        <PlansTab
+          api={api}
+          onSaved={(msg) => setNotice(msg)}
+          onError={(m) => setError(m)}
+        />
       )}
 
       {editing && (
@@ -277,6 +317,387 @@ export function AdminPage() {
         />
       )}
     </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * ABA PLANOS — preço mensal, descontos de 3 meses / 1 ano, ativar-desativar
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function PlansTab({
+  api,
+  onSaved,
+  onError,
+}: {
+  api: (path: string, init?: RequestInit) => Promise<Record<string, unknown>>
+  onSaved: (msg: string) => void
+  onError: (msg: string) => void
+}) {
+  const [rows, setRows] = useState<PlanRow[]>(PLAN_DEFAULTS)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const data = (await api('/plans')) as { plans?: PlanConfig }
+        if (!alive) return
+        const cfg = data.plans ?? {}
+        setRows(
+          PLAN_DEFAULTS.map((d) => {
+            const o = cfg[d.code] ?? {}
+            return {
+              ...d,
+              price_cents: o.price_cents ?? d.price_cents,
+              discount_3m: o.discount_3m ?? d.discount_3m,
+              discount_12m: o.discount_12m ?? d.discount_12m,
+              is_active: o.is_active ?? d.is_active,
+            }
+          }),
+        )
+      } catch (e) {
+        if (alive) onError((e as Error).message)
+      }
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function save(row: PlanRow) {
+    setBusy(row.code)
+    try {
+      await api(`/plans/${row.code}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          price_cents: row.price_cents,
+          discount_3m: row.discount_3m,
+          discount_12m: row.discount_12m,
+          is_active: row.is_active,
+        }),
+      })
+      onSaved(`Plano ${row.name} salvo. A página de planos já mostra o valor novo.`)
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function patch(code: string, p: Partial<PlanRow>) {
+    setRows((rs) => rs.map((r) => (r.code === code ? { ...r, ...p } : r)))
+  }
+
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-title">Preços e descontos</div>
+        <p className="panel-sub">
+          O valor do período é calculado como <strong>mensal × meses × (1 − desconto)</strong>. O
+          desconto é aplicado sobre o valor cheio — o site mostra o preço riscado e a economia.
+        </p>
+
+        <div className="episode-list">
+          {rows.map((r) => {
+            const full3 = r.price_cents * 3
+            const full12 = r.price_cents * 12
+            const p3 = Math.round(full3 * (1 - r.discount_3m))
+            const p12 = Math.round(full12 * (1 - r.discount_12m))
+            return (
+              <div key={r.code} className="episode" style={{ cursor: 'default', flexWrap: 'wrap', gap: 12 }}>
+                <div className="episode-info" style={{ minWidth: 130 }}>
+                  <div className="episode-title">{r.name}</div>
+                  <div className="episode-sub">{r.code}</div>
+                </div>
+
+                <div className="field" style={{ margin: 0, minWidth: 130 }}>
+                  <label htmlFor={`price-${r.code}`}>Mensal (R$)</label>
+                  <input
+                    id={`price-${r.code}`}
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={(r.price_cents / 100).toFixed(2)}
+                    onChange={(e) =>
+                      patch(r.code, { price_cents: Math.round(Number(e.target.value) * 100) || 0 })
+                    }
+                  />
+                </div>
+
+                <div className="field" style={{ margin: 0, minWidth: 110 }}>
+                  <label htmlFor={`d3-${r.code}`}>Desconto 3m (%)</label>
+                  <input
+                    id={`d3-${r.code}`}
+                    className="input"
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="90"
+                    value={Math.round(r.discount_3m * 100)}
+                    onChange={(e) => patch(r.code, { discount_3m: Number(e.target.value) / 100 || 0 })}
+                  />
+                </div>
+
+                <div className="field" style={{ margin: 0, minWidth: 110 }}>
+                  <label htmlFor={`d12-${r.code}`}>Desconto 1 ano (%)</label>
+                  <input
+                    id={`d12-${r.code}`}
+                    className="input"
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="90"
+                    value={Math.round(r.discount_12m * 100)}
+                    onChange={(e) => patch(r.code, { discount_12m: Number(e.target.value) / 100 || 0 })}
+                  />
+                </div>
+
+                <div style={{ minWidth: 190, fontSize: '0.82rem' }} className="muted">
+                  <div>1 mês: {brl(r.price_cents)}</div>
+                  <div>
+                    3 meses: <s>{brl(full3)}</s> {brl(p3)}
+                  </div>
+                  <div>
+                    1 ano: <s>{brl(full12)}</s> {brl(p12)}
+                  </div>
+                </div>
+
+                <label className="inline" style={{ cursor: 'pointer', gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={r.is_active}
+                    onChange={(e) => patch(r.code, { is_active: e.target.checked })}
+                  />
+                  <span style={{ fontSize: '0.85rem' }}>{r.is_active ? 'Ativo' : 'Inativo'}</span>
+                </label>
+
+                <button
+                  className="btn btn--primary btn--sm"
+                  onClick={() => void save(r)}
+                  disabled={busy === r.code}
+                >
+                  <CheckIcon size={15} /> {busy === r.code ? 'Salvando…' : 'Salvar'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * ABA USUÁRIOS — ativar/desativar acesso, conceder plano e ver validade
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function UsersTab({
+  users,
+  api,
+  onChanged,
+  onError,
+  selfId,
+}: {
+  users: AdminUser[]
+  api: (path: string, init?: RequestInit) => Promise<Record<string, unknown>>
+  onChanged: (msg: string) => Promise<void>
+  onError: (msg: string) => void
+  selfId: string
+}) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  // Situação de acesso carregada por usuário (app_metadata).
+  const [access, setAccess] = useState<
+    Record<string, { disabled: boolean; plan_code: string | null; plan_expires_at: string | null }>
+  >({})
+  const [plan, setPlan] = useState<Record<string, string>>({})
+  const [period, setPeriod] = useState<Record<string, string>>({})
+
+  async function loadAccess(id: string) {
+    try {
+      const a = (await api(`/users/${id}/access`)) as {
+        disabled: boolean
+        plan_code: string | null
+        plan_expires_at: string | null
+      }
+      setAccess((m) => ({ ...m, [id]: a }))
+    } catch (e) {
+      onError((e as Error).message)
+    }
+  }
+
+  async function toggle(id: string, disabled: boolean) {
+    setBusy(id)
+    try {
+      await api(`/users/${id}/access`, {
+        method: 'PUT',
+        body: JSON.stringify({ disabled }),
+      })
+      await loadAccess(id)
+      await onChanged(disabled ? 'Acesso desativado.' : 'Acesso reativado.')
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function grant(id: string) {
+    const planCode = plan[id] ?? 'basico'
+    const per = period[id] ?? '1m'
+    setBusy(id)
+    try {
+      const r = (await api(`/users/${id}/plan`, {
+        method: 'POST',
+        body: JSON.stringify({ plan_code: planCode, period: per }),
+      })) as { plan_expires_at?: string }
+      await loadAccess(id)
+      await onChanged(
+        `Plano concedido até ${r.plan_expires_at ? new Date(r.plan_expires_at).toLocaleDateString('pt-BR') : '—'}.`,
+      )
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-title">Usuários</div>
+        <p className="panel-sub">
+          Desativar bloqueia a reprodução na hora (inclusive com plano vigente). Conceder plano
+          grava a validade em <code>app_metadata</code> — a mesma fonte que o servidor confia.
+        </p>
+
+        {users.length === 0 && <p className="muted">Nenhum usuário carregado.</p>}
+
+        <div className="episode-list">
+          {users.map((u) => {
+            const a = access[u.id]
+            const isOpen = openId === u.id
+            return (
+              <div key={u.id} className="episode" style={{ cursor: 'default', flexWrap: 'wrap', gap: 10 }}>
+                <div className="episode-num" style={{ background: 'rgba(139,92,246,.14)', color: '#c4b5fd' }}>
+                  {(u.name || u.email || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="episode-info" style={{ minWidth: 200 }}>
+                  <div className="episode-title">
+                    {u.name || 'Sem nome'}
+                    {u.is_admin && (
+                      <span className="badge badge--red" style={{ marginLeft: 8 }}>
+                        Admin
+                      </span>
+                    )}
+                    {a?.disabled && (
+                      <span className="badge" style={{ marginLeft: 8, background: 'rgba(239,68,68,.2)', color: '#fca5a5' }}>
+                        Desativado
+                      </span>
+                    )}
+                  </div>
+                  <div className="episode-sub">
+                    {u.email} · desde {new Date(u.created_at).toLocaleDateString('pt-BR')}
+                  </div>
+                  {a?.plan_code && (
+                    <div className="episode-sub" style={{ color: 'var(--accent)' }}>
+                      Plano {a.plan_code} até{' '}
+                      {a.plan_expires_at
+                        ? new Date(a.plan_expires_at).toLocaleDateString('pt-BR')
+                        : '—'}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  className="btn btn--ghost btn--sm"
+                  onClick={async () => {
+                    if (isOpen) {
+                      setOpenId(null)
+                    } else {
+                      setOpenId(u.id)
+                      if (!access[u.id]) await loadAccess(u.id)
+                    }
+                  }}
+                >
+                  <SettingsIcon size={15} /> Gerenciar
+                </button>
+
+                {u.id !== selfId && (
+                  <button
+                    className={`btn btn--sm ${a?.disabled ? 'btn--primary' : 'btn--outline'}`}
+                    onClick={() => void toggle(u.id, !a?.disabled)}
+                    disabled={busy === u.id}
+                  >
+                    {a?.disabled ? 'Reativar' : 'Desativar'}
+                  </button>
+                )}
+
+                {isOpen && (
+                  <div
+                    style={{
+                      flexBasis: '100%',
+                      borderTop: '1px solid rgba(255,255,255,.08)',
+                      paddingTop: 12,
+                      marginTop: 4,
+                      display: 'flex',
+                      gap: 10,
+                      flexWrap: 'wrap',
+                      alignItems: 'flex-end',
+                    }}
+                  >
+                    <div className="field" style={{ margin: 0, minWidth: 130 }}>
+                      <label htmlFor={`plan-${u.id}`}>Plano</label>
+                      <select
+                        id={`plan-${u.id}`}
+                        className="input"
+                        value={plan[u.id] ?? 'basico'}
+                        onChange={(e) => setPlan((m) => ({ ...m, [u.id]: e.target.value }))}
+                      >
+                        <option value="basico">Básico</option>
+                        <option value="standard">Médio</option>
+                        <option value="premium">Premium</option>
+                      </select>
+                    </div>
+
+                    <div className="field" style={{ margin: 0, minWidth: 120 }}>
+                      <label htmlFor={`per-${u.id}`}>Duração</label>
+                      <select
+                        id={`per-${u.id}`}
+                        className="input"
+                        value={period[u.id] ?? '1m'}
+                        onChange={(e) => setPeriod((m) => ({ ...m, [u.id]: e.target.value }))}
+                      >
+                        {PERIODS.map((p) => (
+                          <option key={p.code} value={p.code}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      className="btn btn--primary btn--sm"
+                      onClick={() => void grant(u.id)}
+                      disabled={busy === u.id}
+                    >
+                      <CheckIcon size={15} /> Conceder plano
+                    </button>
+
+                    <span className="muted" style={{ fontSize: '0.78rem', flexBasis: '100%' }}>
+                      A validade é somada ao fim do plano atual, se ainda estiver vigente — assim
+                      ninguém perde dias já pagos.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </>
   )
 }
 

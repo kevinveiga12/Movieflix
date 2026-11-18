@@ -42,6 +42,10 @@ export function PlaybackGate({
       body: 'Não foi possível confirmar o período gratuito desta conta. Saia e entre de novo para renovar a sessão.',
       cta: { label: 'Entrar', to: '/login' },
     },
+    account_disabled: {
+      heading: 'Conta desativada',
+      body: 'Esta conta está com o acesso desativado. Fale com o suporte para reativar.',
+    },
     plan_too_low: {
       heading: 'Seu mês grátis terminou',
       body: 'Para continuar assistindo, escolha um plano — a contratação é pelo WhatsApp.',

@@ -105,7 +105,22 @@ export function paidPlanFromAppMetadata(user) {
  * Situação de acesso da conta.
  *   { allowed, reason, trialEndsAt, daysLeft, plan }
  */
+/**
+ * Conta desativada pelo painel administrativo.
+ *
+ * Lido de `app_metadata` (só o servidor escreve com a Service Role). Fica ANTES
+ * de qualquer outra regra: conta desativada não assiste nem com plano pago
+ * vigente — é o que o administrador espera ao clicar em "desativar".
+ */
+export function isDisabled(user) {
+  return user?.app_metadata?.access_disabled === true
+}
+
 export function accessState(user) {
+  if (isDisabled(user)) {
+    return { allowed: false, reason: 'account_disabled', plan: null, trialEndsAt: null, daysLeft: null }
+  }
+
   const plan = paidPlanFromAppMetadata(user)
   if (plan) {
     return { allowed: true, reason: 'plan', plan, trialEndsAt: null, daysLeft: null }
@@ -153,7 +168,9 @@ export async function authorizePlayback({ token }) {
       message:
         state.reason === 'trial_expired'
           ? 'Seu mês grátis terminou. Contrate um plano para continuar assistindo.'
-          : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
+          : state.reason === 'account_disabled'
+            ? 'Esta conta está desativada. Fale com o suporte.'
+            : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
       access: state,
     }
   }

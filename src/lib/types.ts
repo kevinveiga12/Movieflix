@@ -98,7 +98,7 @@ export interface DbSeason {
 export interface PlaybackAuth {
   allowed: boolean
   title?: { tmdb_id: number; title: string; quality: string | null }
-  reason?: 'unauthenticated' | 'no_subscription' | 'plan_too_low' | 'no_source' | 'not_in_catalog' | 'episode_not_found' | 'bad_request' | 'episode_required' | 'trial_expired' | 'trial_unknown'
+  reason?: 'unauthenticated' | 'no_subscription' | 'plan_too_low' | 'no_source' | 'not_in_catalog' | 'episode_not_found' | 'bad_request' | 'episode_required' | 'trial_expired' | 'trial_unknown' | 'account_disabled'
   /** Situação do mês grátis / plano, decidida no servidor. */
   access?: {
     allowed: boolean

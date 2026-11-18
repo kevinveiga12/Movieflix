@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { loadPlans } from '../lib/entitlement.js'
+import { readAdminConfig } from '../lib/store.js'
 
 /**
  * Planos e tabela de preços por período.
@@ -31,12 +32,30 @@ const router = Router()
 const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER ?? '5511943750307'
 const WHATSAPP_DISPLAY = process.env.WHATSAPP_DISPLAY ?? '(11) 94375-0307'
 
-/** Períodos oferecidos. `discount` é a fração abatida do valor cheio. */
+/**
+ * Períodos oferecidos. `discount` é a fração abatida do valor cheio.
+ *
+ * O desconto padrão é o definido pelo proprietário (0% / 20% / 50%), mas o
+ * painel administrativo pode sobrescrevê-lo por plano — ver `discountFor`.
+ */
 const PERIODS = [
   { code: '1m', months: 1, label: '1 mês', discount: 0 },
   { code: '3m', months: 3, label: '3 meses', discount: 0.2 },
   { code: '12m', months: 12, label: '1 ano', discount: 0.5 },
 ]
+
+/**
+ * Desconto efetivo de um plano num período.
+ *
+ * Precedência: configuração do painel (`discount_3m` / `discount_12m`, em
+ * fração 0..1) → padrão do período. O painel grava fração, não porcentagem,
+ * para não haver ambiguidade entre 20 e 0,2.
+ */
+function discountFor(plan, period) {
+  if (period.months === 3 && Number.isFinite(plan.discount_3m)) return plan.discount_3m
+  if (period.months === 12 && Number.isFinite(plan.discount_12m)) return plan.discount_12m
+  return period.discount
+}
 
 /**
  * Configuração canônica dos planos.
@@ -117,7 +136,7 @@ function priceFor(plan, period) {
   }
 
   // Regra de desconto: arredonda para o centavo.
-  const cents = Math.round(full * (1 - period.discount))
+  const cents = Math.round(full * (1 - discountFor(plan, period)))
   return { cents, full, source: 'discount' }
 }
 
@@ -148,10 +167,30 @@ function whatsappMessage({ planName, periodLabel, priceLabel, email }) {
   return lines.join('\n')
 }
 
+/**
+ * Aplica a configuração do painel sobre a lista de planos.
+ *
+ * O painel pode: mudar o preço mensal, mudar os descontos de 3m/12m e ativar ou
+ * desativar um plano. Plano desativado sai da lista pública (mas continua no
+ * arquivo, para poder ser reativado sem perder o preço configurado).
+ */
+function applyAdminConfig(plans, config) {
+  const overrides = config?.plans ?? {}
+  const out = []
+  for (const p of plans) {
+    const o = overrides[p.code] ?? overrides[p.id] ?? null
+    const merged = o ? { ...p, ...o } : { ...p }
+    if (merged.is_active === false) continue
+    out.push(merged)
+  }
+  return out
+}
+
 router.get('/', async (req, res, next) => {
   try {
-    const fromDb = await loadPlans()
-    const plans = fromDb.length > 0 ? fromDb : DEFAULT_PLANS
+    const [fromDb, config] = await Promise.all([loadPlans(), readAdminConfig()])
+    const base = fromDb.length > 0 ? fromDb : DEFAULT_PLANS
+    const plans = applyAdminConfig(base, config)
 
     // E-mail da conta logada, quando o cliente manda o token.
     const email = typeof req.query.email === 'string' ? req.query.email.trim() : ''
@@ -164,7 +203,7 @@ router.get('/', async (req, res, next) => {
           code: period.code,
           label: period.label,
           months: period.months,
-          discount: period.discount,
+          discount: discountFor(p, period),
           price_cents: cents,
           price_label: brl(cents),
           full_cents: full,
