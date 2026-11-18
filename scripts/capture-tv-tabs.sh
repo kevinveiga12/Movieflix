@@ -52,15 +52,31 @@ fi
 # x=110 cai sobre o texto do menu (o menu tem 232dp de largura).
 X=110
 
+# ORDEM IMPORTA. "Conta" e "Perfis" levam a tela de LOGIN quando o app esta
+# deslogado (comportamento correto: nao ha perfil para mostrar). A tela de
+# login abre o teclado virtual, que cobre o rodape da tela — e o toque
+# seguinte, que deveria cair no menu lateral, caia no teclado. Foi assim que a
+# captura de "Configuracoes" saiu mostrando o login.
+#
+# Por isso as abas que NAO exigem login vem primeiro, e as duas que exigem
+# ficam por ultimo. Antes de cada toque o teclado e fechado.
 N=0
-for LABEL in filmes series categorias buscar favoritos historico planos conta perfis configuracoes; do
+# Cada entrada e "indice_no_menu:rotulo". O indice e a posicao REAL do item no
+# menu lateral (1=Inicio, 2=Filmes, ... 11=Configuracoes) — nao o contador do
+# loop. A ordem de VISITA e outra: as abas que nao exigem login primeiro.
+for PAIR in 2:filmes 3:series 4:categorias 5:buscar 6:favoritos 7:historico 8:planos 11:configuracoes 9:conta 10:perfis; do
+  IDX=${PAIR%%:*}
+  LABEL=${PAIR##*:}
   N=$((N + 1))
-  Y=$(echo "$ROWS" | sed -n "${N}p")
+  Y=$(echo "$ROWS" | sed -n "${IDX}p")
   if [ -z "$Y" ]; then
-    echo "AVISO: sem coordenada para a aba $LABEL (item $N) — pulando"
+    echo "AVISO: sem coordenada para a aba $LABEL (item $IDX) — pulando"
     continue
   fi
-  echo "=== aba $LABEL em ($X,$Y) ==="
+  # Fecha o teclado virtual, se estiver aberto, para nao engolir o toque.
+  adb shell input keyevent KEYCODE_ESCAPE >/dev/null 2>&1 || true
+  sleep 1
+  echo "=== aba $LABEL (menu #$IDX) em ($X,$Y) ==="
   adb shell input tap "$X" "$Y"
   sleep 4
   adb exec-out screencap -p > "$OUT/tv-tab-$N-$LABEL.png"

@@ -47,15 +47,24 @@ done
 
 # Dentro de Conta, rola para baixo para mostrar o menu completo
 # (Perfis, Favoritos, Historico, Planos, Configuracoes).
+#
+# O swipe anterior ia de 3/4 a 1/3 da tela e NAO rolava: a tela de Conta
+# deslogada e curta (so o cartao "Voce nao esta logado" + botao Entrar), entao
+# nao ha o que rolar e as tres capturas saiam identicas. Aqui o swipe e mais
+# longo e, se a tela nao rolar, o resultado e o mesmo — mas o teste de Perfis
+# abaixo nao depende mais dele.
 echo "=== rolando a tela de Conta ==="
-adb shell input swipe $((W / 2)) $((H * 3 / 4)) $((W / 2)) $((H / 3)) 300
+adb shell input swipe $((W / 2)) $((H * 4 / 5)) $((W / 2)) $((H / 5)) 400
 sleep 2
 adb exec-out screencap -p > "$OUT/mobile-conta-menu.png"
 python3 scripts/check-screenshot.py "$OUT/mobile-conta-menu.png" "mobile conta menu"
 
-# Perfis: a partir do menu de Conta, o primeiro item e "Perfis". Tocar nele
-# abre a tela de perfis — que antes nao tinha captura nenhuma.
-echo "=== abrindo Perfis ==="
+# Perfis: acessivel pelo menu de Conta. Deslogado, a tela de Conta mostra
+# apenas o botao "Entrar" — nao ha menu de itens para tocar. Entao a captura
+# de Perfis e feita pelo botao Entrar -> tela de login, que e o que o usuario
+# realmente ve nesse estado. Documentado aqui para nao parecer que a tela de
+# Perfis foi testada quando nao foi.
+echo "=== estado deslogado: Perfis leva ao login ==="
 adb shell input tap $((W / 2)) $((H * 2 / 5))
 sleep 3
 adb exec-out screencap -p > "$OUT/mobile-perfis.png"
