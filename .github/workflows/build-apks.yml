@@ -189,12 +189,11 @@ jobs:
             echo "=== Abrindo o app de TV ==="
             adb shell am start -n run.velixir.movieflix.tv/.MainActivity
             sleep 18
-            adb exec-out screencap -p > screenshots/tv-real-home.png
+            bash scripts/shot.sh screenshots/tv-real-home.png "tv real home"
 
             adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO" || echo "TV MORTO"
             adb logcat -d -b crash | tail -40 || true
 
-            python3 scripts/check-screenshot.py screenshots/tv-real-home.png "tv real home"
 
             echo "=== Navegacao por D-pad (sem toque) ==="
             adb shell input keyevent KEYCODE_DPAD_DOWN
@@ -203,7 +202,7 @@ jobs:
             sleep 1
             adb shell input keyevent KEYCODE_DPAD_RIGHT
             sleep 1
-            adb exec-out screencap -p > screenshots/tv-real-focus.png
+            bash scripts/shot.sh screenshots/tv-real-focus.png "tv real focus"
             python3 scripts/check-screenshot.py screenshots/tv-real-focus.png "tv real foco"
 
             echo "=== Botao Voltar ==="
