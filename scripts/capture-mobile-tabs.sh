@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Captura uma tela por aba do app mobile.
+#
+# Por que um script e nao um loop inline no workflow: a action
+# reactivecircus/android-emulator-runner executa CADA LINHA do `script:` num
+# `sh -c` separado. Um `for ... do ... done` inline chega ao shell sem o `done`
+# e morre com "Syntax error: end of file unexpected". Num arquivo .sh o loop
+# roda inteiro.
+set -u
+
+OUT="${1:-screenshots}"
+mkdir -p "$OUT"
+
+# Tamanho real da tela do emulador (ex.: "1080x2400").
+SIZE=$(adb shell wm size | sed 's/.*: //' | tr -d '\r')
+W=${SIZE%x*}
+H=${SIZE#*x}
+echo "tela: ${W}x${H}"
+
+# A barra inferior tem 5 abas de largura igual. O centro da aba i (0..4) fica
+# em x = W*(2i+1)/10. A barra tem ~56dp de altura + navigation bar, entao
+# tocamos 60px acima da base.
+Y=$((H - 60))
+
+# Aba 0 (Início) ja foi capturada como mobile-home.png.
+i=0
+for TAB in filmes series buscar conta; do
+  i=$((i + 1))
+  X=$(( W * (2 * i + 1) / 10 ))
+  echo "=== aba $TAB em ($X,$Y) ==="
+  adb shell input tap "$X" "$Y"
+  sleep 4
+  adb exec-out screencap -p > "$OUT/mobile-$TAB.png"
+  python3 scripts/check-screenshot.py "$OUT/mobile-$TAB.png" "mobile $TAB"
+done
+
+# Dentro de Conta, rola para baixo para mostrar o menu completo
+# (Perfis, Favoritos, Histórico, Planos, Configurações).
+echo "=== rolando a tela de Conta ==="
+adb shell input swipe $((W / 2)) $((H * 3 / 4)) $((W / 2)) $((H / 3)) 300
+sleep 2
+adb exec-out screencap -p > "$OUT/mobile-conta-menu.png"
+python3 scripts/check-screenshot.py "$OUT/mobile-conta-menu.png" "mobile conta menu"
+
+echo "OK: abas do mobile capturadas"

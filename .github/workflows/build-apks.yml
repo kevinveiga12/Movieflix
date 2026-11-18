@@ -143,21 +143,10 @@ jobs:
             echo "=== Tela preta? ==="
             python3 scripts/check-screenshot.py screenshots/mobile-home.png "mobile home"
 
-            # ── Cada aba da barra inferior, uma captura por tela ──────────
-            # A barra tem 5 abas iguais; o centro de cada uma fica em
-            # x = largura*(2i+1)/10, y = altura-60. Tocar ali troca de aba.
-            W=$(adb shell wm size | sed 's/.*: //' | cut -dx -f1)
-            H=$(adb shell wm size | sed 's/.*: //' | cut -dx -f2)
-            Y=$((H - 60))
-            i=0
-            for TAB in filmes series buscar conta; do
-              i=$((i + 1))
-              X=$(( W * (2*i + 1) / 10 ))
-              adb shell input tap $X $Y
-              sleep 4
-              adb exec-out screencap -p > screenshots/mobile-$TAB.png
-              python3 scripts/check-screenshot.py screenshots/mobile-$TAB.png "mobile $TAB"
-            done
+            # Cada aba da barra inferior, uma captura por tela.
+            # O loop vive num .sh porque a action roda cada linha do script
+            # num `sh -c` separado e um `for` inline chega sem o `done`.
+            bash scripts/capture-mobile-tabs.sh screenshots
 
             echo "=== Instalando APK TV ==="
             adb install -r out/movieflix-tv-release.apk
@@ -224,14 +213,7 @@ jobs:
             adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO APOS VOLTAR" || echo "TV FECHOU NO VOLTAR"
 
             # ── Cada aba do menu lateral, uma captura por tela ───────────
-            for N in 1 2 3 4 5 6 7 8 9; do
-              adb shell input keyevent KEYCODE_DPAD_DOWN
-              sleep 1
-              adb shell input keyevent KEYCODE_DPAD_CENTER
-              sleep 4
-              adb exec-out screencap -p > screenshots/tv-tab-$N.png
-              python3 scripts/check-screenshot.py screenshots/tv-tab-$N.png "tv aba $N"
-            done
+            bash scripts/capture-tv-tabs.sh screenshots
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
