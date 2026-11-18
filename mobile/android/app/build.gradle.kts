@@ -27,11 +27,31 @@ android {
         buildConfig = true
     }
 
+    // Assinatura de release. A chave NUNCA fica no repositorio: o build do
+    // GitHub Actions gera o keystore e passa o caminho por variavel de ambiente.
+    // Sem essas variaveis o release sai sem assinatura (nao instalavel), por isso
+    // o build oficial e sempre o do workflow.
+    signingConfigs {
+        create("release") {
+            val ks = System.getenv("MF_KEYSTORE")
+            if (!ks.isNullOrBlank() && file(ks).exists()) {
+                storeFile = file(ks)
+                storePassword = System.getenv("MF_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MF_KEY_ALIAS") ?: "movieflix"
+                keyPassword = System.getenv("MF_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            val ks = System.getenv("MF_KEYSTORE")
+            if (!ks.isNullOrBlank() && file(ks).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             applicationIdSuffix = ".debug"

@@ -1,0 +1,93 @@
+name: Build APKs
+
+# Compila os dois aplicativos Android (mobile e TV) em um runner com o
+# Android SDK real. O sandbox de desenvolvimento nao tem Java nem SDK, entao
+# este workflow e o ambiente de build oficial do projeto.
+#
+# Artefatos gerados:
+#   movieflix-mobile-release.apk
+#   movieflix-tv-release.apk
+#   movieflix-release.keystore  (GUARDE: e a chave das atualizacoes futuras)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/android/**'
+      - 'tv/android/**'
+      - '.github/workflows/build-apks.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # Chave de assinatura. Gerada uma vez por execucao e publicada como
+      # artefato para o dono do projeto guardar. Sem ela, uma atualizacao
+      # futura nao pode ser instalada por cima da anterior.
+      - name: Gerar chave de assinatura
+        run: |
+          keytool -genkeypair -v \
+            -keystore movieflix-release.keystore \
+            -alias movieflix \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}" \
+            -keypass "${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}" \
+            -dname "CN=MovieFlix, OU=Mobile, O=MovieFlix, L=Sao Paulo, ST=SP, C=BR"
+
+      - name: Build mobile
+        working-directory: mobile/android
+        env:
+          MF_KEYSTORE: ${{ github.workspace }}/movieflix-release.keystore
+          MF_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}
+          MF_KEY_ALIAS: movieflix
+          MF_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Build TV
+        working-directory: tv/android
+        env:
+          MF_KEYSTORE: ${{ github.workspace }}/movieflix-release.keystore
+          MF_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}
+          MF_KEY_ALIAS: movieflix
+          MF_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Coletar APKs
+        run: |
+          mkdir -p out
+          find mobile/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/movieflix-mobile-release.apk \;
+          find tv/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/movieflix-tv-release.apk \;
+          ls -lh out/
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: movieflix-apks
+          path: out/*.apk
+          if-no-files-found: error
+
+      - name: Upload chave de assinatura
+        uses: actions/upload-artifact@v4
+        with:
+          name: movieflix-keystore
+          path: movieflix-release.keystore

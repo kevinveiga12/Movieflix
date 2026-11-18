@@ -25,11 +25,29 @@ android {
         buildConfig = true
     }
 
+    // Assinatura de release — mesma regra do app mobile: a chave vem do
+    // ambiente do build (GitHub Actions), nunca do repositorio.
+    signingConfigs {
+        create("release") {
+            val ks = System.getenv("MF_KEYSTORE")
+            if (!ks.isNullOrBlank() && file(ks).exists()) {
+                storeFile = file(ks)
+                storePassword = System.getenv("MF_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MF_KEY_ALIAS") ?: "movieflix"
+                keyPassword = System.getenv("MF_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            val ks = System.getenv("MF_KEYSTORE")
+            if (!ks.isNullOrBlank() && file(ks).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
