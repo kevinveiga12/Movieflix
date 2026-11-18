@@ -9,6 +9,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -134,7 +135,7 @@ fun PlayerScreen(
 }
 
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(androidx.compose.foundation.clickable(onClick = onClick))
+    this.clickable(onClick = onClick)
 
 /** MP4/HLS com controles nativos do Media3. */
 @Composable
