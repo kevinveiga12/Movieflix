@@ -13,10 +13,10 @@ import { CheckIcon, InfoIcon, ArrowLeft } from '../components/Icons'
  * plano. A contratação é feita pelo WhatsApp, que é o fluxo já configurado no
  * projeto; não há cobrança automática aqui.
  *
- * Quando o período de 3 meses ou 1 ano ainda não tem preço próprio definido, o
- * servidor devolve o mensal multiplicado e marca `price_source: 'derived'`.
- * A UI mostra o valor e sinaliza discretamente que é o mensal x meses, em vez
- * de inventar um desconto.
+ * DESCONTOS (definidos pelo proprietário): 1 mês sem desconto, 3 meses com 20%
+ * e 1 ano com 50%. O servidor calcula o valor do período e devolve também o
+ * valor cheio (`full_label`) e a economia (`saved_label`), que a UI mostra com
+ * o preço riscado. O link do WhatsApp já vai com e-mail, plano, duração e valor.
  */
 
 const PERIOD_ORDER: Array<PlanPeriod['code']> = ['1m', '3m', '12m']
@@ -35,7 +35,7 @@ export function PlansPage() {
     let active = true
     ;(async () => {
       try {
-        const data = await fetchPlans()
+        const data = await fetchPlans(user?.email)
         if (!active) return
         setPlans(data.plans)
         if (user) {
@@ -156,7 +156,6 @@ export function PlansPage() {
               const isCurrent = active && sub?.plan_code === p.code
               const periods = p.periods ?? []
               const chosen = periods.find((x) => x.code === period) ?? periods[0]
-              const derived = chosen?.price_source === 'derived'
 
               return (
                 <div
@@ -183,11 +182,19 @@ export function PlansPage() {
                     </span>
                   </div>
 
-                  {derived && (
-                    <p className="muted" style={{ fontSize: '0.76rem', margin: '0 0 8px' }}>
-                      Valor do período = mensal × {chosen?.months}. Desconto ainda não definido.
+                  {chosen && chosen.saved_cents ? (
+                    <p style={{ fontSize: '0.8rem', margin: '0 0 8px' }}>
+                      <span
+                        className="muted"
+                        style={{ textDecoration: 'line-through', marginRight: 8 }}
+                      >
+                        {chosen.full_label}
+                      </span>
+                      <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
+                        economize {chosen.saved_label}
+                      </span>
                     </p>
-                  )}
+                  ) : null}
 
                   {p.description && (
                     <p className="muted" style={{ fontSize: '0.88rem', marginBottom: 12 }}>

@@ -1197,6 +1197,24 @@ h4 {
 
 .player-overlay.visible {
   opacity: 1;
+}
+
+/*
+  O overlay NUNCA captura cliques na área do vídeo.
+
+  Antes, `.player-overlay.visible` voltava para `pointer-events: auto` e, como o
+  overlay cobre a tela inteira, ele engolia todo clique destinado ao <iframe> do
+  provedor: o cliente clicava em play/pause/barra e nada chegava ao player — o
+  vídeo parecia "bloqueado". Só as barras de controle (topo e rodapé) recebem
+  clique; o meio continua transparente para o vídeo.
+*/
+.player-overlay,
+.player-overlay.visible {
+  pointer-events: none;
+}
+
+.player-overlay.visible .player-top,
+.player-overlay.visible .player-bottom {
   pointer-events: auto;
 }
 

@@ -4,27 +4,26 @@ import { loadPlans } from '../lib/entitlement.js'
 /**
  * Planos e tabela de preços por período.
  *
- * Os preços vêm do BANCO (tabela `plans`), nunca do código — assim o
- * administrador ajusta sem deploy e nenhum valor é inventado aqui.
- *
  * TABELA POR PERÍODO (1 mês / 3 meses / 1 ano)
  * --------------------------------------------
- * O banco guarda o preço MENSAL de cada plano (`price_cents`). Os períodos de
- * 3 meses e 1 ano são derivados por multiplicação simples, SEM desconto:
+ * Os preços MENSAIS vêm do banco (tabela `plans`). Quando o banco ainda não
+ * tem planos cadastrados, usamos a configuração canônica definida pelo
+ * proprietário — os mesmos três valores que ele informou:
  *
- *     3 meses = mensal x 3
- *     1 ano   = mensal x 12
+ *     Básico   R$ 19,90 / mês
+ *     Standard R$ 29,90 / mês
+ *     Premium  R$ 39,90 / mês
  *
- * Isso é aritmética sobre um valor que já existe, não um preço novo inventado.
- * Quando o proprietário definir preços promocionais para 3 meses / 1 ano, basta
- * preencher `price_3m_cents` / `price_12m_cents` na tabela `plans` (ou nas
- * variáveis PLAN_*_3M_CENTS / PLAN_*_12M_CENTS) e eles passam a valer — o
- * código já lê esses campos primeiro.
+ * DESCONTOS (definidos pelo proprietário em 2026-11-18)
+ * -----------------------------------------------------
+ *     1 mês   → sem desconto
+ *     3 meses → 20% de desconto
+ *     1 ano   → 50% de desconto
  *
- * Preços mensais configurados no projeto:
- *   Básico   R$ 19,90
- *   Standard R$ 29,90
- *   Premium  R$ 39,90
+ * O valor do período é calculado como `mensal × meses × (1 − desconto)`. O
+ * valor cheio (`full_cents`) também é devolvido para a UI mostrar o preço
+ * riscado e a economia. Nada é inventado: os descontos são os informados e a
+ * base é o preço mensal já configurado.
  */
 
 const router = Router()
@@ -32,11 +31,56 @@ const router = Router()
 const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER ?? '5511943750307'
 const WHATSAPP_DISPLAY = process.env.WHATSAPP_DISPLAY ?? '(11) 94375-0307'
 
-/** Períodos oferecidos. `months` é o multiplicador do preço mensal. */
+/** Períodos oferecidos. `discount` é a fração abatida do valor cheio. */
 const PERIODS = [
-  { code: '1m', months: 1, label: '1 mês' },
-  { code: '3m', months: 3, label: '3 meses' },
-  { code: '12m', months: 12, label: '1 ano' },
+  { code: '1m', months: 1, label: '1 mês', discount: 0 },
+  { code: '3m', months: 3, label: '3 meses', discount: 0.2 },
+  { code: '12m', months: 12, label: '1 ano', discount: 0.5 },
+]
+
+/**
+ * Configuração canônica dos planos.
+ *
+ * Usada quando a tabela `plans` do Supabase está vazia (é o estado atual do
+ * projeto). Se o administrador cadastrar os planos no banco, os valores do
+ * banco têm prioridade — este bloco é só o padrão.
+ */
+const DEFAULT_PLANS = [
+  {
+    id: 'basico',
+    code: 'basico',
+    name: 'Básico',
+    description: 'Para começar a assistir com qualidade.',
+    price_cents: 1990,
+    duration_days: 30,
+    is_active: true,
+    features: ['Catálogo completo de filmes e séries', 'Qualidade HD', '1 tela por vez'],
+  },
+  {
+    id: 'standard',
+    code: 'standard',
+    name: 'Médio',
+    description: 'O equilíbrio entre preço e qualidade.',
+    price_cents: 2990,
+    duration_days: 30,
+    is_active: true,
+    features: ['Catálogo completo de filmes e séries', 'Qualidade Full HD', '2 telas ao mesmo tempo'],
+  },
+  {
+    id: 'premium',
+    code: 'premium',
+    name: 'Premium',
+    description: 'A experiência completa, sem limites.',
+    price_cents: 3990,
+    duration_days: 30,
+    is_active: true,
+    features: [
+      'Catálogo completo de filmes e séries',
+      'Qualidade 4K quando disponível',
+      '4 telas ao mesmo tempo',
+      'Suporte prioritário',
+    ],
+  },
 ]
 
 function brl(cents) {
@@ -45,9 +89,14 @@ function brl(cents) {
 
 /**
  * Preço de um período.
- * Ordem: valor explícito do banco → variável de ambiente → mensal x meses.
- * `source` diz de onde veio, para o relatório e o painel saberem o que é
- * preço definido e o que é apenas o mensal multiplicado.
+ *
+ * Ordem de precedência:
+ *   1. valor explícito do banco (`price_3m_cents` / `price_12m_cents`)
+ *   2. variável de ambiente (`PLAN_<CODE>_3M_CENTS` / `_12M_CENTS`)
+ *   3. mensal × meses × (1 − desconto)  ← regra atual
+ *
+ * `source` diz de onde veio, para o painel saber o que é preço definido e o
+ * que é calculado pela regra de desconto.
  */
 function priceFor(plan, period) {
   const explicit =
@@ -57,10 +106,19 @@ function priceFor(plan, period) {
         ? (plan.price_12m_cents ?? envPrice(plan.code, '12M'))
         : plan.price_cents
 
+  const full = plan.price_cents * period.months
+
   if (Number.isFinite(explicit) && explicit > 0) {
-    return { cents: explicit, source: period.months === 1 ? 'monthly' : 'configured' }
+    return {
+      cents: explicit,
+      full,
+      source: period.months === 1 ? 'monthly' : 'configured',
+    }
   }
-  return { cents: plan.price_cents * period.months, source: 'derived' }
+
+  // Regra de desconto: arredonda para o centavo.
+  const cents = Math.round(full * (1 - period.discount))
+  return { cents, full, source: 'discount' }
 }
 
 function envPrice(code, suffix) {
@@ -71,23 +129,56 @@ function envPrice(code, suffix) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-router.get('/', async (_req, res, next) => {
+/**
+ * Mensagem do WhatsApp para um plano/período.
+ *
+ * Inclui e-mail, plano, duração e valor — o proprietário pediu que a conversa
+ * já abra com tudo preenchido. O e-mail vem do cliente (conta logada); quando
+ * não há sessão, o texto diz isso em vez de mandar um campo vazio.
+ */
+function whatsappMessage({ planName, periodLabel, priceLabel, email }) {
+  const lines = [
+    'Olá! Quero assinar o MovieFlix.',
+    '',
+    `Plano: ${planName}`,
+    `Duração: ${periodLabel}`,
+    `Valor: ${priceLabel}`,
+    `E-mail da conta: ${email || 'não informado (não estou logado)'}`,
+  ]
+  return lines.join('\n')
+}
+
+router.get('/', async (req, res, next) => {
   try {
-    const plans = await loadPlans()
+    const fromDb = await loadPlans()
+    const plans = fromDb.length > 0 ? fromDb : DEFAULT_PLANS
+
+    // E-mail da conta logada, quando o cliente manda o token.
+    const email = typeof req.query.email === 'string' ? req.query.email.trim() : ''
 
     const shaped = plans.map((p) => {
       const periods = PERIODS.map((period) => {
-        const { cents, source } = priceFor(p, period)
+        const { cents, full, source } = priceFor(p, period)
+        const saved = full - cents
         return {
           code: period.code,
           label: period.label,
           months: period.months,
+          discount: period.discount,
           price_cents: cents,
           price_label: brl(cents),
-          // 'derived' = mensal x meses (sem desconto definido ainda)
+          full_cents: full,
+          full_label: brl(full),
+          saved_cents: saved,
+          saved_label: brl(saved),
           price_source: source,
           whatsapp_url: `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-            `Olá! Quero assinar o MovieFlix — ${p.name} (${period.label}) por ${brl(cents)}.`,
+            whatsappMessage({
+              planName: p.name,
+              periodLabel: period.label,
+              priceLabel: brl(cents),
+              email,
+            }),
           )}`,
         }
       })
@@ -103,8 +194,14 @@ router.get('/', async (_req, res, next) => {
 
     res.json({
       plans: shaped,
-      periods: PERIODS.map((p) => ({ code: p.code, label: p.label, months: p.months })),
+      periods: PERIODS.map((p) => ({
+        code: p.code,
+        label: p.label,
+        months: p.months,
+        discount: p.discount,
+      })),
       whatsapp: { number: WHATSAPP_NUMBER, display: WHATSAPP_DISPLAY },
+      source: fromDb.length > 0 ? 'database' : 'default',
     })
   } catch (e) {
     next(e)

@@ -32,10 +32,18 @@ export interface PlanPeriod {
   code: '1m' | '3m' | '12m'
   label: string
   months: number
+  /** Fração de desconto aplicada (0, 0.2, 0.5). */
+  discount?: number
   price_cents: number
   price_label: string
-  /** 'monthly' | 'configured' | 'derived' (mensal x meses, sem desconto definido) */
-  price_source: 'monthly' | 'configured' | 'derived'
+  /** Valor cheio (mensal × meses), antes do desconto. */
+  full_cents?: number
+  full_label?: string
+  /** Economia em relação ao valor cheio. */
+  saved_cents?: number
+  saved_label?: string
+  /** 'monthly' | 'configured' | 'discount' */
+  price_source: 'monthly' | 'configured' | 'discount' | 'derived'
   whatsapp_url: string
 }
 

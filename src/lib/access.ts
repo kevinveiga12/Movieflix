@@ -58,8 +58,9 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Planos reais (preços vêm do banco). */
-export async function fetchPlans(): Promise<{ plans: Plan[]; whatsapp: { number: string; display: string } }> {
-  return getJson('/api/plans')
+export async function fetchPlans(email?: string | null): Promise<{ plans: Plan[]; whatsapp: { number: string; display: string } }> {
+  const qs = email ? `?email=${encodeURIComponent(email)}` : ''
+  return getJson(`/api/plans${qs}`)
 }
 
 /** Assinatura do usuário logado. */
