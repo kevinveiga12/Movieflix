@@ -162,6 +162,51 @@ jobs:
             adb exec-out screencap -p > screenshots/tv-focus.png
             echo "OK: D-pad respondeu"
 
+      # ── Emulador de TV: prova visual em paisagem, com D-pad ────────────────
+      # O emulador de celular roda o APK de TV, mas em retrato e sem controle.
+      # Aqui usamos um perfil de TV (1080p paisagem) e navegamos só com D-pad,
+      # que é a experiência real do usuário na televisão.
+      - name: Rodar emulador de TV e capturar telas
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: tv_1080p
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            mkdir -p screenshots
+
+            echo "=== Instalando APK TV ==="
+            adb install -r out/movieflix-tv-release.apk
+
+            echo "=== Abrindo o app de TV ==="
+            adb shell am start -n run.velixir.movieflix.tv/.MainActivity
+            sleep 18
+            adb exec-out screencap -p > screenshots/tv-real-home.png
+
+            adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO" || echo "TV MORTO"
+            adb logcat -d -b crash | tail -40 || true
+
+            python3 scripts/check-screenshot.py screenshots/tv-real-home.png "tv real home"
+
+            echo "=== Navegacao por D-pad (sem toque) ==="
+            adb shell input keyevent KEYCODE_DPAD_DOWN
+            sleep 1
+            adb shell input keyevent KEYCODE_DPAD_RIGHT
+            sleep 1
+            adb shell input keyevent KEYCODE_DPAD_RIGHT
+            sleep 1
+            adb exec-out screencap -p > screenshots/tv-real-focus.png
+            python3 scripts/check-screenshot.py screenshots/tv-real-focus.png "tv real foco"
+
+            echo "=== Botao Voltar ==="
+            adb shell input keyevent KEYCODE_BACK
+            sleep 2
+            adb exec-out screencap -p > screenshots/tv-real-back.png
+            adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO APOS VOLTAR" || echo "TV FECHOU NO VOLTAR"
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
