@@ -5,7 +5,6 @@ import { loadCatalog, getById } from '../lib/catalog'
 import { nextEpisode, formatTime, type PlaybackSource } from '../lib/player'
 import { authorizePlayback } from '../lib/access'
 import { PlaybackGate } from '../components/PlaybackGate'
-import { EmbedPlayer } from '../components/EmbedPlayer'
 import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useHistory } from '../lib/userData'
@@ -415,18 +414,29 @@ export function PlayerPage() {
         )}
 
         {source?.mode === 'embed' && (
-          /*
-            Player do provedor dentro do MovieFlix. O componente usa sandbox
-            restritivo (sem allow-popups / allow-top-navigation), então o
-            provedor não consegue abrir aba nova nem trocar a página. Se o
-            player não carregar, mostra um estado curto em português — nunca
-            nome de provedor nem mensagem técnica.
-          */
-          <EmbedPlayer
-            url={source.url}
-            title={title?.title}
-            onRetry={() => setAuthAttempt((n) => n + 1)}
-          />
+          <>
+            {/*
+              Fonte externa (embed). O requisito do projeto é reproduzir DENTRO
+              do MovieFlix, sem anúncios nem redirecionamentos. Um embed de
+              terceiro não garante isso — então avisamos em vez de fingir que
+              está tudo certo. O administrador deve cadastrar um arquivo
+              próprio (.mp4/.m3u8) para o título sair deste modo.
+            */}
+            <div className="player-embed-warning">
+              <strong>Fonte externa</strong> — este título usa um player de
+              terceiros. Se houver anúncios ou redirecionamento, é o provedor
+              externo, não o MovieFlix. Para reprodução dentro da plataforma, o
+              administrador precisa cadastrar um arquivo próprio (.mp4 ou .m3u8).
+            </div>
+            <iframe
+              src={source.url}
+              title={title?.title ?? 'Player'}
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              allowFullScreen
+              referrerPolicy="origin"
+              sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
+            />
+          </>
         )}
 
         {loading && source?.mode === 'direct' && (
@@ -572,7 +582,7 @@ export function PlayerPage() {
             {source?.mode === 'embed' && (
               <div className="inline" style={{ justifyContent: 'space-between' }}>
                 <span className="player-time">
-                  {type === 'tv' ? `Temporada ${season} · Episódio ${episode}` : title?.year}
+                  Reprodução pelo provedor · use os controles do player
                 </span>
                 <div className="inline">
                   {next && (
