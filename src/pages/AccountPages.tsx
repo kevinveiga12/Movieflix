@@ -132,7 +132,7 @@ function TrialSection({ email, name }: { email: string | null | undefined; name?
           onSubmit={submit}
           style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}
         >
-          <div className="field" style={{ margin: 0, minWidth: 150 }}>
+          <div className="field" style={{ margin: 0, width: 132, flex: '0 0 auto' }}>
             <label htmlFor="trial-code" className="sr-only">
               Código de 6 dígitos
             </label>
@@ -142,11 +142,11 @@ function TrialSection({ email, name }: { email: string | null | undefined; name?
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={6}
-              placeholder="Código de 6 dígitos"
+              placeholder="Código"
               aria-label="Código de 6 dígitos"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              style={{ height: 44 }}
+              style={{ height: 44, width: 132, letterSpacing: '0.12em', textAlign: 'center' }}
             />
           </div>
           <button
