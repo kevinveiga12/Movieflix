@@ -175,6 +175,95 @@ export async function createConfirmedUser({ email, password, fullName }) {
 }
 
 /**
+ * Localiza um usuário do Auth pelo e-mail, usando a API administrativa.
+ *
+ * Precisa da Service Role (a listagem de usuários não é pública). Pagina de 200
+ * em 200 porque `listUsers` não aceita filtro por e-mail; paramos na primeira
+ * página incompleta.
+ */
+export async function findAdminUserByEmail(email) {
+  const admin = getAdminClient()
+  if (!admin) return { user: null, error: 'service_role_ausente' }
+
+  const target = String(email ?? '').trim().toLowerCase()
+  if (!target) return { user: null, error: 'email_invalido' }
+
+  for (let page = 1; page <= 25; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 })
+    if (error) return { user: null, error: error.message }
+    const users = data?.users ?? []
+    const hit = users.find((u) => String(u.email ?? '').toLowerCase() === target)
+    if (hit) return { user: hit, error: null }
+    if (users.length < 200) break
+  }
+  return { user: null, error: null }
+}
+
+/**
+ * Confirma os e-mails de TODAS as contas que ainda estão pendentes.
+ *
+ * Por que existe: o projeto nasceu com "Confirm email" ligado. Toda conta criada
+ * antes desta correção ficou presa em `email_not_confirmed` e não conseguia
+ * entrar — o login devolvia "Invalid login credentials"/`email not confirmed`.
+ * A política do MovieFlix 2.0 é não exigir confirmação de e-mail, então as
+ * contas antigas têm de ser liberadas também.
+ *
+ * Preserva integralmente: o ID do usuário, a senha (não é tocada), o perfil,
+ * favoritos, histórico e qualquer relacionamento por `user_id`. Só grava
+ * `email_confirmed_at`.
+ */
+export async function confirmAllPendingEmails() {
+  const admin = getAdminClient()
+  if (!admin) return { scanned: 0, confirmed: 0, failed: 0, error: 'service_role_ausente' }
+
+  let scanned = 0
+  let confirmed = 0
+  let failed = 0
+
+  for (let page = 1; page <= 25; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 })
+    if (error) return { scanned, confirmed, failed, error: error.message }
+
+    const users = data?.users ?? []
+    if (users.length === 0) break
+    scanned += users.length
+
+    for (const u of users) {
+      // `confirmed_at` é coluna gerada; a que se grava é `email_confirmed_at`.
+      if (!u.email || u.email_confirmed_at) continue
+      const { error: e } = await admin.auth.admin.updateUserById(u.id, { email_confirm: true })
+      if (e) failed++
+      else confirmed++
+    }
+
+    if (users.length < 200) break
+  }
+
+  return { scanned, confirmed, failed, error: null }
+}
+
+/** Quantas contas seguem pendentes de confirmação (só leitura). */
+export async function countPendingEmails() {
+  const admin = getAdminClient()
+  if (!admin) return { pending: null, total: null, error: 'service_role_ausente' }
+
+  let pending = 0
+  let total = 0
+
+  for (let page = 1; page <= 25; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 })
+    if (error) return { pending: null, total: null, error: error.message }
+    const users = data?.users ?? []
+    if (users.length === 0) break
+    total += users.length
+    pending += users.filter((u) => u.email && !u.email_confirmed_at).length
+    if (users.length < 200) break
+  }
+
+  return { pending, total, error: null }
+}
+
+/**
  * Marca o e-mail como confirmado.
  *
  * O projeto está com "Confirm email" ligado e o SMTP padrão do Supabase não

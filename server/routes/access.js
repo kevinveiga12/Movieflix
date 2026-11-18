@@ -2,7 +2,16 @@ import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { authorizePlayback, bearer, resolveUser } from '../lib/entitlement.js'
 import { findTitle, seriesEpisodes } from '../lib/db-catalog.js'
-import { ensureProfile, confirmEmail, createConfirmedUser } from '../lib/profile.js'
+import {
+  ensureProfile,
+  confirmEmail,
+  createConfirmedUser,
+  confirmAllPendingEmails,
+  countPendingEmails,
+  findAdminUserByEmail,
+  adminEmails,
+} from '../lib/profile.js'
+import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-server.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -254,6 +263,359 @@ router.post('/profile/confirm-email', strict, async (req, res, next) => {
     const { ok, error } = await confirmEmail(resolved.user.id)
     if (!ok) return res.status(503).json({ confirmed: false, error })
     res.json({ confirmed: true })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * POST /api/auth/login
+ * body: { email, password }
+ *
+ * Login feito no SERVIDOR para eliminar de vez o bloqueio por e-mail não
+ * confirmado.
+ *
+ * Por que não usar o signInWithPassword do navegador: se a conta tiver sido
+ * criada antes da correção (ou por qualquer outro caminho), ela fica com
+ * `email_confirmed_at = null` e o Supabase devolve `email_not_confirmed`. O
+ * usuário vê "Confirme seu e-mail antes de entrar" e não entra nunca, porque o
+ * SMTP padrão do projeto não entrega a mensagem.
+ *
+ * Aqui: tentamos a senha no Supabase; se o erro for só falta de confirmação,
+ * confirmamos pela API administrativa e repetimos — na mesma requisição, com a
+ * MESMA senha e o MESMO id de usuário. A senha nunca é gravada nem logada.
+ */
+router.post('/auth/login', strict, async (req, res, next) => {
+  try {
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    const password = String(req.body?.password ?? '')
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Informe e-mail e senha.' })
+    }
+
+    const anon = getAnonClient()
+    if (!anon) return res.status(503).json({ error: 'Supabase não configurado no servidor.' })
+
+    const attempt = () =>
+      anon.auth.signInWithPassword({ email, password })
+
+    let { data, error } = await attempt()
+
+    // Só um motivo justifica nova tentativa: falta de confirmação de e-mail.
+    if (error && /email[ _]not[ _]confirmed|not confirmed/i.test(error.message ?? '')) {
+      const found = await findAdminUserByEmail(email)
+      if (found.user) {
+        const admin = getAdminClient()
+        await admin?.auth.admin.updateUserById(found.user.id, { email_confirm: true })
+        ;({ data, error } = await attempt())
+      }
+    }
+
+    if (error || !data?.session) {
+      const msg = error?.message ?? 'Falha no login.'
+      if (/invalid login credentials/i.test(msg)) {
+        return res.status(401).json({ error: 'E-mail ou senha incorretos.' })
+      }
+      if (/email[ _]not[ _]confirmed|not confirmed/i.test(msg)) {
+        return res.status(403).json({
+          error: 'Não foi possível liberar esta conta automaticamente. Fale com o suporte.',
+        })
+      }
+      return res.status(401).json({ error: msg })
+    }
+
+    // Garante o perfil (e promove o administrador legítimo) antes de responder.
+    const { profile } = await ensureProfile(data.session.user)
+
+    res.json({
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: data.session.expires_at,
+        expires_in: data.session.expires_in,
+        token_type: data.session.token_type,
+      },
+      user: {
+        id: data.session.user.id,
+        email: data.session.user.email,
+        email_confirmed: Boolean(data.session.user.email_confirmed_at),
+      },
+      profile,
+      isAdmin: Boolean(profile?.is_admin),
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Recuperação de senha por CÓDIGO de 6 dígitos
+ *
+ * O Supabase gera o código pela API administrativa (`generateLink` do tipo
+ * `recovery`, campo `email_otp`). Nós o enviamos por e-mail e o usuário digita
+ * no site. A validação é feita pelo PRÓPRIO Supabase (`verifyOtp`), então não
+ * guardamos códigos em lugar nenhum e não há como forjar um.
+ *
+ * Validade, uso único e limite de tentativas vêm do Supabase (o OTP expira em
+ * 1 hora e é consumido na primeira verificação bem-sucedida). Acima disso
+ * aplicamos um contador em memória por e-mail para conter abuso barato.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const CODE_TTL_MINUTES = 15
+const MAX_CODE_ATTEMPTS = 5
+
+/** e-mail -> { attempts, lastSentAt } — só para conter abuso; nunca guarda código. */
+const codeThrottle = new Map()
+
+function throttleFor(email) {
+  const now = Date.now()
+  let entry = codeThrottle.get(email)
+  if (!entry || now - entry.lastSentAt > CODE_TTL_MINUTES * 60_000) {
+    entry = { attempts: 0, lastSentAt: 0 }
+    codeThrottle.set(email, entry)
+  }
+  return entry
+}
+
+/**
+ * Envia o código. Usa Resend (HTTP) se houver RESEND_API_KEY; senão SMTP via
+ * nodemailer. Sem nenhum dos dois devolve `not_configured` — nunca finge envio.
+ */
+async function sendCodeEmail({ to, code }) {
+  const subject = `MovieFlix — seu código de recuperação: ${code}`
+  const html = `
+    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px;background:#0b0b0f;color:#f5f5f7;border-radius:14px">
+      <h2 style="margin:0 0 6px;font-size:20px">MovieFlix</h2>
+      <p style="color:#a1a1aa;margin:0 0 22px">Recuperação de senha</p>
+      <p>Use o código abaixo para criar uma nova senha:</p>
+      <p style="font-size:34px;letter-spacing:10px;font-weight:700;margin:22px 0;color:#fff">${code}</p>
+      <p style="color:#a1a1aa;font-size:13px">O código vale por ${CODE_TTL_MINUTES} minutos e só pode ser usado uma vez.
+      Se você não pediu a troca, ignore este e-mail — sua senha continua a mesma.</p>
+    </div>`
+
+  const resendKey = process.env.RESEND_API_KEY
+  if (resendKey) {
+    const from = process.env.MAIL_FROM ?? 'MovieFlix <onboarding@resend.dev>'
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to: [to], subject, html }),
+    })
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '')
+      return { ok: false, provider: 'resend', error: `HTTP ${r.status} ${detail.slice(0, 200)}` }
+    }
+    return { ok: true, provider: 'resend', error: null }
+  }
+
+  const host = process.env.SMTP_HOST
+  const user = process.env.SMTP_USER
+  const pass = process.env.SMTP_PASS
+  if (host && user && pass) {
+    let nodemailer
+    try {
+      nodemailer = (await import('nodemailer')).default
+    } catch {
+      return { ok: false, provider: 'smtp', error: 'nodemailer não instalado' }
+    }
+    const port = Number(process.env.SMTP_PORT ?? 587)
+    const transport = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    })
+    try {
+      await transport.sendMail({
+        from: process.env.MAIL_FROM ?? user,
+        to,
+        subject,
+        html,
+      })
+      return { ok: true, provider: 'smtp', error: null }
+    } catch (e) {
+      return { ok: false, provider: 'smtp', error: String(e?.message ?? e).slice(0, 200) }
+    }
+  }
+
+  return { ok: false, provider: null, error: 'not_configured' }
+}
+
+/**
+ * POST /api/auth/request-code
+ * body: { email }
+ *
+ * Responde sempre 200 com a mesma mensagem, exista ou não a conta — não
+ * revelamos quais e-mails estão cadastrados. Só devolve erro explícito quando o
+ * problema é de infraestrutura (SMTP ausente), porque nesse caso esconder não
+ * ajuda ninguém.
+ */
+router.post('/auth/request-code', strict, async (req, res, next) => {
+  try {
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return res.status(400).json({ error: 'E-mail inválido.' })
+    }
+
+    const entry = throttleFor(email)
+    // No máximo 1 código por minuto por e-mail.
+    if (Date.now() - entry.lastSentAt < 60_000) {
+      return res.status(429).json({
+        error: 'Aguarde um minuto antes de pedir outro código.',
+      })
+    }
+
+    const admin = getAdminClient()
+    if (!admin) return res.status(503).json({ error: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY.' })
+
+    const found = await findAdminUserByEmail(email)
+    if (found.error) return res.status(503).json({ error: 'Não foi possível consultar a conta.' })
+
+    // Conta inexistente: resposta neutra, sem gerar código.
+    if (!found.user) {
+      entry.lastSentAt = Date.now()
+      return res.json({
+        ok: true,
+        sent: false,
+        message: 'Se este e-mail estiver cadastrado, o código será enviado.',
+      })
+    }
+
+    const { data, error } = await admin.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+    })
+    if (error) return res.status(503).json({ error: 'Não foi possível gerar o código.' })
+
+    const code = data?.properties?.email_otp
+    if (!code) {
+      return res.status(503).json({
+        error: 'O projeto Supabase não devolveu um código de recuperação.',
+      })
+    }
+
+    const sent = await sendCodeEmail({ to: email, code })
+    if (!sent.ok) {
+      if (sent.error === 'not_configured') {
+        return res.status(503).json({
+          error:
+            'O envio de e-mail não está configurado no servidor. Cadastre RESEND_API_KEY (ou SMTP_HOST/SMTP_USER/SMTP_PASS) nas variáveis de ambiente.',
+          missing: 'email_provider',
+        })
+      }
+      return res.status(502).json({ error: `Falha ao enviar o e-mail (${sent.provider}).` })
+    }
+
+    entry.lastSentAt = Date.now()
+    entry.attempts = 0
+
+    res.json({
+      ok: true,
+      sent: true,
+      expiresInMinutes: CODE_TTL_MINUTES,
+      message: 'Código enviado para o seu e-mail.',
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * POST /api/auth/verify-code
+ * body: { email, code, password }
+ *
+ * Verifica o código no Supabase (`verifyOtp`, tipo `recovery`) e, com a sessão
+ * resultante, grava a nova senha da própria conta. Não usa a Service Role para
+ * trocar a senha: quem troca é o token que o código gerou.
+ */
+router.post('/auth/verify-code', strict, async (req, res, next) => {
+  try {
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    const code = String(req.body?.code ?? '').replace(/\D/g, '')
+    const password = String(req.body?.password ?? '')
+
+    if (!email || code.length !== 6) {
+      return res.status(400).json({ error: 'Informe o e-mail e o código de 6 dígitos.' })
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' })
+    }
+
+    const entry = throttleFor(email)
+    if (entry.attempts >= MAX_CODE_ATTEMPTS) {
+      return res.status(429).json({
+        error: 'Muitas tentativas com este e-mail. Peça um novo código em alguns minutos.',
+      })
+    }
+
+    const anon = getAnonClient()
+    if (!anon) return res.status(503).json({ error: 'Supabase não configurado no servidor.' })
+
+    const { data, error } = await anon.auth.verifyOtp({ email, token: code, type: 'recovery' })
+
+    if (error || !data?.session) {
+      entry.attempts += 1
+      const restantes = Math.max(0, MAX_CODE_ATTEMPTS - entry.attempts)
+      return res.status(400).json({
+        error:
+          restantes > 0
+            ? `Código inválido ou expirado. Tentativas restantes: ${restantes}.`
+            : 'Código inválido. Peça um novo código.',
+        attemptsLeft: restantes,
+      })
+    }
+
+    // Sessão legítima emitida pelo código: troca a senha com ela.
+    const userClient = getClientAsUser(data.session.access_token)
+    const { error: updErr } = await userClient.auth.updateUser({ password })
+    if (updErr) {
+      return res.status(400).json({ error: updErr.message })
+    }
+
+    entry.attempts = 0
+    entry.lastSentAt = 0
+
+    res.json({ ok: true, message: 'Senha atualizada. Você já pode entrar.' })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * GET /api/auth/pending  — quantas contas seguem sem e-mail confirmado.
+ * POST /api/auth/activate-all — confirma todas (restringido ao administrador).
+ */
+router.get('/auth/pending', strict, async (_req, res, next) => {
+  try {
+    const counts = await countPendingEmails()
+    if (counts.error) return res.status(503).json({ error: counts.error })
+    res.json(counts)
+  } catch (e) {
+    next(e)
+  }
+})
+
+router.post('/auth/activate-all', strict, async (req, res, next) => {
+  try {
+    const token = bearer(req)
+    if (!token) return res.status(401).json({ error: 'Token ausente.' })
+
+    const resolved = await resolveUser(token)
+    if (resolved.error) return res.status(401).json({ error: resolved.error })
+
+    const email = String(resolved.user.email ?? '').toLowerCase()
+    if (!adminEmails().includes(email)) {
+      return res.status(403).json({ error: 'Apenas o administrador pode liberar as contas.' })
+    }
+
+    const result = await confirmAllPendingEmails()
+    if (result.error) return res.status(503).json({ error: result.error })
+
+    // O administrador também entra em `profiles` como admin.
+    await ensureProfile(resolved.user)
+
+    res.json({ ok: true, ...result })
   } catch (e) {
     next(e)
   }

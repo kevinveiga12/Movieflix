@@ -13,6 +13,7 @@ import { accessRouter } from './routes/access.js'
 import { dbCatalogRouter } from './routes/db-catalog.js'
 import { plansRouter } from './routes/plans.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
+import { confirmAllPendingEmails } from './lib/profile.js'
 
 dotenv.config()
 
@@ -161,4 +162,34 @@ app.listen(PORT, HOST, () => {
       tmdb: Boolean(process.env.TMDB_API_KEY),
     }),
   )
+
+  // ── Aprovação das contas antigas ──────────────────────────────────────────
+  //
+  // O projeto nasceu com "Confirm email" ligado e o SMTP padrão do Supabase não
+  // entrega para destinatários arbitrários. Toda conta criada antes da correção
+  // ficou presa em `email_not_confirmed` e não conseguia entrar.
+  //
+  // A política do MovieFlix 2.0 é não exigir confirmação de e-mail, então
+  // liberamos as contas existentes uma vez, no boot. A operação é idempotente
+  // (só toca em quem ainda está pendente) e preserva ID, senha, perfil,
+  // favoritos e histórico — grava apenas `email_confirmed_at`.
+  //
+  // Roda em background para não atrasar o health check. Desligue com
+  // AUTO_CONFIRM_EMAILS=false se algum dia quiser voltar a exigir confirmação.
+  if (process.env.AUTO_CONFIRM_EMAILS !== 'false') {
+    ;(async () => {
+      try {
+        const result = await confirmAllPendingEmails()
+        if (result.error) {
+          console.warn('[MovieFlix] aprovação de contas:', result.error)
+          return
+        }
+        console.log(
+          `[MovieFlix] contas verificadas: ${result.scanned} · confirmadas agora: ${result.confirmed} · falhas: ${result.failed}`,
+        )
+      } catch (e) {
+        console.warn('[MovieFlix] aprovação de contas falhou:', e?.message ?? e)
+      }
+    })()
+  }
 })

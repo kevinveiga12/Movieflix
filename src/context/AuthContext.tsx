@@ -17,6 +17,8 @@ interface AuthState {
   ) => Promise<{ error: string | null; needsConfirmation: boolean }>
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<{ error: string | null }>
+  requestCode: (email: string) => Promise<{ error: string | null; sent: boolean }>
+  verifyCode: (email: string, code: string, password: string) => Promise<{ error: string | null }>
   updatePassword: (password: string) => Promise<{ error: string | null }>
   updateProfile: (patch: Partial<Pick<Profile, 'name' | 'avatar_url'>>) => Promise<{ error: string | null }>
   refreshProfile: () => Promise<void>
@@ -128,8 +130,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       isAdmin: Boolean(profile?.is_admin),
       async signIn(email, password) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        return { error: error ? friendly(error.message) : null }
+        // Login pelo SERVIDOR (POST /api/auth/login).
+        //
+        // O signInWithPassword direto no navegador falha para qualquer conta
+        // cujo e-mail ainda não foi confirmado — e o SMTP padrão do projeto não
+        // entrega a mensagem de confirmação, então a conta nunca é liberada. O
+        // servidor faz a confirmação pela API administrativa na mesma
+        // requisição, preservando a senha e o id do usuário.
+        try {
+          const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          })
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string
+            session?: { access_token: string; refresh_token: string }
+          }
+          if (!res.ok || !data.session) {
+            return { error: friendly(data.error ?? `Falha ao entrar (HTTP ${res.status}).`) }
+          }
+
+          const { error } = await supabase.auth.setSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          })
+          if (error) return { error: friendly(error.message) }
+          return { error: null }
+        } catch (e) {
+          return { error: friendly((e as Error).message) }
+        }
       },
       async signUp(email, password, fullName) {
         // Cadastro pelo SERVIDOR: a conta nasce com o e-mail já confirmado.
@@ -164,6 +194,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const redirectTo = `${window.location.origin}/redefinir-senha`
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
         return { error: error ? friendly(error.message) : null }
+      },
+      /**
+       * Pede o código de 6 dígitos.
+       *
+       * O código é gerado e validado pelo Supabase; o servidor só o envia por
+       * e-mail. Não existe código fixo nem simulação: se o SMTP do servidor não
+       * estiver configurado, a resposta traz o motivo real e o usuário recebe
+       * uma mensagem de erro em vez de um falso "enviado".
+       */
+      async requestCode(email) {
+        try {
+          const res = await fetch('/api/auth/request-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          })
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string
+            sent?: boolean
+          }
+          if (!res.ok) return { error: friendly(data.error ?? `Falha ao enviar (HTTP ${res.status}).`), sent: false }
+          return { error: null, sent: Boolean(data.sent) }
+        } catch (e) {
+          return { error: friendly((e as Error).message), sent: false }
+        }
+      },
+      async verifyCode(email, code, password) {
+        try {
+          const res = await fetch('/api/auth/verify-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code, password }),
+          })
+          const data = (await res.json().catch(() => ({}))) as { error?: string }
+          if (!res.ok) return { error: friendly(data.error ?? `Falha ao validar (HTTP ${res.status}).`) }
+          return { error: null }
+        } catch (e) {
+          return { error: friendly((e as Error).message) }
+        }
       },
       async updatePassword(password) {
         const { error } = await supabase.auth.updateUser({ password })
