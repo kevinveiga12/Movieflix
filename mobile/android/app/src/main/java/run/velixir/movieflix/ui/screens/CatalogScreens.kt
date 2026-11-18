@@ -42,7 +42,9 @@ import run.velixir.movieflix.ui.HeroBanner
 import run.velixir.movieflix.ui.LoadingBox
 import run.velixir.movieflix.ui.PosterGrid
 import run.velixir.movieflix.ui.TitleRow
+import run.velixir.movieflix.ui.theme.MfBrand
 import run.velixir.movieflix.ui.theme.MfColors
+import run.velixir.movieflix.ui.theme.MfSans
 
 @Composable
 fun HomeScreen(vm: AppViewModel, onOpen: (Title) -> Unit, onSearch: () -> Unit) {
@@ -67,10 +69,8 @@ fun HomeScreen(vm: AppViewModel, onOpen: (Title) -> Unit, onSearch: () -> Unit) 
             ) {
                 Text(
                     "MOVIEFLIX",
+                    style = MfBrand.copy(fontSize = 24.sp),
                     color = MfColors.Red,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp,
                 )
                 Spacer(Modifier.weight(1f))
                 Box(
@@ -113,6 +113,7 @@ fun HomeScreen(vm: AppViewModel, onOpen: (Title) -> Unit, onSearch: () -> Unit) 
                     Text(
                         "Continuar assistindo",
                         color = MfColors.Text,
+                        fontFamily = MfSans,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(start = 16.dp, bottom = 10.dp),
@@ -197,6 +198,7 @@ fun CatalogScreen(
         Text(
             if (kind == "tv") "Séries" else "Filmes",
             color = MfColors.Text,
+            fontFamily = MfSans,
             fontSize = 22.sp,
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(16.dp),
@@ -262,6 +264,7 @@ fun FavoritesScreen(vm: AppViewModel, onOpen: (Title) -> Unit) {
         Text(
             "Favoritos",
             color = MfColors.Text,
+            fontFamily = MfSans,
             fontSize = 22.sp,
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(16.dp),
@@ -296,6 +299,7 @@ fun HistoryScreen(vm: AppViewModel, onOpen: (Title) -> Unit) {
         Text(
             "Histórico",
             color = MfColors.Text,
+            fontFamily = MfSans,
             fontSize = 22.sp,
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(16.dp),

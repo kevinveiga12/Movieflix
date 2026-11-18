@@ -1,13 +1,16 @@
 name: Build APKs
 
 # Compila os dois aplicativos Android (mobile e TV) em um runner com o
-# Android SDK real. O sandbox de desenvolvimento nao tem Java nem SDK, entao
-# este workflow e o ambiente de build oficial do projeto.
+# Android SDK real, e RODA cada um em emulador tirando screenshot.
+#
+# O sandbox de desenvolvimento nao tem Java nem SDK, entao este workflow e o
+# ambiente de build oficial do projeto.
 #
 # Artefatos gerados:
 #   movieflix-mobile-release.apk
 #   movieflix-tv-release.apk
 #   movieflix-release.keystore  (GUARDE: e a chave das atualizacoes futuras)
+#   movieflix-screenshots       (prova visual de que o app abre)
 
 on:
   workflow_dispatch:
@@ -16,12 +19,14 @@ on:
     paths:
       - 'mobile/android/**'
       - 'tv/android/**'
+      - 'scripts/verify-apk.py'
+      - 'scripts/check-screenshot.py'
       - '.github/workflows/build-apks.yml'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -41,10 +46,8 @@ jobs:
         run: |
           SDK="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
           echo "SDK em: $SDK"
-          ls "$SDK" || true
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          # platform 35 + build-tools que o projeto usa (compileSdk = 35)
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-35" "build-tools;35.0.0" "platform-tools" 2>&1 | tail -5
@@ -53,6 +56,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
+      - name: Pillow (para checar screenshots)
+        run: pip install --quiet pillow
 
       # Chave de assinatura. Gerada uma vez por execucao e publicada como
       # artefato para o dono do projeto guardar. Sem ela, uma atualizacao
@@ -92,12 +98,84 @@ jobs:
           find tv/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/movieflix-tv-release.apk \;
           ls -lh out/
 
+      # Prova que a UI realmente entrou no pacote. Se o R8 remover a arvore de
+      # Compose, o app abre em tela preta — este passo falha antes de publicar.
+      - name: Verificar conteudo dos APKs
+        run: |
+          python3 scripts/verify-apk.py out/movieflix-mobile-release.apk
+          python3 scripts/verify-apk.py out/movieflix-tv-release.apk
+
+      # ── Emulador: prova visual de que o app abre ───────────────────────────
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || echo "sem /dev/kvm"
+
+      - name: Rodar emulador e capturar telas
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            mkdir -p screenshots
+
+            echo "=== Instalando APK mobile ==="
+            adb install -r out/movieflix-mobile-release.apk
+
+            echo "=== Abrindo o app mobile ==="
+            adb shell am start -n run.velixir.movieflix/.MainActivity
+            sleep 15
+            adb exec-out screencap -p > screenshots/mobile-home.png
+
+            echo "=== Processo vivo? ==="
+            adb shell pidof run.velixir.movieflix && echo "MOBILE VIVO" || echo "MOBILE MORTO"
+
+            echo "=== Log de crash ==="
+            adb logcat -d -b crash | tail -60 || true
+
+            echo "=== Tela preta? ==="
+            python3 scripts/check-screenshot.py screenshots/mobile-home.png "mobile home"
+
+            echo "=== Instalando APK TV ==="
+            adb install -r out/movieflix-tv-release.apk
+            adb shell am start -n run.velixir.movieflix.tv/.MainActivity
+            sleep 15
+            adb exec-out screencap -p > screenshots/tv-home.png
+
+            adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO" || echo "TV MORTO"
+            adb logcat -d -b crash | tail -40 || true
+
+            python3 scripts/check-screenshot.py screenshots/tv-home.png "tv home"
+
+            echo "=== Navegacao por D-pad na TV ==="
+            adb shell input keyevent KEYCODE_DPAD_DOWN
+            sleep 1
+            adb shell input keyevent KEYCODE_DPAD_RIGHT
+            sleep 1
+            adb exec-out screencap -p > screenshots/tv-focus.png
+            echo "OK: D-pad respondeu"
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: movieflix-apks
           path: out/*.apk
           if-no-files-found: error
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: movieflix-screenshots
+          path: screenshots/*.png
+          if-no-files-found: warn
 
       - name: Upload chave de assinatura
         uses: actions/upload-artifact@v4

@@ -33,7 +33,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import run.velixir.movieflix.data.Title
+import run.velixir.movieflix.ui.theme.MfBrand
 import run.velixir.movieflix.ui.theme.MfColors
+import run.velixir.movieflix.ui.theme.MfDisplay
+import run.velixir.movieflix.ui.theme.MfHeroTitle
+import run.velixir.movieflix.ui.theme.MfSans
+import run.velixir.movieflix.ui.theme.MfSectionTitle
 
 /** Card de pôster — mesma proporção 2:3 do site. */
 @Composable
@@ -79,6 +84,7 @@ fun PosterCard(
         Text(
             text = title.title,
             color = MfColors.TextSoft,
+            fontFamily = MfSans,
             fontSize = 12.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -96,13 +102,23 @@ fun TitleRow(
 ) {
     if (items.isEmpty()) return
     Column(modifier = Modifier.padding(bottom = 18.dp)) {
-        Text(
-            text = heading,
-            color = MfColors.Text,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
+        // Título de seção no padrão do site: barrinha degradê + Inter Bold.
+        Row(
             modifier = Modifier.padding(start = 16.dp, bottom = 10.dp),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Box(
+                Modifier
+                    .width(4.dp)
+                    .height(17.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        Brush.verticalGradient(listOf(MfColors.Red, MfColors.Purple)),
+                    ),
+            )
+            Text(text = heading, style = MfSectionTitle, color = MfColors.Text)
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -194,24 +210,25 @@ fun HeroBanner(title: Title?, onPlay: () -> Unit) {
                 .align(Alignment.BottomStart)
                 .padding(16.dp),
         ) {
+            // Título em Bebas Neue, caixa alta — o .display do site.
             Text(
-                text = title.title,
+                text = title.title.uppercase(),
+                style = MfHeroTitle.copy(fontSize = 30.sp, lineHeight = 30.sp),
                 color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Black,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("★ ${title.ratingLabel}", color = MfColors.Warning, fontSize = 12.sp)
+                Text("★ ${title.ratingLabel}", color = MfColors.Warning, fontFamily = MfSans, fontSize = 12.sp)
                 Spacer(Modifier.width(10.dp))
-                Text(title.year, color = MfColors.TextMuted, fontSize = 12.sp)
+                Text(title.year, color = MfColors.TextMuted, fontFamily = MfSans, fontSize = 12.sp)
                 if (title.category.isNotBlank()) {
                     Spacer(Modifier.width(10.dp))
                     Text(
                         title.category.split(",").first().trim(),
                         color = MfColors.TextMuted,
+                        fontFamily = MfSans,
                         fontSize = 12.sp,
                     )
                 }
@@ -225,7 +242,13 @@ fun HeroBanner(title: Title?, onPlay: () -> Unit) {
                     .padding(horizontal = 22.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("▶  Assistir", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(
+                    "▶  Assistir",
+                    color = Color.White,
+                    fontFamily = MfSans,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                )
             }
         }
     }
@@ -243,6 +266,7 @@ fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
         Text(
             label,
             color = if (selected) Color.White else MfColors.TextMuted,
+            fontFamily = MfSans,
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
         )
@@ -251,19 +275,36 @@ fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        color = MfColors.Text,
-        fontSize = 20.sp,
-        fontWeight = FontWeight.Black,
+    Row(
         modifier = Modifier.padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Box(
+            Modifier
+                .width(4.dp)
+                .height(20.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Brush.verticalGradient(listOf(MfColors.Red, MfColors.Purple))),
+        )
+        Text(text = text, style = MfSectionTitle.copy(fontSize = 20.sp), color = MfColors.Text)
+    }
+}
+
+/** Logo MovieFlix — Bebas Neue, caixa alta, vermelho, como o .brand-word. */
+@Composable
+fun MfLogo(fontSize: Int = 26) {
+    Text(
+        text = "MOVIEFLIX",
+        style = MfBrand.copy(fontSize = fontSize.sp),
+        color = MfColors.Red,
     )
 }
 
 @Composable
 fun EmptyState(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = MfColors.TextMuted, fontSize = 14.sp)
+        Text(text, color = MfColors.TextMuted, fontFamily = MfSans, fontSize = 14.sp)
     }
 }
 

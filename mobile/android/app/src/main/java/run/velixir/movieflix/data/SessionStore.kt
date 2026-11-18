@@ -1,6 +1,7 @@
 package run.velixir.movieflix.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -9,10 +10,16 @@ import androidx.security.crypto.MasterKey
  *
  * Guarda apenas o access_token e o refresh_token do Supabase — nunca a senha.
  * A senha existe só na memória durante a requisição de login.
+ *
+ * IMPORTANTE: `EncryptedSharedPreferences.create` pode lançar exceção em
+ * aparelhos com Keystore corrompido ou ROM modificada. Se isso acontecesse
+ * dentro do construtor do ViewModel, o app morreria na inicialização — tela
+ * preta. Por isso há um fallback para SharedPreferences comum: pior em
+ * segurança, mas o app abre. O token continua sendo só do próprio usuário.
  */
 class SessionStore(context: Context) {
 
-    private val prefs = run {
+    private val prefs: SharedPreferences = runCatching {
         val key = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -22,7 +29,10 @@ class SessionStore(context: Context) {
             key,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+        ) as SharedPreferences
+    }.getOrElse {
+        // Keystore indisponível: o app precisa abrir de qualquer forma.
+        context.getSharedPreferences("movieflix_session_plain", Context.MODE_PRIVATE)
     }
 
     var accessToken: String?

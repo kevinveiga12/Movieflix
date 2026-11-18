@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
                         .background(MfColors.Bg)
                         .statusBarsPadding(),
                 ) {
-                    MovieFlixApp()
+                    MovieFlixRoot()
                 }
             }
         }
@@ -88,8 +88,19 @@ sealed interface Route {
     data class Player(val title: Title, val season: Int?, val episode: Int?) : Route
 }
 
+/**
+ * Raiz da interface.
+ *
+ * ATENÇÃO ao nome: esta função NÃO pode se chamar `MovieFlixApp`, porque já
+ * existe `class MovieFlixApp : Application()` no mesmo pacote. Com o nome
+ * repetido, a chamada `MovieFlixApp()` dentro de `setContent` resolvia para o
+ * CONSTRUTOR da classe Application em vez desta função — compilava sem erro,
+ * mas não montava interface nenhuma. O R8 então via esta função como não usada
+ * e removia junto todo o pacote `ui`, o Compose, o Coil e o OkHttp: o APK
+ * abria em tela preta. Nome distinto elimina a ambiguidade.
+ */
 @Composable
-fun MovieFlixApp(vm: AppViewModel = viewModel()) {
+fun MovieFlixRoot(vm: AppViewModel = viewModel()) {
     var route by remember { mutableStateOf<Route>(Route.Home) }
     val s by vm.state.collectAsState()
 

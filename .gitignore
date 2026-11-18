@@ -14,3 +14,5 @@ server/data/admin-config.json
 
 # TS build cache
 *.tsbuildinfo
+__pycache__/
+*.pyc
