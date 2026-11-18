@@ -5,10 +5,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -33,10 +32,14 @@ import run.velixir.movieflix.tv.ui.screens.TvAccountScreen
 import run.velixir.movieflix.tv.ui.screens.TvCatalogScreen
 import run.velixir.movieflix.tv.ui.screens.TvDetailScreen
 import run.velixir.movieflix.tv.ui.screens.TvFavoritesScreen
+import run.velixir.movieflix.tv.ui.screens.TvGenresScreen
+import run.velixir.movieflix.tv.ui.screens.TvHistoryScreen
 import run.velixir.movieflix.tv.ui.screens.TvHomeScreen
 import run.velixir.movieflix.tv.ui.screens.TvLoginScreen
+import run.velixir.movieflix.tv.ui.screens.TvPlansScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlayerScreen
 import run.velixir.movieflix.tv.ui.screens.TvSearchScreen
+import run.velixir.movieflix.tv.ui.screens.TvSettingsScreen
 import run.velixir.movieflix.tv.ui.screens.TvSidebar
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MovieFlixTheme
@@ -62,9 +65,13 @@ sealed interface TvRoute {
     data object Home : TvRoute
     data object Movies : TvRoute
     data object Series : TvRoute
+    data object Genres : TvRoute
     data object Search : TvRoute
     data object Favorites : TvRoute
+    data object History : TvRoute
+    data object Plans : TvRoute
     data object Account : TvRoute
+    data object Settings : TvRoute
     data object Login : TvRoute
     data class Detail(val title: Title) : TvRoute
     data class Player(val title: Title, val season: Int?, val episode: Int?) : TvRoute
@@ -108,9 +115,13 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                     TvRoute.Home -> "home"
                     TvRoute.Movies -> "movies"
                     TvRoute.Series -> "series"
+                    TvRoute.Genres -> "genres"
                     TvRoute.Search -> "search"
                     TvRoute.Favorites -> "favorites"
+                    TvRoute.History -> "history"
+                    TvRoute.Plans -> "plans"
                     TvRoute.Account, TvRoute.Login -> "account"
+                    TvRoute.Settings -> "settings"
                     is TvRoute.Detail -> "home"
                     else -> "home"
                 }
@@ -119,8 +130,12 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                     route = when (key) {
                         "movies" -> TvRoute.Movies
                         "series" -> TvRoute.Series
+                        "genres" -> TvRoute.Genres
                         "search" -> TvRoute.Search
                         "favorites" -> TvRoute.Favorites
+                        "history" -> TvRoute.History
+                        "plans" -> TvRoute.Plans
+                        "settings" -> TvRoute.Settings
                         "account" -> if (s.loggedIn) TvRoute.Account else TvRoute.Login
                         else -> TvRoute.Home
                     }
@@ -131,9 +146,13 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                         TvRoute.Home -> TvHomeScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.Movies -> TvCatalogScreen(vm, "movie") { route = TvRoute.Detail(it) }
                         TvRoute.Series -> TvCatalogScreen(vm, "tv") { route = TvRoute.Detail(it) }
+                        TvRoute.Genres -> TvGenresScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.Search -> TvSearchScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.Favorites -> TvFavoritesScreen(vm) { route = TvRoute.Detail(it) }
+                        TvRoute.History -> TvHistoryScreen(vm) { route = TvRoute.Detail(it) }
+                        TvRoute.Plans -> TvPlansScreen(vm)
                         TvRoute.Account -> TvAccountScreen(vm) { route = TvRoute.Login }
+                        TvRoute.Settings -> TvSettingsScreen(vm)
                         TvRoute.Login -> TvLoginScreen(vm) { route = TvRoute.Account }
                         is TvRoute.Detail -> TvDetailScreen(
                             vm, r.title,
@@ -148,7 +167,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel()) {
                             Modifier
                                 .align(Alignment.BottomCenter)
                                 .padding(24.dp)
-                                .background(MfColors.BgHover, androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                                .background(MfColors.BgHover, RoundedCornerShape(10.dp))
                                 .padding(horizontal = 20.dp, vertical = 12.dp),
                         ) {
                             Text(s.toast!!, color = MfColors.Text, fontSize = 14.sp)

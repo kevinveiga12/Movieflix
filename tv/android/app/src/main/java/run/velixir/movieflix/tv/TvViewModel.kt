@@ -11,6 +11,7 @@ import run.velixir.movieflix.tv.data.ApiException
 import run.velixir.movieflix.tv.data.FavoriteRow
 import run.velixir.movieflix.tv.data.HistoryRow
 import run.velixir.movieflix.tv.data.MovieFlixApi
+import run.velixir.movieflix.tv.data.Plan
 import run.velixir.movieflix.tv.data.Season
 import run.velixir.movieflix.tv.data.SessionStore
 import run.velixir.movieflix.tv.data.SubscriptionResponse
@@ -25,6 +26,8 @@ data class TvState(
     val favorites: List<FavoriteRow> = emptyList(),
     val history: List<HistoryRow> = emptyList(),
     val seasons: List<Season> = emptyList(),
+    val genres: List<String> = emptyList(),
+    val plans: List<Plan> = emptyList(),
     val subscription: SubscriptionResponse? = null,
     val loggedIn: Boolean = false,
     val email: String? = null,
@@ -65,18 +68,27 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val m = api.movies(limit = 40)
                 val s = api.series(limit = 40)
-                update { it.copy(loading = false, movies = m.items, series = s.items) }
+                val g = runCatching { api.genres() }.getOrNull()
+                update {
+                    it.copy(
+                        loading = false,
+                        movies = m.items,
+                        series = s.items,
+                        genres = g?.genres ?: emptyList(),
+                    )
+                }
             } catch (e: Exception) {
                 update { it.copy(loading = false, error = friendly(e)) }
             }
         }
     }
 
-    fun loadCatalog(kind: String) {
+    fun loadCatalog(kind: String, genre: String? = null) {
         viewModelScope.launch {
             update { it.copy(loading = true, error = null) }
             try {
-                val r = if (kind == "tv") api.series(limit = 60) else api.movies(limit = 60)
+                val r = if (kind == "tv") api.series(limit = 60, genre = genre)
+                else api.movies(limit = 60, genre = genre)
                 update {
                     if (kind == "tv") it.copy(loading = false, series = r.items)
                     else it.copy(loading = false, movies = r.items)
@@ -154,6 +166,13 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val s = runCatching { api.subscription() }.getOrNull()
             update { it.copy(subscription = s) }
+        }
+    }
+
+    fun loadPlans() {
+        viewModelScope.launch {
+            val p = runCatching { api.plans(session.email) }.getOrNull()
+            update { it.copy(plans = p?.plans ?: emptyList()) }
         }
     }
 
