@@ -56,7 +56,7 @@ class SessionStore(context: Context) {
      *
      * Guardado só para o menu não piscar ao reabrir o app. NÃO é fonte de
      * verdade: a cada abertura o app revalida em /api/profile/ensure, e toda
-     * rota /api/admin/* revalida de novo no servidor. Alterar este valor no
+     * rota /api/admin revalida de novo no servidor. Alterar este valor no
      * aparelho não dá acesso a nada.
      */
     var isAdmin: Boolean
