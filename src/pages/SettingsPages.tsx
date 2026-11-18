@@ -147,11 +147,27 @@ export function DownloadPage() {
         <div className="row-between">
           <div>
             <div className="panel-title">📱 MovieFlix Mobile</div>
-            <p className="panel-sub" style={{ marginBottom: 0 }}>
-              Para Android e iPhone. Assista no celular com o app.
+            <p className="panel-sub" style={{ marginBottom: 6 }}>
+              Aplicativo Android para assistir no celular, com login, catálogo,
+              favoritos e histórico sincronizados com sua conta.
+            </p>
+            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+              Compatível com Android 8.0 ou superior.
             </p>
           </div>
-          <span className="badge badge--outline">Android · iOS</span>
+          <span className="badge badge--outline">Em desenvolvimento</span>
+        </div>
+        {/*
+          Sem botão de download enquanto não existir APK publicado: um botão
+          que não baixa nada é pior do que a ausência dele.
+        */}
+        <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
+          <InfoIcon size={18} />
+          <span>
+            A versão para celular ainda não tem instalador publicado. Enquanto
+            isso, use o MovieFlix no navegador do celular — todas as funções
+            estão disponíveis.
+          </span>
         </div>
       </div>
 
@@ -159,11 +175,22 @@ export function DownloadPage() {
         <div className="row-between">
           <div>
             <div className="panel-title">📺 MovieFlix TV</div>
-            <p className="panel-sub" style={{ marginBottom: 0 }}>
-              Assista seus filmes e séries diretamente na sua Android TV, Google TV ou TV Box.
+            <p className="panel-sub" style={{ marginBottom: 6 }}>
+              Versão para Android TV, Google TV e TV Box, com navegação pelo
+              controle remoto.
+            </p>
+            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+              Requer Android TV 8.0 ou superior.
             </p>
           </div>
-          <span className="badge badge--outline">Android TV</span>
+          <span className="badge badge--outline">Em desenvolvimento</span>
+        </div>
+        <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
+          <InfoIcon size={18} />
+          <span>
+            A versão para TV ainda não tem instalador publicado. Nas smart TVs,
+            abra o navegador e acesse o site do MovieFlix.
+          </span>
         </div>
       </div>
 

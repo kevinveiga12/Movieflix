@@ -1,22 +1,83 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Player — estados de reprodução
+   ───────────────────────────────────────────────────────────────────────────── */
 
-/* Aviso de fonte externa (embed) no player.
-   Existe porque o requisito é reproduzir dentro do MovieFlix; um embed de
-   terceiro não garante isso, então o usuário é informado em vez de enganado. */
-.player-embed-warning {
+/**
+ * Estado de "título indisponível no momento".
+ *
+ * Substitui o antigo aviso de "Fonte externa" (que mostrava nome de provedor
+ * e instrução para o administrador na tela do cliente). Este bloco segue a
+ * identidade do MovieFlix: fundo escuro, tipografia da plataforma, uma ação
+ * clara e nenhum detalhe técnico.
+ */
+.player-unavailable {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 5;
-  padding: 10px 16px;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: #fde68a;
-  background: rgba(120, 53, 15, 0.92);
-  border-bottom: 1px solid rgba(253, 230, 138, 0.35);
-  backdrop-filter: blur(6px);
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 24px;
+  text-align: center;
+  background: radial-gradient(
+      ellipse at 50% 30%,
+      rgba(229, 9, 20, 0.08),
+      transparent 62%
+    ),
+    #0b0b0f;
 }
 
-.player-embed-warning strong {
-  color: #fef3c7;
+.player-unavailable__icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 2px;
+  border-radius: 50%;
+  color: #f5f5f7;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.player-unavailable__title {
+  margin: 0;
+  font-size: clamp(1.05rem, 2.2vw, 1.35rem);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #f5f5f7;
+}
+
+.player-unavailable__text {
+  max-width: 46ch;
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #a1a1aa;
+}
+
+.player-unavailable__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+/* Em telas pequenas o estado precisa caber sem cortar o botão. */
+@media (max-width: 520px) {
+  .player-unavailable {
+    padding: 20px 16px;
+    gap: 8px;
+  }
+
+  .player-unavailable__icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .player-unavailable__text {
+    font-size: 0.86rem;
+  }
 }

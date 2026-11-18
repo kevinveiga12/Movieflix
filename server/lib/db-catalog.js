@@ -48,6 +48,18 @@ async function dbHasTables() {
   return tablesPresent
 }
 
+/**
+ * Normaliza o tipo vindo do banco/catálogo.
+ *
+ * O banco usa 'movie'/'tv', mas catálogos importados podem trazer 'series' ou
+ * 'show'. Tratar tudo que não é 'tv' como filme fazia uma série cair no fluxo
+ * de filme no player (sem temporada/episódio) e o título ficava sem fonte.
+ */
+function normalizeMediaType(value) {
+  const v = String(value ?? '').toLowerCase()
+  return v === 'tv' || v === 'series' || v === 'show' ? 'tv' : 'movie'
+}
+
 /** Normaliza a linha do banco para o formato `Title` do frontend. */
 function toTitle(row) {
   return {
@@ -64,8 +76,8 @@ function toTitle(row) {
     category: row.category ?? '',
     language: row.language ?? '',
     quality: row.quality ?? '',
-    type: row.type === 'tv' ? 'tv' : 'movie',
-    media_type: row.type === 'tv' ? 'tv' : 'movie',
+    type: normalizeMediaType(row.type),
+    media_type: normalizeMediaType(row.type),
     year: row.year ?? '',
     duration: row.duration ?? null,
     required_plan: row.required_plan ?? null,

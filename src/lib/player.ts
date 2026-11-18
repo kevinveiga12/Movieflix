@@ -3,15 +3,42 @@ import type { Title } from './types'
 /**
  * Resolução da fonte de reprodução.
  *
- * O MovieFlix original usa o provedor StreamBetter, que entrega uma página de
- * embed (não um arquivo .mp4/.m3u8 direto). Por isso o player tem dois modos:
+ * ── O QUE FOI APURADO (testes reais em 2026-11-18) ─────────────────────────
  *
- *  - 'direct'  → URL de arquivo (MP4/HLS). Usa <video> nativo + hls.js.
- *  - 'embed'   → página do provedor. Usa <iframe> com sandbox restritivo.
+ * Todo o catálogo aponta para `streambetter.shop/filme/{id}`. Ao abrir essa
+ * página dentro de um iframe ela NÃO entrega o vídeo: responde com um desafio
+ * anti-bot do Cloudflare Turnstile ("Confirmando que você é uma pessoa de
+ * verdade..."). O desafio não se completa dentro de um iframe, e a página
+ * então tenta escapar — daí o redirecionamento para fora do MovieFlix e, ao
+ * voltar, a reprodução bloqueada.
  *
- * O administrador pode cadastrar uma URL direta em `video_url`; se ela for um
- * arquivo, o player usa o modo nativo (melhor experiência: legendas, áudio,
- * retomada precisa). Caso contrário cai no embed.
+ * Outros provedores testados no mesmo dia:
+ *   - vidsrc.to     → recusa explicitamente iframe com `sandbox`
+ *   - vidlink.pro   → "Please Disable Sandbox": só toca se retirarmos o sandbox
+ *   - 2embed.cc     → devolve o título errado para o id pedido
+ *   - embed.su / multiembed.mov / vidsrc.icu / vidsrc.pro → não entregam player
+ *
+ * Conclusão: nenhum embed de terceiro permite reprodução incorporada COM as
+ * proteções de segurança que o MovieFlix exige (sem pop-up, sem navegação da
+ * janela principal). Reproduzir de qualquer jeito exigiria remover o `sandbox`
+ * e liberar `allow-popups`, que é exatamente o que causa o redirecionamento e
+ * os anúncios que o cliente relatou. Portanto o embed não é tratado como
+ * reprodução garantida.
+ *
+ * ── COMO O APP SE COMPORTA AGORA ───────────────────────────────────────────
+ *
+ *  1) `direct` → arquivo de mídia (MP4/HLS). É o caminho preferido e o único
+ *     que o MovieFlix apresenta como reprodução garantida: controle total,
+ *     retomada exata, sem anúncio e sem saída do site.
+ *  2) `embed`  → página de terceiro. Continua existindo, mas SEMPRE com
+ *     sandbox restritivo (`allow-scripts allow-same-origin allow-presentation
+ *     allow-forms`), nunca com `allow-popups` nem `allow-top-navigation`.
+ *     Assim o pior caso é o player não carregar DENTRO do site — nunca o
+ *     cliente ser jogado para outro site. Se não carregar, a UI mostra um
+ *     estado de indisponibilidade curto e em português, sem jargão técnico.
+ *
+ * O modo vem do servidor (`/api/playback/authorize`), então cadastrar uma URL
+ * direta no painel promove o título a `direct` sem alterar o frontend.
  */
 
 export type PlaybackMode = 'direct' | 'embed'
@@ -28,6 +55,29 @@ const DIRECT_EXT = /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i
 export function isDirectUrl(url: string): boolean {
   return DIRECT_EXT.test(url)
 }
+
+/**
+ * Sandbox usado em TODA incorporação de terceiro.
+ *
+ * Deliberadamente NÃO inclui:
+ *   - allow-popups            → bloqueia janelas/anúncios em aba nova
+ *   - allow-top-navigation*   → bloqueia o provedor de trocar a página do
+ *                               MovieFlix (a causa do "fui jogado pra fora")
+ *   - allow-modals            → bloqueia alert/confirm do provedor
+ *
+ * Inclui o mínimo para um player funcionar:
+ *   - allow-scripts           → o player é JS
+ *   - allow-same-origin       → necessário para o player acessar o próprio
+ *                               storage/HLS segments
+ *   - allow-presentation      → permite entrar em tela cheia
+ *   - allow-forms              → login/legendas de alguns provedores
+ */
+export const EMBED_SANDBOX =
+  'allow-scripts allow-same-origin allow-presentation allow-forms'
+
+/** `allow` do iframe — o que a página incorporada pode usar do dispositivo. */
+export const EMBED_ALLOW =
+  'autoplay; fullscreen; encrypted-media; picture-in-picture'
 
 export function movieSource(t: Title): PlaybackSource | null {
   if (!t.video_url) return null

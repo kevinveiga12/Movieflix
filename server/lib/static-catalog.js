@@ -25,6 +25,25 @@ const inflight = { movie: null, tv: null }
 const FILES = { movie: 'filmes.light.json', tv: 'series.light.json' }
 
 /**
+ * Normaliza o `type` de um registro do catálogo estático.
+ *
+ * Os arquivos gravam `type: "series"` nas séries, mas TODO o servidor compara
+ * com `'tv'` (rotas de episódio, autorização de reprodução, estatísticas).
+ * Sem esta normalização, uma série vinda do catálogo estático:
+ *   - caía no ramo de filme em /api/playback/authorize → "no_source";
+ *   - não era reconhecida como série em seriesEpisodes.
+ *
+ * Não altera o array em cache: devolve uma cópia com `type`/`media_type` certos.
+ */
+function normalizeRecord(t) {
+  if (!t || typeof t !== 'object') return t
+  const raw = String(t.type ?? t.media_type ?? '').toLowerCase()
+  const type = raw === 'tv' || raw === 'series' || raw === 'show' ? 'tv' : 'movie'
+  if (t.type === type && t.media_type === type) return t
+  return { ...t, type, media_type: type }
+}
+
+/**
  * Devolve a lista (já parseada) de filmes ou séries.
  * O array é compartilhado — NUNCA o mutar; use filter/map/slice.
  */
@@ -36,8 +55,9 @@ export async function loadStatic(kind) {
     try {
       const raw = await fs.readFile(path.join(PUBLIC, FILES[kind]), 'utf8')
       const list = JSON.parse(raw)
-      cache[kind] = list
-      return list
+      // Normaliza uma única vez, no parse — o resto do servidor só vê 'tv'/'movie'.
+      cache[kind] = Array.isArray(list) ? list.map(normalizeRecord) : []
+      return cache[kind]
     } catch {
       cache[kind] = []
       return []

@@ -18,6 +18,41 @@ async function loadJson<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
+/**
+ * Normaliza o `type` de um título.
+ *
+ * O gerador do catálogo grava `type: "series"` nas séries, mas todo o resto do
+ * app (player, detalhe, cards, filtros) trabalha com `"tv"`. Sem esta
+ * normalização, 8.093 séries ficavam com um tipo que nenhuma comparação
+ * reconhecia: a página da série dizia "não encontrada", o player tratava como
+ * filme e o botão de episódio não aparecia.
+ *
+ * Aceita também `media_type` como pista quando `type` vem ausente ou inválido.
+ */
+function normalizeType(raw: Partial<Title>): MediaType {
+  const value = String(raw.type ?? raw.media_type ?? '').toLowerCase()
+  if (value === 'tv' || value === 'series' || value === 'show') return 'tv'
+  return 'movie'
+}
+
+/** Aplica a normalização sem descartar nenhum campo do registro original. */
+function normalizeTitle(raw: Title): Title {
+  const type = normalizeType(raw)
+  return {
+    ...raw,
+    id: String(raw.id ?? raw.tmdb_id ?? ''),
+    tmdb_id: Number(raw.tmdb_id ?? raw.id ?? 0),
+    type,
+    media_type: type,
+    category: raw.category ?? '',
+    description: raw.description ?? '',
+    poster_url: raw.poster_url ?? '',
+    backdrop_url: raw.backdrop_url ?? '',
+    video_url: raw.video_url ?? '',
+    episodes_available: Array.isArray(raw.episodes_available) ? raw.episodes_available : [],
+  }
+}
+
 export async function loadCatalog(): Promise<void> {
   if (moviesCache && seriesCache) return
   if (loading) return loading
@@ -26,8 +61,8 @@ export async function loadCatalog(): Promise<void> {
       loadJson<Title[]>('/filmes/filmes.light.json'),
       loadJson<Title[]>('/filmes/series.light.json'),
     ])
-    moviesCache = movies
-    seriesCache = series
+    moviesCache = movies.map(normalizeTitle)
+    seriesCache = series.map(normalizeTitle)
   })()
   try {
     await loading
@@ -48,9 +83,23 @@ export function getAll(): Title[] {
   return [...getMovies(), ...getSeries()]
 }
 
+/**
+ * Busca um título por id.
+ *
+ * Procura primeiro no conjunto indicado por `type`, mas cai para o catálogo
+ * inteiro quando não encontra — assim um link antigo ou um parâmetro de tipo
+ * errado (`?type=movie` numa série) ainda abre o conteúdo certo em vez de
+ * mostrar "não encontrado".
+ */
 export function getById(id: string, type?: MediaType): Title | undefined {
-  const pool = type === 'movie' ? getMovies() : type === 'tv' ? getSeries() : getAll()
-  return pool.find((t) => String(t.tmdb_id) === String(id) || t.id === String(id))
+  const key = String(id)
+  const match = (pool: Title[]) =>
+    pool.find((t) => String(t.tmdb_id) === key || t.id === key)
+
+  if (type === 'movie' || type === 'tv') {
+    return match(type === 'movie' ? getMovies() : getSeries()) ?? match(getAll())
+  }
+  return match(getAll())
 }
 
 /** Somente títulos com fonte de vídeo configurada são reproduzíveis. */

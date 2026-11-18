@@ -5,6 +5,7 @@ import { loadCatalog, getById } from '../lib/catalog'
 import { nextEpisode, formatTime, type PlaybackSource } from '../lib/player'
 import { authorizePlayback } from '../lib/access'
 import { PlaybackGate } from '../components/PlaybackGate'
+import { EmbedPlayer } from '../components/EmbedPlayer'
 import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useHistory } from '../lib/userData'
@@ -29,7 +30,9 @@ export function PlayerPage() {
   const { user } = useAuth()
   const { saveProgress, progressFor } = useHistory()
 
-  const type = (params.get('type') as 'movie' | 'tv') ?? 'movie'
+  // Tipo pedido na URL. `null` = não veio; nesse caso descobrimos pelo
+  // catálogo, para que /assistir/1621 (uma SÉRIE) não seja tratado como filme.
+  const askedType = params.get('type') as 'movie' | 'tv' | null
   const season = Number(params.get('season') ?? 1)
   const episode = Number(params.get('episode') ?? 1)
 
@@ -57,6 +60,22 @@ export function PlayerPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [subsOn, setSubsOn] = useState(false)
+
+  /**
+   * Tipo efetivo do título.
+   *
+   * A URL manda quando traz `?type=`, mas quando o parâmetro falta usamos o
+   * tipo REAL do catálogo. Sem isso, abrir `/assistir/1621` (Boardwalk Empire,
+   * uma série de 5 temporadas) pedia autorização como FILME: o servidor não
+   * achava fonte, devolvia `no_source` e o cliente via "sem fonte de
+   * reprodução" — exatamente o sintoma relatado no título 1621.
+   */
+  const catalogHit = useMemo(
+    () => (ready ? getById(id ?? '') : undefined),
+    [ready, id, authAttempt],
+  )
+  const type: 'movie' | 'tv' =
+    askedType === 'movie' || askedType === 'tv' ? askedType : (catalogHit?.type ?? 'movie')
 
   // Título em exibição. Prefere o catálogo estático (metadados completos) e cai
   // para o título da resposta autorizada quando o item só existe no banco.
@@ -396,29 +415,18 @@ export function PlayerPage() {
         )}
 
         {source?.mode === 'embed' && (
-          <>
-            {/*
-              Fonte externa (embed). O requisito do projeto é reproduzir DENTRO
-              do MovieFlix, sem anúncios nem redirecionamentos. Um embed de
-              terceiro não garante isso — então avisamos em vez de fingir que
-              está tudo certo. O administrador deve cadastrar um arquivo
-              próprio (.mp4/.m3u8) para o título sair deste modo.
-            */}
-            <div className="player-embed-warning">
-              <strong>Fonte externa</strong> — este título usa um player de
-              terceiros. Se houver anúncios ou redirecionamento, é o provedor
-              externo, não o MovieFlix. Para reprodução dentro da plataforma, o
-              administrador precisa cadastrar um arquivo próprio (.mp4 ou .m3u8).
-            </div>
-            <iframe
-              src={source.url}
-              title={title?.title ?? 'Player'}
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              allowFullScreen
-              referrerPolicy="origin"
-              sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups"
-            />
-          </>
+          /*
+            Player do provedor dentro do MovieFlix. O componente usa sandbox
+            restritivo (sem allow-popups / allow-top-navigation), então o
+            provedor não consegue abrir aba nova nem trocar a página. Se o
+            player não carregar, mostra um estado curto em português — nunca
+            nome de provedor nem mensagem técnica.
+          */
+          <EmbedPlayer
+            url={source.url}
+            title={title?.title}
+            onRetry={() => setAuthAttempt((n) => n + 1)}
+          />
         )}
 
         {loading && source?.mode === 'direct' && (
@@ -564,7 +572,7 @@ export function PlayerPage() {
             {source?.mode === 'embed' && (
               <div className="inline" style={{ justifyContent: 'space-between' }}>
                 <span className="player-time">
-                  Reprodução pelo provedor · use os controles do player
+                  {type === 'tv' ? `Temporada ${season} · Episódio ${episode}` : title?.year}
                 </span>
                 <div className="inline">
                   {next && (
