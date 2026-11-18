@@ -160,3 +160,33 @@ usuário, **favoritar no celular aparece no site e na TV** — é a mesma linha.
   verificação anti-bot, ela aparece dentro do WebView — o app não contorna isso.
   Para controle total, cadastre uma URL `.mp4`/`.m3u8` no painel: aí o Media3
   assume e o player fica nativo.
+
+---
+
+## Build oficial: GitHub Actions (recomendado)
+
+O APK publicado em `public/apk/movieflix-mobile-1.0.0.apk` foi gerado pelo
+workflow `.github/workflows/build-apks.yml`, em um runner Ubuntu com o Android
+SDK real. É o caminho mais rápido — não exige Android Studio na sua máquina.
+
+1. GitHub → aba **Actions** → workflow **Build APKs** → **Run workflow**.
+2. Ao terminar (~6 min), baixe o artefato **movieflix-apks**.
+3. Baixe também **movieflix-keystore** e guarde o arquivo `movieflix-release.keystore`.
+
+### A chave de assinatura
+
+O workflow gera um keystore novo a cada execução. **Guarde o primeiro** e
+configure-o como secret para que as próximas versões usem a mesma chave:
+
+- Gere o base64: `base64 -w0 movieflix-release.keystore`
+- GitHub → Settings → Secrets and variables → Actions → **New secret**
+  - `KEYSTORE_BASE64` = o conteúdo acima
+  - `KEYSTORE_PASSWORD` = a senha usada
+
+Sem a mesma chave, uma atualização **não instala por cima** da versão anterior:
+o Android recusa com "assinaturas incompatíveis" e o usuário precisa desinstalar.
+
+### Versão
+
+Antes de publicar uma atualização, suba `versionCode` (inteiro, sempre maior) e
+`versionName` em `mobile/android/app/build.gradle.kts`.

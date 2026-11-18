@@ -134,3 +134,30 @@ app/src/main/java/run/velixir/movieflix/tv/
   `onFocusChanged` e `onKeyEvent`, mas só um teste em aparelho confirma o
   comportamento — especialmente em TV Box com launchers modificados.
 - Fire TV, Tizen, webOS e tvOS: **não implementados**.
+
+---
+
+## Build oficial: GitHub Actions (recomendado)
+
+O APK publicado em `public/apk/movieflix-tv-1.0.0.apk` foi gerado pelo workflow
+`.github/workflows/build-apks.yml`, no mesmo runner do app mobile.
+
+1. GitHub → **Actions** → **Build APKs** → **Run workflow**.
+2. Baixe o artefato **movieflix-apks** e use `movieflix-tv-release.apk`.
+
+O APK de TV é **diferente** do mobile: package `run.velixir.movieflix.tv`,
+`LEANBACK_LAUNCHER` no manifest e banner de TV. Não publique um como se fosse o outro.
+
+### Instalar na TV
+
+```bash
+adb connect 192.168.0.10:5555     # IP da TV (ative a depuração nas opções de desenvolvedor)
+adb install -r movieflix-tv-release.apk
+```
+
+Ou copie o APK para um pendrive e instale com um gerenciador de arquivos na TV.
+
+### Versão
+
+Suba `versionCode` e `versionName` em `tv/android/app/build.gradle.kts` antes de
+cada atualização, e assine com o **mesmo keystore** do app mobile.

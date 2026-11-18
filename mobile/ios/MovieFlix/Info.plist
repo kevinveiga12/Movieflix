@@ -29,7 +29,7 @@
     </dict>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
-        <string>armv7</string>
+        <string>arm64</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
@@ -63,8 +63,6 @@
             </dict>
         </dict>
     </dict>
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>O MovieFlix não acessa suas fotos. Este campo existe apenas para conformidade.</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
 </dict>
