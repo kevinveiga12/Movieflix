@@ -53,16 +53,112 @@ export async function resolveUser(token) {
 /**
  * Decide se o usuário pode reproduzir um título.
  *
- * Plataforma gratuita: basta estar autenticado. A função continua existindo
- * (e devolvendo o mesmo formato) para que o dia em que houver planos seja só
- * reativar a checagem aqui, sem tocar no resto do código.
+ * REGRA DE NEGÓCIO (definida pelo proprietário em 2026-11-18):
+ *   Toda conta nova ganha 1 MÊS GRÁTIS contado da criação da conta.
+ *   Depois de completar o mês, o acesso é bloqueado até contratar um plano.
+ *
+ * Onde a decisão é tomada:
+ *   - A data de criação vem de `user.created_at` do Supabase Auth, que o
+ *     usuário NÃO controla (não é user_metadata).
+ *   - O status do plano vem de `app_metadata`, que só o servidor escreve com a
+ *     Service Role. `user_metadata` é ignorado de propósito: o próprio usuário
+ *     pode editá-lo pelo SDK do navegador, então confiar nele permitiria
+ *     "assinar" sem pagar.
+ *
+ * Nada aqui apaga conta, assinatura ou pagamento — só lê e decide.
  */
+
+/** Duração do período gratuito, em dias. */
+export const FREE_TRIAL_DAYS = 30
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Fim do período gratuito de uma conta.
+ * Devolve null quando não há data de criação confiável — nesse caso o acesso
+ * NÃO é liberado por tempo indeterminado (ver authorizePlayback).
+ */
+export function trialEndsAt(user) {
+  const created = user?.created_at ?? user?.createdAt
+  if (!created) return null
+  const t = new Date(created).getTime()
+  if (!Number.isFinite(t)) return null
+  return new Date(t + FREE_TRIAL_DAYS * DAY_MS)
+}
+
+/**
+ * Plano pago vigente, lido de `app_metadata` (fonte confiável).
+ * Devolve { code, expires_at } ou null.
+ */
+export function paidPlanFromAppMetadata(user) {
+  const meta = user?.app_metadata ?? {}
+  const code = meta.plan_code ?? meta.plan ?? null
+  if (!code) return null
+  const expires = meta.plan_expires_at ?? meta.subscription_expires_at ?? null
+  if (!expires) return null
+  const t = new Date(expires).getTime()
+  if (!Number.isFinite(t) || t <= Date.now()) return null
+  return { code: String(code), expires_at: new Date(t).toISOString() }
+}
+
+/**
+ * Situação de acesso da conta.
+ *   { allowed, reason, trialEndsAt, daysLeft, plan }
+ */
+export function accessState(user) {
+  const plan = paidPlanFromAppMetadata(user)
+  if (plan) {
+    return { allowed: true, reason: 'plan', plan, trialEndsAt: null, daysLeft: null }
+  }
+
+  const ends = trialEndsAt(user)
+  if (!ends) {
+    // Sem data de criação não há como provar o período gratuito. Negar é o
+    // lado seguro: liberar "para sempre" seria pior que pedir para entrar de novo.
+    return { allowed: false, reason: 'trial_unknown', plan: null, trialEndsAt: null, daysLeft: null }
+  }
+
+  const msLeft = ends.getTime() - Date.now()
+  if (msLeft > 0) {
+    return {
+      allowed: true,
+      reason: 'trial',
+      plan: null,
+      trialEndsAt: ends.toISOString(),
+      daysLeft: Math.ceil(msLeft / DAY_MS),
+    }
+  }
+
+  return {
+    allowed: false,
+    reason: 'trial_expired',
+    plan: null,
+    trialEndsAt: ends.toISOString(),
+    daysLeft: 0,
+  }
+}
+
 export async function authorizePlayback({ token }) {
   const resolved = await resolveUser(token)
   if (resolved.error) {
     return { allowed: false, reason: 'unauthenticated', status: 401, message: resolved.error }
   }
-  return { allowed: true, user: resolved.user, subscription: null }
+
+  const state = accessState(resolved.user)
+  if (!state.allowed) {
+    return {
+      allowed: false,
+      reason: state.reason,
+      status: 402,
+      message:
+        state.reason === 'trial_expired'
+          ? 'Seu mês grátis terminou. Contrate um plano para continuar assistindo.'
+          : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
+      access: state,
+    }
+  }
+
+  return { allowed: true, user: resolved.user, subscription: null, access: state }
 }
 
 /**

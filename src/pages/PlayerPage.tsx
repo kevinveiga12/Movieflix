@@ -414,29 +414,22 @@ export function PlayerPage() {
         )}
 
         {source?.mode === 'embed' && (
-          <>
-            {/*
-              Fonte externa (embed). O requisito do projeto é reproduzir DENTRO
-              do MovieFlix, sem anúncios nem redirecionamentos. Um embed de
-              terceiro não garante isso — então avisamos em vez de fingir que
-              está tudo certo. O administrador deve cadastrar um arquivo
-              próprio (.mp4/.m3u8) para o título sair deste modo.
-            */}
-            <div className="player-embed-warning">
-              <strong>Fonte externa</strong> — este título usa um player de
-              terceiros. Se houver anúncios ou redirecionamento, é o provedor
-              externo, não o MovieFlix. Para reprodução dentro da plataforma, o
-              administrador precisa cadastrar um arquivo próprio (.mp4 ou .m3u8).
-            </div>
-            <iframe
-              src={source.url}
-              title={title?.title ?? 'Player'}
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              allowFullScreen
-              referrerPolicy="origin"
-              sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
-            />
-          </>
+          /*
+            Player em página inteira, sem aviso e sem rodapé.
+
+            O sandbox NÃO inclui `allow-popups` nem `allow-top-navigation`:
+            o provedor não consegue abrir aba/janela nem trocar a página do
+            MovieFlix. É a única proteção aplicada aqui — o resto da
+            experiência é a do player original.
+          */
+          <iframe
+            src={source.url}
+            title={title?.title ?? 'Player'}
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allowFullScreen
+            referrerPolicy="origin"
+            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
+          />
         )}
 
         {loading && source?.mode === 'direct' && (
@@ -580,10 +573,7 @@ export function PlayerPage() {
             )}
 
             {source?.mode === 'embed' && (
-              <div className="inline" style={{ justifyContent: 'space-between' }}>
-                <span className="player-time">
-                  Reprodução pelo provedor · use os controles do player
-                </span>
+              <div className="inline" style={{ justifyContent: 'flex-end' }}>
                 <div className="inline">
                   {next && (
                     <button

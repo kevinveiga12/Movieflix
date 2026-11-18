@@ -32,6 +32,16 @@ export function PlaybackGate({
       body: 'O MovieFlix é gratuito: basta ter uma conta. Entre para liberar a reprodução.',
       cta: { label: 'Entrar', to: '/login' },
     },
+    trial_expired: {
+      heading: 'Seu mês grátis terminou',
+      body: 'Você assistiu de graça por 1 mês. Para continuar, escolha um plano — a contratação é pelo WhatsApp.',
+      cta: { label: 'Ver planos', to: '/planos' },
+    },
+    trial_unknown: {
+      heading: 'Entre novamente para continuar',
+      body: 'Não foi possível confirmar o período gratuito desta conta. Saia e entre de novo para renovar a sessão.',
+      cta: { label: 'Entrar', to: '/login' },
+    },
     plan_too_low: {
       heading: 'Entre na sua conta para assistir',
       body: 'O MovieFlix é gratuito: basta ter uma conta. Entre para liberar a reprodução.',

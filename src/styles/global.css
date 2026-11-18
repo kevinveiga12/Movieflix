@@ -1145,30 +1145,41 @@ h4 {
 
 /* ============================ Player ============================ */
 
+/* Player em PÁGINA INTEIRA.
+   O iframe do provedor ocupa 100% da viewport: sem moldura, sem card, sem
+   margens, sem cabeçalho/rodapé do site em volta. Nenhum aviso técnico é
+   exibido ao cliente. */
 .player-page {
   position: fixed;
   inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   background: #000;
   z-index: 1000;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .player-stage {
   flex: 1;
   position: relative;
   background: #000;
-  display: grid;
-  place-items: center;
+  display: block;
   overflow: hidden;
+  min-height: 0;
 }
 
 .player-stage video,
 .player-stage iframe {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   border: 0;
   background: #000;
+  display: block;
 }
 
 .player-overlay {

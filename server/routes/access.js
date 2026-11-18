@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
-import { authorizePlayback, bearer, resolveUser } from '../lib/entitlement.js'
+import { authorizePlayback, bearer, resolveUser, accessState } from '../lib/entitlement.js'
 import { findTitle, seriesEpisodes } from '../lib/db-catalog.js'
 import {
   ensureProfile,
@@ -84,6 +84,7 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
         allowed: false,
         reason: auth.reason,
         message: auth.message,
+        access: auth.access ?? null,
       })
     }
 
@@ -142,7 +143,12 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
         // Só é arquivo reproduzível se for extensão de mídia.
         mode: /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i.test(sourceUrl) ? 'direct' : 'embed',
       },
-      plan: { code: null, label: 'Acesso gratuito', expires_at: null },
+      plan: {
+        code: auth.access?.plan?.code ?? null,
+        label: auth.access?.reason === 'plan' ? 'Plano ativo' : 'Mês grátis',
+        expires_at: auth.access?.plan?.expires_at ?? auth.access?.trialEndsAt ?? null,
+      },
+      access: auth.access ?? null,
     })
   } catch (e) {
     next(e)
@@ -150,8 +156,11 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
 })
 
 /**
- * GET /api/subscription — mantido por compatibilidade.
- * A plataforma é gratuita: sempre devolve acesso liberado para quem está logado.
+ * GET /api/subscription — situação real de acesso da conta.
+ *
+ * Devolve o mês grátis (com a data em que termina) ou o plano pago vigente.
+ * A decisão vem de `accessState`, que lê `created_at` do Auth e `app_metadata`
+ * — nunca `user_metadata`.
  */
 router.get('/subscription', strict, async (req, res, next) => {
   try {
@@ -159,7 +168,20 @@ router.get('/subscription', strict, async (req, res, next) => {
     if (!token) return res.status(401).json({ error: 'Token ausente.', subscription: null })
     const resolved = await resolveUser(token)
     if (resolved.error) return res.status(401).json({ error: resolved.error, subscription: null })
-    res.json({ subscription: null, active: true, free: true })
+
+    const state = accessState(resolved.user)
+    res.json({
+      subscription: state.plan
+        ? {
+            plan_code: state.plan.code,
+            status: 'active',
+            expires_at: state.plan.expires_at,
+            plan_label: 'Plano ativo',
+          }
+        : null,
+      active: state.allowed,
+      access: state,
+    })
   } catch (e) {
     next(e)
   }

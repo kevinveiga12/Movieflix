@@ -28,6 +28,17 @@ export interface Title {
   source?: 'database'
 }
 
+export interface PlanPeriod {
+  code: '1m' | '3m' | '12m'
+  label: string
+  months: number
+  price_cents: number
+  price_label: string
+  /** 'monthly' | 'configured' | 'derived' (mensal x meses, sem desconto definido) */
+  price_source: 'monthly' | 'configured' | 'derived'
+  whatsapp_url: string
+}
+
 export interface Plan {
   id: string
   name: string
@@ -39,6 +50,8 @@ export interface Plan {
   duration_days: number
   is_active: boolean
   whatsapp_url?: string
+  /** Tabela por período: 1 mês / 3 meses / 1 ano. */
+  periods?: PlanPeriod[]
 }
 
 export interface Subscription {
@@ -77,7 +90,15 @@ export interface DbSeason {
 export interface PlaybackAuth {
   allowed: boolean
   title?: { tmdb_id: number; title: string; quality: string | null }
-  reason?: 'unauthenticated' | 'no_subscription' | 'plan_too_low' | 'no_source' | 'not_in_catalog' | 'episode_not_found' | 'bad_request' | 'episode_required'
+  reason?: 'unauthenticated' | 'no_subscription' | 'plan_too_low' | 'no_source' | 'not_in_catalog' | 'episode_not_found' | 'bad_request' | 'episode_required' | 'trial_expired' | 'trial_unknown'
+  /** Situação do mês grátis / plano, decidida no servidor. */
+  access?: {
+    allowed: boolean
+    reason: string
+    trialEndsAt: string | null
+    daysLeft: number | null
+    plan: { code: string; expires_at: string } | null
+  } | null
   message?: string
   source?: { url: string; label: string | null; mode: 'direct' | 'embed' }
   plan?: { code: string | null; label: string; expires_at: string | null }
