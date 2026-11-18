@@ -199,6 +199,16 @@ export function XIcon({ size = 20, className }: IconProps) {
   )
 }
 
+/** Chave — usada na ação "Gerar código de 1 mês grátis". */
+export function KeyIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="m10.7 12.3 8.3-8.3M17 6l2 2M14 9l2 2" />
+    </svg>
+  )
+}
+
 export function SkipBack({ size = 20, className }: IconProps) {
   return (
     <svg {...base(size)} className={className}>

@@ -106,7 +106,7 @@ export function SettingsPage() {
               Entrar
             </Link>
             <Link to="/cadastro" className="btn btn--outline">
-              Criar conta grátis
+              Criar conta
             </Link>
           </div>
         </div>

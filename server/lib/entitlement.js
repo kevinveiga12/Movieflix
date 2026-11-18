@@ -145,10 +145,21 @@ export function accessState(user) {
   const recorded = trialFromMetadata(user)
 
   if (recorded && recorded.granted === false) {
-    // Conta criada em dispositivo que já consumiu o benefício: sem 30 dias.
+    /**
+     * Conta sem benefício. Dois motivos possíveis, e a diferença importa para
+     * a mensagem que o cliente lê:
+     *
+     *   - `no_trial`   → regra atual: ninguém ganha mês grátis no cadastro. O
+     *                    benefício é liberado pelo administrador por código.
+     *   - `trial_used` → regra anterior: o aparelho já havia consumido.
+     *
+     * Em ambos os casos a conta existe, o login funciona e o cliente pode
+     * contratar um plano — só não assiste ainda.
+     */
+    const reason = recorded.reason === 'no_trial' ? 'no_trial' : 'trial_used'
     return {
       allowed: false,
-      reason: 'trial_used',
+      reason,
       plan: null,
       trialEndsAt: null,
       daysLeft: 0,
@@ -197,11 +208,13 @@ export async function authorizePlayback({ token }) {
       message:
         state.reason === 'trial_expired'
           ? 'Seu mês grátis terminou. Contrate um plano para continuar assistindo.'
-          : state.reason === 'trial_used'
-            ? 'O período grátis deste aparelho já foi utilizado. Escolha um plano para assistir.'
-            : state.reason === 'account_disabled'
-              ? 'Esta conta está desativada. Fale com o suporte.'
-              : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
+          : state.reason === 'no_trial'
+            ? 'Sua conta está ativa. Para assistir, escolha um plano ou peça seu mês grátis pelo WhatsApp.'
+            : state.reason === 'trial_used'
+              ? 'O período grátis deste aparelho já foi utilizado. Escolha um plano para assistir.'
+              : state.reason === 'account_disabled'
+                ? 'Esta conta está desativada. Fale com o suporte.'
+                : 'Não foi possível confirmar o período gratuito desta conta. Entre novamente.',
       access: state,
     }
   }

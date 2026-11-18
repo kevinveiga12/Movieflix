@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites, useHistory, parseEpisodeId } from '../lib/userData'
 import { loadCatalog, getById } from '../lib/catalog'
+import { redeemTrialCode, trialRequestMessage, whatsappUrl, fetchSubscription } from '../lib/access'
 import { PosterCard } from '../components/PosterCard'
 import { HeartIcon, ClockIcon, LogoutIcon, SettingsIcon, UserIcon, PlayIcon } from '../components/Icons'
 
@@ -13,6 +14,147 @@ function formatWatched(seconds: number): string {
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}min`
   return `${Math.floor(m / 60)}h ${m % 60}min`
+}
+
+/**
+ * SEÇÃO "1 MÊS GRÁTIS"
+ *
+ * O mês grátis deixou de ser automático: ninguém recebe 30 dias ao criar a
+ * conta. Quem libera é o administrador, por um código de 6 dígitos.
+ *
+ * Aqui ficam as duas coisas lado a lado, como pedido:
+ *   1. o botão que abre o WhatsApp do administrador com a mensagem pronta
+ *      (o e-mail vem da conta autenticada, não de um campo editável);
+ *   2. o campo para digitar o código e confirmar.
+ *
+ * A validação acontece no servidor (`POST /api/trial/redeem`) — este
+ * componente só mostra o resultado.
+ */
+function TrialSection({ email, name }: { email: string | null | undefined; name?: string | null }) {
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [ok, setOk] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [status, setStatus] = useState<{ daysLeft: number | null; reason: string; trialEndsAt: string | null } | null>(
+    null,
+  )
+
+  useEffect(() => {
+    let alive = true
+    fetchSubscription()
+      .then((r) => {
+        if (alive) setStatus(r.access as typeof status)
+      })
+      .catch(() => {
+        /* sem sessão ou API fora: a seção continua utilizável */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const onTrial = Boolean(status && status.daysLeft !== null && status.daysLeft > 0 && status.reason === 'trial')
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setErr(null)
+    setOk(null)
+    const clean = code.replace(/\D/g, '')
+    if (clean.length !== 6) {
+      setErr('Digite os 6 números do código.')
+      return
+    }
+    setBusy(true)
+    const r = await redeemTrialCode(clean)
+    setBusy(false)
+    if (r.ok) {
+      setOk(
+        r.endsAt
+          ? `Pronto! Seu mês grátis está liberado até ${new Date(r.endsAt).toLocaleDateString('pt-BR')}.`
+          : (r.message ?? 'Mês grátis liberado.'),
+      )
+      setCode('')
+      const fresh = await fetchSubscription().catch(() => null)
+      if (fresh) setStatus(fresh.access as typeof status)
+      return
+    }
+    const extra =
+      typeof r.attemptsLeft === 'number' && r.attemptsLeft > 0 && r.attemptsLeft < 5
+        ? ` Tentativas restantes: ${r.attemptsLeft}.`
+        : ''
+    setErr((r.error ?? 'Não foi possível validar o código.') + extra)
+  }
+
+  return (
+    <div className="panel">
+      <div className="panel-title">1 mês grátis</div>
+      <p className="panel-sub">
+        Peça o código de 6 dígitos pelo WhatsApp e digite aqui para liberar seus 30 dias gratuitos.
+      </p>
+
+      {onTrial && (
+        <div className="alert alert--success" style={{ marginBottom: 14 }}>
+          Você já está no mês grátis — {status?.daysLeft} dia{status?.daysLeft === 1 ? '' : 's'} restante
+          {status?.daysLeft === 1 ? '' : 's'}
+          {status?.trialEndsAt && ` (até ${new Date(status.trialEndsAt).toLocaleDateString('pt-BR')})`}.
+        </div>
+      )}
+      {ok && (
+        <div className="alert alert--success" style={{ marginBottom: 14 }}>
+          {ok}
+        </div>
+      )}
+      {err && (
+        <div className="alert alert--error" style={{ marginBottom: 14 }}>
+          {err}
+        </div>
+      )}
+
+      <div
+        style={{
+          display: 'flex',
+          gap: 14,
+          flexWrap: 'wrap',
+          alignItems: 'flex-end',
+        }}
+      >
+        <a
+          className="btn btn--primary"
+          href={whatsappUrl(trialRequestMessage(email, name))}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Pedir código no WhatsApp
+        </a>
+
+        <form
+          onSubmit={submit}
+          style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}
+        >
+          <div className="field" style={{ margin: 0, minWidth: 150 }}>
+            <label htmlFor="trial-code">Código de 6 dígitos</label>
+            <input
+              id="trial-code"
+              className="input"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            />
+          </div>
+          <button className="btn btn--outline" type="submit" disabled={busy || code.length !== 6}>
+            {busy ? 'Validando…' : 'Confirmar código'}
+          </button>
+        </form>
+      </div>
+
+      <p className="muted" style={{ fontSize: '0.78rem', marginTop: 12 }}>
+        O código vale 7 dias, é de uso único e só funciona na conta para a qual foi gerado.
+      </p>
+    </div>
+  )
 }
 
 export function FavoritesPage() {
@@ -264,7 +406,7 @@ export function ProfilePage() {
                 {user.email}
               </div>
               <div className="inline" style={{ marginTop: 8, gap: 8 }}>
-                <span className="badge badge--purple">Acesso gratuito</span>
+                <span className="badge badge--purple">Conta ativa</span>
                 {profile?.is_admin && <span className="badge badge--red">Administrador</span>}
               </div>
             </div>
@@ -285,6 +427,8 @@ export function ProfilePage() {
           </div>
         </div>
       </div>
+
+      <TrialSection email={user.email} name={profile?.name} />
 
       <div className="panel">
         <div className="panel-title">Estatísticas</div>

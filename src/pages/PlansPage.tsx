@@ -73,8 +73,8 @@ export function PlansPage() {
         Planos
       </h1>
       <p className="muted" style={{ marginBottom: 24, fontSize: '0.95rem' }}>
-        Toda conta nova tem <strong>1 mês grátis</strong>. Depois desse período, escolha um plano para
-        continuar assistindo.
+        Escolha um plano para assistir. Se ainda não usou, peça seu <strong>mês grátis</strong> pelo
+        WhatsApp — o código de 6 dígitos é digitado na aba de contas.
       </p>
 
       {active && sub && (
@@ -114,8 +114,8 @@ export function PlansPage() {
             Planos em configuração
           </h3>
           <p className="panel-sub" style={{ marginBottom: 20 }}>
-            Os planos ainda não foram cadastrados no painel. Enquanto isso, sua conta continua com o
-            mês grátis. Fale com a gente pelo WhatsApp para contratar.
+            Os planos ainda não foram cadastrados no painel. Fale com a gente pelo WhatsApp para
+            contratar ou para pedir seu mês grátis.
           </p>
           <a
             className="btn btn--primary"

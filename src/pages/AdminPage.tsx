@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { loadCatalog, getAll } from '../lib/catalog'
-import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon } from '../components/Icons'
+import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon, KeyIcon } from '../components/Icons'
 import type { Title } from '../lib/types'
 
 type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability'
@@ -585,6 +585,47 @@ function UsersTab({
   >({})
   const [plan, setPlan] = useState<Record<string, string>>({})
   const [period, setPeriod] = useState<Record<string, string>>({})
+  // Código de 1 mês grátis: código recém-gerado e histórico, por usuário.
+  const [trialCode, setTrialCode] = useState<Record<string, { code: string; expiresAt: string }>>({})
+  const [trialCodes, setTrialCodes] = useState<
+    Record<
+      string,
+      { id: string; created_at: string | null; expires_at: string | null; used_at: string | null; status: string }[]
+    >
+  >({})
+
+  async function loadCodes(id: string) {
+    try {
+      const r = (await api(`/users/${id}/trial-codes`)) as {
+        codes: {
+          id: string
+          created_at: string | null
+          expires_at: string | null
+          used_at: string | null
+          status: string
+        }[]
+      }
+      setTrialCodes((m) => ({ ...m, [id]: r.codes ?? [] }))
+    } catch (e) {
+      onError((e as Error).message)
+    }
+  }
+
+  async function genCode(id: string) {
+    setBusy(id)
+    try {
+      const r = (await api(`/users/${id}/trial-code`, { method: 'POST' })) as {
+        code: string
+        expiresAt: string
+      }
+      setTrialCode((m) => ({ ...m, [id]: { code: r.code, expiresAt: r.expiresAt } }))
+      await loadCodes(id)
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   async function loadAccess(id: string) {
     try {
@@ -690,6 +731,7 @@ function UsersTab({
                     } else {
                       setOpenId(u.id)
                       if (!access[u.id]) await loadAccess(u.id)
+                      await loadCodes(u.id)
                     }
                   }}
                 >
@@ -756,6 +798,73 @@ function UsersTab({
                     >
                       <CheckIcon size={15} /> Conceder plano
                     </button>
+
+                    {/* ── Código de 1 mês grátis ─────────────────────────────── */}
+                    <button
+                      className="btn btn--outline btn--sm"
+                      onClick={() => void genCode(u.id)}
+                      disabled={busy === u.id}
+                    >
+                      <KeyIcon size={15} /> Gerar código de 1 mês grátis
+                    </button>
+
+                    {trialCode[u.id] && (
+                      <div
+                        className="alert alert--success"
+                        style={{ flexBasis: '100%', alignItems: 'flex-start' }}
+                      >
+                        <span>
+                          Código de <strong>{u.email}</strong>:{' '}
+                          <strong
+                            style={{
+                              fontSize: '1.15rem',
+                              letterSpacing: '0.16em',
+                              fontFamily: 'ui-monospace, monospace',
+                            }}
+                          >
+                            {trialCode[u.id].code}
+                          </strong>{' '}
+                          — passe para o cliente. Vale até{' '}
+                          {new Date(trialCode[u.id].expiresAt).toLocaleDateString('pt-BR')} e só funciona uma vez.
+                        </span>
+                      </div>
+                    )}
+
+                    {(trialCodes[u.id]?.length ?? 0) > 0 && (
+                      <div style={{ flexBasis: '100%', marginTop: 4 }}>
+                        <div className="muted" style={{ fontSize: '0.78rem', marginBottom: 6 }}>
+                          Códigos já gerados para este cliente
+                        </div>
+                        <div style={{ display: 'grid', gap: 4 }}>
+                          {trialCodes[u.id].map((c) => (
+                            <div
+                              key={c.id}
+                              className="muted"
+                              style={{ fontSize: '0.76rem', display: 'flex', gap: 12, flexWrap: 'wrap' }}
+                            >
+                              <span>
+                                {c.created_at
+                                  ? new Date(c.created_at).toLocaleString('pt-BR')
+                                  : '—'}
+                              </span>
+                              <span
+                                style={{
+                                  color:
+                                    c.status === 'usado'
+                                      ? 'var(--accent)'
+                                      : c.status === 'expirado'
+                                        ? '#fca5a5'
+                                        : '#86efac',
+                                }}
+                              >
+                                {c.status}
+                              </span>
+                              {c.used_at && <span>usado em {new Date(c.used_at).toLocaleString('pt-BR')}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <span className="muted" style={{ fontSize: '0.78rem', flexBasis: '100%' }}>
                       A validade é somada ao fim do plano atual, se ainda estiver vigente — assim

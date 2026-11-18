@@ -13,6 +13,7 @@ import {
 } from '../lib/profile.js'
 import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-server.js'
 import { grantTrialForNewUser, applyTrialMetadata } from '../lib/trial-claims.js'
+import { redeemTrialCode, TRIAL_CODE_MAX_ATTEMPTS } from '../lib/trial-codes.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -189,6 +190,87 @@ router.get('/subscription', strict, async (req, res, next) => {
 })
 
 /**
+ * POST /api/trial/redeem
+ * body: { code: '123456' }
+ *
+ * Libera 1 MÊS GRÁTIS com o código que o administrador gerou para ESTA conta.
+ *
+ * Por que a validação é aqui e não no navegador:
+ *   O código é comparado com o hash guardado em `app_metadata` do próprio
+ *   usuário — campo que só a Service Role escreve. Editar o frontend não
+ *   libera nada: sem o código certo, o servidor não grava o benefício.
+ *
+ * O código é de uso único, vale 7 dias e o hash inclui o `userId`, então um
+ * código gerado para outra pessoa não funciona aqui.
+ */
+const redeemLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas. Aguarde alguns minutos e tente de novo.' },
+})
+
+router.post('/trial/redeem', redeemLimiter, async (req, res, next) => {
+  try {
+    const token = bearer(req)
+    if (!token) return res.status(401).json({ error: 'Entre na sua conta para usar o código.' })
+
+    const resolved = await resolveUser(token)
+    if (resolved.error) return res.status(401).json({ error: resolved.error })
+
+    const code = String(req.body?.code ?? '').replace(/\D/g, '')
+    if (code.length !== 6) {
+      return res.status(400).json({ error: 'Digite os 6 números do código.' })
+    }
+
+    const result = await redeemTrialCode({ userId: resolved.user.id, code })
+
+    if (result.ok) {
+      return res.json({
+        ok: true,
+        granted: true,
+        days: result.days,
+        endsAt: result.endsAt,
+        message: `Pronto! Seu mês grátis está liberado até ${new Date(result.endsAt).toLocaleDateString('pt-BR')}.`,
+      })
+    }
+
+    // Mensagens em português, sem termo técnico, e sem revelar nada sobre
+    // códigos de outras contas.
+    const messages = {
+      invalid: 'Código incorreto. Confira os 6 números e tente de novo.',
+      used: 'Este código já foi utilizado. Peça um novo código pelo WhatsApp.',
+      expired: 'Este código expirou. Peça um novo código pelo WhatsApp.',
+      too_many_attempts: 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.',
+      already_active: 'Sua conta já tem um período grátis ou plano ativo.',
+      user_not_found: 'Não encontramos sua conta. Saia e entre novamente.',
+      service_role_ausente: 'Não foi possível validar o código agora. Tente em instantes.',
+      write_failed: 'Não foi possível liberar o mês grátis agora. Tente em instantes.',
+    }
+
+    const status =
+      result.reason === 'too_many_attempts'
+        ? 429
+        : result.reason === 'already_active'
+          ? 409
+          : result.reason === 'service_role_ausente' || result.reason === 'write_failed'
+            ? 503
+            : 400
+
+    res.status(status).json({
+      ok: false,
+      error: messages[result.reason] ?? 'Não foi possível validar o código.',
+      reason: result.reason,
+      attemptsLeft: result.attemptsLeft ?? null,
+      maxAttempts: TRIAL_CODE_MAX_ATTEMPTS,
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
  * POST /api/auth/signup
  * body: { email, password, fullName? }
  *
@@ -219,36 +301,39 @@ router.post('/auth/signup', strict, async (req, res, next) => {
     }
 
     /**
-     * Benefício de 30 dias — decidido AQUI, no servidor, no momento do cadastro.
+     * MÊS GRÁTIS — NÃO É MAIS AUTOMÁTICO.
      *
-     * Regra: um benefício por E-MAIL e um por DISPOSITIVO. Se o aparelho já
-     * consumiu, a conta é criada normalmente mas nasce sem os 30 dias e o
-     * cliente cai direto na tela de planos.
+     * Regra definida pelo proprietário em 2026-11-18: ninguém recebe 30 dias ao
+     * criar a conta. O benefício passou a ser liberado MANUALMENTE pelo
+     * administrador, por um código de 6 dígitos que o cliente digita na aba de
+     * contas (POST /api/trial/redeem).
      *
-     * O identificador do dispositivo é emitido pelo servidor (cookie HttpOnly)
-     * e combinado com uma impressão de rede (IP + User-Agent + Accept-Language),
-     * então limpar os dados do navegador não devolve o benefício.
+     * Motivo: contas em série (julho3@, julho4@, julho5@…) repetiam o mês
+     * grátis indefinidamente. Com liberação manual, criar conta nova não gera
+     * benefício nenhum.
      *
-     * Falha aqui NÃO derruba o cadastro: a conta já existe e o cliente precisa
-     * conseguir entrar. Nesse caso o trial fica como legado (calculado por
-     * created_at), que é o comportamento anterior — nunca pior que antes.
+     * O que gravamos aqui é apenas a MARCA de que esta conta nasceu sob a nova
+     * regra (`granted: false, reason: 'no_trial'`). Isso é o que impede o
+     * cálculo legado por `created_at` de conceder 30 dias por engano — sem essa
+     * marca, `accessState` cairia no fallback e daria o mês grátis.
+     *
+     * Contas ANTIGAS não têm essa marca e continuam com o benefício em curso
+     * até o fim: ninguém perde o que já estava usando.
+     *
+     * Falha aqui NÃO derruba o cadastro — a conta já existe e o cliente precisa
+     * conseguir entrar.
      */
     let trial = null
     try {
-      const decision = await grantTrialForNewUser({ req, res, email })
-      if (decision.reason !== 'admin_exempt') {
-        const applied = await applyTrialMetadata({
-          userId: result.user?.id,
-          email,
-          granted: decision.granted,
-          deviceKeys: decision.deviceKeys,
-        })
-        trial = applied.ok
-          ? { granted: decision.granted, endsAt: applied.trial?.ends_at ?? null }
-          : null
-      }
+      const applied = await applyTrialMetadata({
+        userId: result.user?.id,
+        email,
+        granted: false,
+        reason: 'no_trial',
+      })
+      trial = applied.ok ? { granted: false, endsAt: null } : null
     } catch (e) {
-      console.warn('[MovieFlix] trial no cadastro:', e?.message ?? e)
+      console.warn('[MovieFlix] marca de trial no cadastro:', e?.message ?? e)
     }
 
     res.status(201).json({
@@ -256,9 +341,7 @@ router.post('/auth/signup', strict, async (req, res, next) => {
       email,
       profile: result.profile,
       trial,
-      message: trial?.granted
-        ? 'Conta criada com 30 dias grátis. Faça login para assistir.'
-        : 'Conta criada. Faça login para assistir.',
+      message: 'Conta criada. Faça login para acessar o MovieFlix.',
     })
   } catch (e) {
     next(e)

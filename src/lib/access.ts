@@ -64,7 +64,17 @@ export async function fetchPlans(email?: string | null): Promise<{ plans: Plan[]
 }
 
 /** Assinatura do usuário logado. */
-export async function fetchSubscription(): Promise<{ subscription: Subscription | null; active: boolean }> {
+export async function fetchSubscription(): Promise<{
+  subscription: Subscription | null
+  active: boolean
+  access?: {
+    allowed: boolean
+    reason: string
+    trialEndsAt: string | null
+    daysLeft: number | null
+    plan: { code: string; expires_at: string } | null
+  }
+}> {
   const headers = await authHeader()
   if (!headers.Authorization) return { subscription: null, active: false }
   try {
@@ -124,4 +134,47 @@ export async function fetchSeriesEpisodes(tmdbId: string | number) {
 /** É uma URL de arquivo reproduzível pelo <video>? */
 export function isDirectMedia(url: string): boolean {
   return /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i.test(url)
+}
+
+/**
+ * Libera 1 mês grátis com o código que o administrador enviou.
+ *
+ * A validação é 100% no servidor (`POST /api/trial/redeem`): o navegador só
+ * envia o que o cliente digitou. O código é comparado com o hash guardado em
+ * `app_metadata` — campo que o cliente não consegue escrever. Editar o
+ * frontend não libera nada.
+ */
+export async function redeemTrialCode(code: string): Promise<{
+  ok: boolean
+  endsAt?: string | null
+  days?: number
+  message?: string
+  error?: string
+  attemptsLeft?: number | null
+}> {
+  const headers = await authHeader()
+  try {
+    return await getJson('/api/trial/redeem', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ code }),
+    })
+  } catch (e) {
+    const err = e as Error & { status?: number; body?: { error?: string; attemptsLeft?: number } }
+    return {
+      ok: false,
+      error: err.body?.error ?? err.message,
+      attemptsLeft: err.body?.attemptsLeft ?? null,
+    }
+  }
+}
+
+/**
+ * Mensagem pronta para o WhatsApp do administrador, com o e-mail da conta
+ * autenticada. O e-mail vem do parâmetro (sessão do Supabase), nunca de um
+ * campo que o cliente possa editar para pedir o benefício em outra conta.
+ */
+export function trialRequestMessage(email: string | null | undefined, name?: string | null): string {
+  const quem = name ? `${name} (${email ?? 'e-mail não informado'})` : (email ?? 'e-mail não informado')
+  return `Olá! Quero o mês grátis do MovieFlix. Minha conta: ${quem}. Pode me enviar o código? Obrigado!`
 }

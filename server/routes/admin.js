@@ -3,6 +3,7 @@ import { requireAdmin, supabaseAdmin } from '../lib/auth.js'
 import { readOverrides, writeOverrides, readAdminConfig, writeAdminConfig } from '../lib/store.js'
 import { normalizeProfile } from '../lib/profile.js'
 import { availabilityStats, loadStatic } from '../lib/static-catalog.js'
+import { generateTrialCode, publicCodes, TRIAL_CODE_TTL_DAYS } from '../lib/trial-codes.js'
 
 const router = Router()
 
@@ -396,6 +397,72 @@ router.post('/users/:id/plan', async (req, res, next) => {
       plan_expires_at: data.user.app_metadata?.plan_expires_at ?? null,
       period,
       days: PLAN_DAYS[period],
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * CÓDIGO DE 1 MÊS GRÁTIS
+ *
+ * O mês grátis deixou de ser automático. O administrador gera um código de 6
+ * dígitos para um cliente específico, passa o código para ele (WhatsApp) e o
+ * cliente digita na aba de contas. A validação e a liberação acontecem no
+ * servidor (POST /api/trial/redeem).
+ *
+ * O código em texto puro só existe na resposta desta rota — depois disso só o
+ * hash fica guardado. Se o administrador perder o código, gera outro.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** POST /api/admin/users/:id/trial-code — gera um código para o cliente */
+router.post('/users/:id/trial-code', async (req, res, next) => {
+  try {
+    if (!validUserId(req, res)) return
+
+    const result = await generateTrialCode({
+      userId: req.params.id,
+      createdBy: req.user?.email ?? null,
+    })
+
+    if (!result.ok) {
+      const status = result.reason === 'user_not_found' ? 404 : 503
+      return res.status(status).json({
+        error:
+          result.reason === 'user_not_found'
+            ? 'Usuário não encontrado.'
+            : 'Não foi possível gerar o código agora.',
+        reason: result.reason,
+      })
+    }
+
+    res.status(201).json({
+      ok: true,
+      code: result.code,
+      email: result.email,
+      expiresAt: result.expiresAt,
+      ttlDays: result.ttlDays,
+      message: `Código gerado. Vale por ${result.ttlDays} dias e só pode ser usado uma vez.`,
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/** GET /api/admin/users/:id/trial-codes — histórico de códigos do cliente */
+router.get('/users/:id/trial-codes', async (req, res, next) => {
+  try {
+    if (!validUserId(req, res)) return
+    const admin = supabaseAdmin
+    if (!admin) return res.status(503).json({ error: 'Servidor sem Service Role.' })
+
+    const { data, error } = await admin.auth.admin.getUserById(req.params.id)
+    if (error || !data?.user) return res.status(404).json({ error: 'Usuário não encontrado.' })
+
+    res.json({
+      email: data.user.email ?? null,
+      ttlDays: TRIAL_CODE_TTL_DAYS,
+      codes: publicCodes(data.user),
     })
   } catch (e) {
     next(e)

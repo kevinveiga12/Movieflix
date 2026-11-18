@@ -34,20 +34,16 @@ export function SignupPage() {
     if (needsConfirmation) setDone(true)
     else {
       /**
-       * Conta criada. Se o benefício de 30 dias NÃO foi concedido (o aparelho
-       * já consumiu), o cliente vai direto para a tela de planos — é o
-       * comportamento pedido pelo proprietário. Caso contrário, entra no site.
+       * Conta criada. O mês grátis NÃO é mais automático: quem libera é o
+       * administrador, por um código de 6 dígitos. Então o cliente vai direto
+       * para a tela de planos, onde também encontra o caminho do WhatsApp.
        */
-      let trialGranted = true
       try {
-        const raw = sessionStorage.getItem('mf_signup_trial')
         sessionStorage.removeItem('mf_signup_trial')
-        const parsed = raw ? (JSON.parse(raw) as { granted?: boolean } | null) : null
-        if (parsed && parsed.granted === false) trialGranted = false
       } catch {
-        /* sem sessionStorage: assume o caminho normal */
+        /* sem sessionStorage: segue o fluxo normal */
       }
-      navigate(trialGranted ? '/' : '/planos', { replace: true })
+      navigate('/planos', { replace: true })
     }
   }
 
@@ -79,7 +75,7 @@ export function SignupPage() {
           <img src="/icon-192.png" alt="" />
           <span className="brand-word">MovieFlix</span>
         </div>
-        <h1 className="auth-title">Criar conta grátis</h1>
+        <h1 className="auth-title">Criar conta</h1>
         <p className="auth-sub">
           O catálogo é livre. A conta serve para salvar favoritos e histórico.
         </p>
@@ -140,7 +136,7 @@ export function SignupPage() {
             />
           </div>
           <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={busy}>
-            {busy ? 'Criando…' : 'Criar conta grátis'}
+            {busy ? 'Criando…' : 'Criar conta'}
           </button>
         </form>
 

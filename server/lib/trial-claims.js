@@ -230,7 +230,7 @@ export async function grantTrialForNewUser({ req, res, email }) {
  * `user_metadata` pelo SDK do navegador, então confiar nele permitiria conceder
  * a si mesmo um novo mês grátis. `app_metadata` só a Service Role escreve.
  */
-export async function applyTrialMetadata({ userId, email, granted, deviceKeys }) {
+export async function applyTrialMetadata({ userId, email, granted, deviceKeys, reason }) {
   const admin = getAdminClient()
   if (!admin || !userId) return { ok: false }
 
@@ -245,7 +245,9 @@ export async function applyTrialMetadata({ userId, email, granted, deviceKeys })
     : {
         granted: false,
         denied_at: now.toISOString(),
-        reason: 'device_used',
+        // `no_trial` = regra atual (liberação manual por código do admin).
+        // `device_used` = regra anterior, mantida para contas já gravadas.
+        reason: reason ?? 'device_used',
       }
 
   const { error } = await admin.auth.admin.updateUserById(userId, {
@@ -273,5 +275,9 @@ export function trialFromMetadata(user) {
     granted: t.granted === true,
     startedAt: t.started_at ?? null,
     endsAt: t.ends_at ?? null,
+    // `no_trial` = conta criada sob a regra de liberação manual por código.
+    // `device_used` = regra anterior (benefício por aparelho).
+    reason: t.reason ?? null,
+    source: t.source ?? null,
   }
 }

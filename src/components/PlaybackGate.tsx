@@ -24,13 +24,18 @@ export function PlaybackGate({
   const config: Record<string, { heading: string; body: string; cta?: { label: string; to: string } }> = {
     unauthenticated: {
       heading: 'Crie sua conta para assistir',
-      body: 'Você pode navegar pelo catálogo livremente. Crie sua conta e assista 1 mês grátis — leva menos de um minuto.',
-      cta: { label: 'Criar conta grátis', to: '/cadastro' },
+      body: 'Você pode navegar pelo catálogo livremente. Crie sua conta em menos de um minuto para liberar a reprodução.',
+      cta: { label: 'Criar conta', to: '/cadastro' },
     },
     no_subscription: {
       heading: 'Entre na sua conta para assistir',
-      body: 'Entre para liberar a reprodução. Toda conta tem 1 mês grátis.',
+      body: 'Entre para liberar a reprodução.',
       cta: { label: 'Entrar', to: '/login' },
+    },
+    no_trial: {
+      heading: 'Sua conta está ativa',
+      body: 'Para assistir, escolha um plano ou peça seu mês grátis pelo WhatsApp. O código de 6 dígitos é digitado na aba de contas.',
+      cta: { label: 'Ver planos', to: '/planos' },
     },
     trial_expired: {
       heading: 'Seu mês grátis terminou',
@@ -118,8 +123,8 @@ export function PlaybackGate({
           <div className="alert alert--info" style={{ marginTop: 20, textAlign: 'left' }}>
             <InfoIcon size={18} />
             <span>
-              O MovieFlix é <strong>gratuito</strong>. Não há plano para contratar — só é preciso
-              estar logado.
+              Precisa de acesso? Escolha um plano ou peça seu <strong>mês grátis</strong> pelo WhatsApp — o
+              código de 6 dígitos é digitado na aba de contas.
             </span>
           </div>
         )}
