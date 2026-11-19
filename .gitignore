@@ -16,3 +16,4 @@ server/data/admin-config.json
 *.tsbuildinfo
 __pycache__/
 *.pyc
+docs/apps-evidencias/
