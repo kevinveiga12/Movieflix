@@ -336,6 +336,19 @@ private val BRIDGE_JS: String = """
     } catch (e) {}
   }
 
+  /** Estado completo — o app lê estes campos, não só o `type`. */
+  function snapshot() {
+    return {
+      type: 'state',
+      playing: S.playing,
+      t: S.t,
+      d: S.d,
+      vol: S.vol,
+      muted: S.muted,
+      ready: S.ready
+    };
+  }
+
   function sync() {
     var v = S.v;
     if (!v) return;
@@ -355,7 +368,7 @@ private val BRIDGE_JS: String = """
       var evs = ['play','playing','pause','timeupdate','durationchange','loadedmetadata',
                  'volumechange','ended','seeking','seeked','canplay'];
       for (var i = 0; i < evs.length; i++) {
-        v.addEventListener(evs[i], function () { sync(); post({ type: 'state' }); }, true);
+        v.addEventListener(evs[i], function () { sync(); post(snapshot()); }, true);
       }
       // O provedor costuma montar o vídeo já pausado. Tenta tocar assim que o
       // elemento existe; se o navegador recusar, o OK do controle resolve.
@@ -385,7 +398,7 @@ private val BRIDGE_JS: String = """
       else if (cmd === 'vol') { v.muted = false; v.volume = Math.max(0, Math.min(1, arg)); }
       else if (cmd === 'mute') { v.muted = !v.muted; }
       sync();
-      post({ type: 'state' });
+      post(snapshot());
       return true;
     } catch (e) { return false; }
   };
