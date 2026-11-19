@@ -72,6 +72,8 @@ check('esconde os controles REAIS do ArtPlayer', bridge.includes('.art-controls'
 check('esconde a barra inferior do ArtPlayer', bridge.includes('.art-bottom'))
 check('esconde o botão de play inicial', bridge.includes('#wp-initial-play'))
 check('nunca esconde o <video>', bridge.includes('video{display:block'))
+check('desliga controls nativos do <video>', bridge.includes("v.controls = false"))
+check('reaplica controls=false no laço', bridge.includes('vs[i].controls = false'))
 check('repassa comando para iframes filhos', bridge.includes('__mfCmd: cmd'))
 check('sobe estado por postMessage', bridge.includes('__mfState'))
 check('só o frame do topo fala com o app', bridge.includes('S.isTop'))

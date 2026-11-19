@@ -399,6 +399,14 @@ private val BRIDGE_JS: String = """
   function hideProviderUi() {
     try {
       if (!document || typeof document.getElementById !== 'function') return;
+      // Garantia continua: se o provedor recriar o <video> com controls=true,
+      // os controles nativos voltam. Reaplicar a cada volta do laco.
+      try {
+        var vs = document.querySelectorAll('video');
+        for (var i = 0; i < vs.length; i++) {
+          if (vs[i].controls) { vs[i].controls = false; vs[i].removeAttribute('controls'); }
+        }
+      } catch (e) {}
       if (!document.getElementById('__mf_clean')) {
         var st = document.createElement('style');
         st.id = '__mf_clean';
@@ -575,6 +583,11 @@ private val BRIDGE_JS: String = """
     if (!v) return false;
     if (v !== S.v) {
       S.v = v;
+      // Controles nativos do <video> desligados SEMPRE. O provedor costuma
+      // vir com controls=false, mas a rota de teste (MP4 direto) vem com
+      // controls=true — e aí o Chrome desenha play/volume/engrenagem/tela
+      // cheia por cima da nossa barra. Aqui a garantia é incondicional.
+      try { v.controls = false; v.removeAttribute('controls'); } catch (e) {}
       var evs = ['play','playing','pause','timeupdate','durationchange','loadedmetadata',
                  'volumechange','ended','seeking','seeked','canplay'];
       for (var i = 0; i < evs.length; i++) {
