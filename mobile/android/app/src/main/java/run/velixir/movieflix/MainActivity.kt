@@ -45,6 +45,7 @@ import run.velixir.movieflix.ui.screens.AccountScreen
 import run.velixir.movieflix.ui.screens.AdminScreen
 import run.velixir.movieflix.ui.screens.CatalogScreen
 import run.velixir.movieflix.ui.screens.DetailScreen
+import run.velixir.movieflix.ui.screens.EmbedPlayer
 import run.velixir.movieflix.ui.screens.FavoritesScreen
 import run.velixir.movieflix.ui.screens.ForgotScreen
 import run.velixir.movieflix.ui.screens.GenresScreen

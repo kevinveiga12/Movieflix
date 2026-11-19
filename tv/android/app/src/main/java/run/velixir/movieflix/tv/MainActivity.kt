@@ -32,6 +32,7 @@ import run.velixir.movieflix.tv.ui.screens.TvAccountScreen
 import run.velixir.movieflix.tv.ui.screens.TvAdminScreen
 import run.velixir.movieflix.tv.ui.screens.TvCatalogScreen
 import run.velixir.movieflix.tv.ui.screens.TvDetailScreen
+import run.velixir.movieflix.tv.ui.screens.TvEmbedPlayer
 import run.velixir.movieflix.tv.ui.screens.TvFavoritesScreen
 import run.velixir.movieflix.tv.ui.screens.TvGenresScreen
 import run.velixir.movieflix.tv.ui.screens.TvHistoryScreen
