@@ -19,7 +19,22 @@ nixPkgs = ["nodejs_22"]
 cmds = ["npm ci --include=dev"]
 
 [phases.build]
-cmds = ["npm run build"]
+# ── TETO DE HEAP DO BUILD (correção do "The build failed" da v92) ─────────────
+#
+# O `NODE_OPTIONS=--max-old-space-size=160` que mantém o RUNTIME abaixo dos
+# 256 MB do plano Free também é herdado pela fase de BUILD, e o build não cabe
+# nele: `tsc -b` + `vite build` estouram 160 MB e o processo morre com
+# "Reached heap limit Allocation failed - JavaScript heap out of memory".
+#
+# Medido neste repositório, num checkout limpo:
+#   --max-old-space-size=160  → FATAL ERROR: heap out of memory
+#   --max-old-space-size=256  → build ok
+#   --max-old-space-size=512  → build ok
+#
+# Por isso o build define o próprio teto (1024 MB, acima do necessário e dentro
+# do que o builder da Velixir oferece). O valor do runtime continua sendo 160 no
+# [start] abaixo — são fases diferentes e o teto do build não vaza para o pod.
+cmds = ["NODE_OPTIONS=--max-old-space-size=1024 npm run build"]
 
 [start]
 # ── LIMITE DE HEAP DO V8 (correção do Out of Memory da v78) ──────────────────
