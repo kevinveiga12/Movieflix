@@ -6,7 +6,7 @@
   "description": "MovieFlix 2.0 — plataforma de streaming gratuita com catálogo TMDB",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview",
     "server": "node server/index.js",
     "start": "node server/index.js",
