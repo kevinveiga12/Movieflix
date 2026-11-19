@@ -197,28 +197,25 @@ private fun testRepeatedTaps() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. Volume
+// 7. Volume removido do player
 // ─────────────────────────────────────────────────────────────────────────────
-private fun testVolume() {
-    println("\n[7] Volume pelas setas ↑ ↓")
-    var real = 0.5
-    val applied = mutableListOf<Double>()
-    val v = VolumeController(currentProvider = { real }, onChange = { applied += it; real = it })
+private fun testVolumeRemoved() {
+    println("\n[7] Volume removido do player (↑ ↓ não fazem nada)")
+    // O player não tem mais controle de volume: o proprietário pediu para
+    // remover volume, legendas, tela cheia, ajustes e troca de servidor.
+    // Sobram OK (play/pause), ← → (10 s) e a barra de progresso.
+    //
+    // Sem Android aqui, o que dá para garantir é que a única operação que
+    // desloca a posição continua sendo o seek horizontal — nenhuma tecla
+    // vertical toca no player.
+    val p = FakePlayer(pos = 100.0, dur = 3600.0)
+    val s = seeker(p)
 
-    v.up()
-    check("↑ sobe para 60%", near(v.level, 0.6), "nível=${v.level}")
-    v.up()
-    check("↑ sobe para 70%", near(v.level, 0.7), "nível=${v.level}")
-    v.down()
-    check("↓ desce para 60%", near(v.level, 0.6), "nível=${v.level}")
+    check("nenhum seek antes de qualquer tecla", p.seeks.isEmpty())
 
-    repeat(10) { v.up() }
-    check("não passa de 100%", near(v.level, 1.0), "nível=${v.level}")
-    repeat(20) { v.down() }
-    check("não desce abaixo de 0%", near(v.level, 0.0), "nível=${v.level}")
-
-    check("sem erro de ponto flutuante", applied.all { near(it, Math.round(it * 100.0) / 100.0) })
-    check("rótulo mostra a porcentagem", v.label() == "🔊 0%", v.label())
+    s.onKeyDown(1, 0, now = 0)
+    s.onKeyUp(now = 100)
+    check("só a seta horizontal move a posição", p.seeks.size == 1 && near(p.last(), 110.0))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,7 +354,7 @@ fun main() {
     testReleaseWatchdog()
     testBounds()
     testRepeatedTaps()
-    testVolume()
+    testVolumeRemoved()
     testPlayPause()
     testLabels()
     testToggleRetry()

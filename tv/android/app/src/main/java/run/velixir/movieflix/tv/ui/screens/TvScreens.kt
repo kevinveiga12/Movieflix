@@ -65,7 +65,7 @@ import run.velixir.movieflix.tv.ui.theme.MfSans
    ========================================================================== */
 
 @Composable
-fun TvHomeScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
+fun TvHomeScreen(vm: TvViewModel, onOpen: (Title) -> Unit, onLoginRequired: () -> Unit = {}) {
     val s by vm.state.collectAsState()
 
     when {
@@ -75,7 +75,19 @@ fun TvHomeScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             item {
                 TvHero(
                     s.movies.firstOrNull(),
-                    onPlay = { s.movies.firstOrNull()?.let(onOpen) },
+                    /*
+                      "Assistir" sem sessão vai DIRETO ao login.
+
+                      O proprietário pediu: clicar em assistir sem estar logado
+                      redireciona imediatamente para a página de login, sem
+                      telas intermediárias. Antes este botão abria a tela do
+                      título, e só depois de um segundo toque o login aparecia.
+                    */
+                    onPlay = {
+                        s.movies.firstOrNull()?.let { t ->
+                            if (s.loggedIn) onOpen(t) else onLoginRequired()
+                        }
+                    },
                     onDetails = { s.movies.firstOrNull()?.let(onOpen) },
                 )
             }

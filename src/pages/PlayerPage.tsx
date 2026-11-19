@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom'
 import Hls from 'hls.js'
 import { loadCatalog, getById } from '../lib/catalog'
 import { nextEpisode, formatTime, type PlaybackSource } from '../lib/player'
@@ -8,17 +8,7 @@ import { PlaybackGate } from '../components/PlaybackGate'
 import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useHistory } from '../lib/userData'
-import {
-  PlayIcon,
-  PauseIcon,
-  SkipBack,
-  SkipForward,
-  VolumeIcon,
-  FullscreenIcon,
-  ArrowLeft,
-  NextEpisodeIcon,
-  SubtitlesIcon,
-} from '../components/Icons'
+import { PlayIcon, PauseIcon, SkipBack, SkipForward, ArrowLeft } from '../components/Icons'
 
 /**
  * Intervalo de gravação do progresso.
@@ -60,7 +50,8 @@ export function PlayerPage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const location = useLocation()
+  const { user, loading: authLoading } = useAuth()
   const { saveProgress, progressFor } = useHistory()
 
   // Tipo pedido na URL. `null` = não veio; nesse caso descobrimos pelo
@@ -91,14 +82,31 @@ export function PlayerPage() {
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
   const [buffered, setBuffered] = useState(0)
-  const [volume, setVolume] = useState(1)
-  const [muted, setMuted] = useState(false)
   const [showUi, setShowUi] = useState(true)
   /** Incrementa a cada interação — reinicia o timer do auto-hide. */
   const [uiPoke, setUiPoke] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [subsOn, setSubsOn] = useState(false)
+
+  /**
+   * LOGIN OBRIGATÓRIO — sem sessão, o player não abre.
+   *
+   * O proprietário pediu: "se o usuário não estiver logado e clicar em assistir
+   * qualquer filme ou série, redirecionar imediatamente para a página de login.
+   * Sem telas intermediárias, sem mensagens para voltar, sem etapas adicionais."
+   *
+   * Antes, quem abria /assistir/... sem conta via a tela do PlaybackGate
+   * ("Crie sua conta para assistir") e precisava clicar de novo. Agora o
+   * redirecionamento acontece aqui, antes de qualquer requisição de
+   * autorização, e o login devolve a pessoa ao mesmo título.
+   */
+  useEffect(() => {
+    if (authLoading || user) return
+    navigate('/login', {
+      replace: true,
+      state: { from: `${location.pathname}${location.search}` },
+    })
+  }, [authLoading, user, navigate, location.pathname, location.search])
 
   /**
    * Tipo efetivo do título.
@@ -155,7 +163,7 @@ export function PlayerPage() {
   // conta, assinatura, validade e plano exigido, e só então devolve a URL.
   // Sem resposta autorizada, não existe fonte para tocar.
   useEffect(() => {
-    if (!ready || !id) return
+    if (!ready || !id || !user) return
     let cancelled = false
 
     setAuthChecking(true)
@@ -189,7 +197,7 @@ export function PlayerPage() {
     return () => {
       cancelled = true
     }
-  }, [ready, id, type, season, episode, authAttempt])
+  }, [ready, id, type, season, episode, authAttempt, user])
 
   // Inicializa o <video> para fontes diretas
   useEffect(() => {
@@ -381,11 +389,14 @@ export function PlayerPage() {
   // Atalhos de teclado / controle remoto
   //
   // Na TV o botão OK do controle chega ao navegador como `Enter` (e alguns
-  // aparelhos mandam `MediaPlayPause`). Antes só `Espaço` e `k` alternavam, então
-  // o OK não fazia nada e o usuário precisava clicar na tela várias vezes.
+  // aparelhos mandam `MediaPlayPause`).
   //
-  // Regra do usuário: NADA de abrir ajustes/qualidade/legendas pelo controle.
-  // Só OK (play/pause), ← → (retroceder/avançar) e ↑ ↓ (volume).
+  // Regra do proprietário — SÓ estes comandos existem:
+  //   OK            → pausar / continuar
+  //   →             → avançar 10 s
+  //   ←             → voltar 10 s
+  //   Voltar/Escape → sair do player
+  // Nada de volume, legendas, tela cheia, ajustes ou troca de servidor.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const v = videoRef.current
@@ -416,35 +427,12 @@ export function PlayerPage() {
           e.preventDefault()
           v.currentTime = Math.max(0, v.currentTime - 10)
           break
-        case 'ArrowUp':
-          e.preventDefault()
-          setVolume((x) => Math.min(1, x + 0.1))
-          setMuted(false)
-          break
-        case 'ArrowDown':
-          e.preventDefault()
-          setVolume((x) => Math.max(0, x - 0.1))
-          break
-        case 'm':
-          setMuted((m) => !m)
-          break
-        case 'f':
-          void toggleFullscreen()
-          break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    const v = videoRef.current
-    if (v) {
-      v.volume = volume
-      v.muted = muted
-    }
-  }, [volume, muted])
 
   async function togglePlay() {
     const v = videoRef.current
@@ -460,13 +448,6 @@ export function PlayerPage() {
     }
   }
 
-  async function toggleFullscreen() {
-    const el = wrapRef.current
-    if (!el) return
-    if (document.fullscreenElement) await document.exitFullscreen()
-    else await el.requestFullscreen().catch(() => {})
-  }
-
   function seekTo(ratio: number) {
     const v = videoRef.current
     if (!v || !v.duration) return
@@ -476,6 +457,16 @@ export function PlayerPage() {
   const next = title && type === 'tv' ? nextEpisode(title, season, episode) : null
   const pct = duration ? (current / duration) * 100 : 0
   const bufPct = duration ? (buffered / duration) * 100 : 0
+
+  // Sem sessão: o redirecionamento ao login já foi disparado acima. Não
+  // desenhamos nada além do spinner para não piscar tela intermediária.
+  if (authLoading || !user) {
+    return (
+      <div className="player-page">
+        <div className="player-spinner" />
+      </div>
+    )
+  }
 
   // Verificando autorização — ainda não há decisão para mostrar.
   if (authChecking) {
@@ -557,9 +548,7 @@ export function PlayerPage() {
               setError('Não foi possível reproduzir este vídeo.')
               setLoading(false)
             }}
-          >
-            {subsOn && <track kind="subtitles" srcLang="pt" label="Português" default />}
-          </video>
+          />
         )}
 
         {source?.mode === 'embed' && (
@@ -641,53 +630,13 @@ export function PlayerPage() {
                 {title?.dublado_ptbr ? ' · Dublado (pt-BR)' : ''}
               </div>
             </div>
-            {source?.mode === 'direct' && (
-              <button
-                className="player-btn"
-                onClick={() => setSubsOn((s) => !s)}
-                aria-label="Legendas"
-                title="Legendas"
-                style={{ opacity: subsOn ? 1 : 0.6 }}
-              >
-                <SubtitlesIcon size={20} />
-              </button>
-            )}
-
             {/*
-              Modo EMBED: as ações da MovieFlix ficam no TOPO.
+              Lado direito do cabeçalho VAZIO, de propósito.
 
-              Antes elas viviam na barra de baixo, exatamente sobre a barra do
-              provedor — era isso que produzia duas barras e dois botões de
-              pause na tela da TV. O player do provedor já traz progresso,
-              volume e pause; aqui ficam só o que ele NÃO tem (próximo episódio
-              e tela cheia do MovieFlix), e o rodapé deixa de ser desenhado.
+              O proprietário pediu para remover os elementos desnecessários do
+              lado direito: nada de legendas, tela cheia, próximo episódio,
+              ajustes, volume ou troca de servidor. O título pode ficar.
             */}
-            {source?.mode === 'embed' && (
-              <>
-                {next && (
-                  <button
-                    className="player-btn"
-                    onClick={() =>
-                      navigate(
-                        `/assistir/${title?.tmdb_id}?type=tv&season=${next.season}&episode=${next.episode}`,
-                      )
-                    }
-                    aria-label="Próximo episódio"
-                    title="Próximo episódio"
-                  >
-                    <NextEpisodeIcon size={19} />
-                  </button>
-                )}
-                <button
-                  className="player-btn"
-                  onClick={() => void toggleFullscreen()}
-                  aria-label="Tela cheia"
-                  title="Tela cheia"
-                >
-                  <FullscreenIcon size={19} />
-                </button>
-              </>
-            )}
           </div>
 
           {/*
@@ -716,8 +665,18 @@ export function PlayerPage() {
                   <div className="progress-knob" style={{ left: `${pct}%` }} />
                 </div>
 
+                {/*
+                  Controles permitidos — e SÓ estes:
+                    OK (play/pause), ← 10 s, → 10 s, e o tempo atual/duração.
+                  Sem volume, sem legendas, sem tela cheia, sem próximo
+                  episódio, sem ajustes, sem troca de servidor.
+                */}
                 <div className="player-controls" style={{ marginTop: 14 }}>
-                  <button className="player-btn player-btn--main" onClick={togglePlay} aria-label={playing ? 'Pausar' : 'Reproduzir'}>
+                  <button
+                    className="player-btn player-btn--main"
+                    onClick={togglePlay}
+                    aria-label={playing ? 'Pausar' : 'Reproduzir'}
+                  >
                     {playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
                   </button>
                   <button
@@ -744,44 +703,6 @@ export function PlayerPage() {
                   <span className="player-time">
                     {formatTime(current)} / {formatTime(duration)}
                   </span>
-
-                  <div className="player-spacer" />
-
-                  <button className="player-btn" onClick={() => setMuted((m) => !m)} aria-label="Mudo">
-                    <VolumeIcon size={19} muted={muted || volume === 0} />
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={muted ? 0 : volume}
-                    onChange={(e) => {
-                      setVolume(Number(e.target.value))
-                      setMuted(false)
-                    }}
-                    style={{ width: 90, accentColor: 'var(--mf-red)' }}
-                    aria-label="Volume"
-                  />
-
-                  {next && (
-                    <button
-                      className="player-btn"
-                      onClick={() =>
-                        navigate(
-                          `/assistir/${title?.tmdb_id}?type=tv&season=${next.season}&episode=${next.episode}`,
-                        )
-                      }
-                      aria-label="Próximo episódio"
-                      title="Próximo episódio"
-                    >
-                      <NextEpisodeIcon size={19} />
-                    </button>
-                  )}
-
-                  <button className="player-btn" onClick={toggleFullscreen} aria-label="Tela cheia">
-                    <FullscreenIcon size={19} />
-                  </button>
                 </div>
               </>
             </div>

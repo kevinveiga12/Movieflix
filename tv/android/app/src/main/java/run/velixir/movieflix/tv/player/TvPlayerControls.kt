@@ -27,7 +27,9 @@ package run.velixir.movieflix.tv.player
  *   ← / → curto   → ±10 s
  *   ← / → segurando → ±30 s, ±1 min, ±2 min, ±3 min, ±4 min (e 4 min depois)
  *   soltar        → para EXATAMENTE no alvo acumulado (seek absoluto)
- *   ↑ / ↓         → volume ±10 %
+ *
+ * Volume foi REMOVIDO do player a pedido do proprietário (junto com legendas,
+ * tela cheia, ajustes e troca de servidor). ↑ ↓ não fazem nada.
  */
 
 /** Constantes de tempo e de passo. Uma fonte só, usada pelo app e pelos testes. */
@@ -57,7 +59,14 @@ object TvPlayerTiming {
     /** Saltos progressivos enquanto segura: 30 s → 1 → 2 → 3 → 4 min. */
     val HOLD_STEPS: DoubleArray = doubleArrayOf(30.0, 60.0, 120.0, 180.0, 240.0)
 
-    /** Passo do volume. */
+    /**
+     * Passo do volume — NÃO é mais usado pelo player.
+     *
+     * O proprietário pediu para remover volume (e legendas, tela cheia,
+     * ajustes, troca de servidor) do player. A constante fica como registro
+     * histórico; `VolumeController` foi removido de propósito, para que nenhum
+     * código volte a desenhar volume sem uma decisão explícita.
+     */
     const val VOLUME_STEP: Double = 0.1
 
     /** Janela de debounce do OK, para o auto-repeat do controle não piscar. */
@@ -268,43 +277,6 @@ class SeekController(
         }
         return "$sign$body"
     }
-}
-
-/**
- * Volume pelo D-pad.
- *
- * O nível é sempre recalculado a partir do volume REAL do player, não de um
- * contador interno — assim o app e o aparelho nunca divergem (o usuário pode
- * ter mexido no volume da TV, e o player pode ter sido mutado pelo provedor).
- */
-class VolumeController(
-    private val currentProvider: () -> Double,
-    private val onChange: (Double) -> Unit,
-    private val step: Double = TvPlayerTiming.VOLUME_STEP,
-) {
-    /** Último nível aplicado, 0.0–1.0. */
-    var level: Double = currentProvider().coerceIn(0.0, 1.0)
-        private set
-
-    fun up(): Double = apply(step)
-
-    fun down(): Double = apply(-step)
-
-    private fun apply(delta: Double): Double {
-        val base = currentProvider().coerceIn(0.0, 1.0)
-        // Arredonda em 2 casas: 0.1 + 0.2 não pode virar 0.30000000000000004.
-        val next = Math.round((base + delta).coerceIn(0.0, 1.0) * 100.0) / 100.0
-        level = next
-        onChange(next)
-        return next
-    }
-
-    /** Sincroniza com o que o player reportou. */
-    fun sync(v: Double) {
-        level = v.coerceIn(0.0, 1.0)
-    }
-
-    fun label(): String = "🔊 ${(level * 100).toInt()}%"
 }
 
 /**

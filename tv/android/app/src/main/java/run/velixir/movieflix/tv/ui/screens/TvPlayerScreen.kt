@@ -58,7 +58,6 @@ import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.player.PlayPauseController
 import run.velixir.movieflix.tv.player.SeekController
 import run.velixir.movieflix.tv.player.UiVisibility
-import run.velixir.movieflix.tv.player.VolumeController
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MfSans
 
@@ -73,8 +72,11 @@ import run.velixir.movieflix.tv.ui.theme.MfSans
  *   ←  toque curto          → −10 s
  *   ←  segurando            → −30 s, −1 min, −2 min, −3 min, −4 min
  *   soltar                  → para EXATAMENTE no alvo (seek absoluto)
- *   ↑ / ↓                   → volume ±10 %
  *   Voltar                  → sai do player
+ *
+ * Volume NÃO existe mais: o proprietário pediu para remover volume, legendas,
+ * tela cheia, ajustes e troca de servidor. ↑ ↓ são consumidas (para o foco não
+ * escapar do player) e não fazem nada.
  *
  * ── O que mudou nesta versão (e por quê) ─────────────────────────────────────
  *
@@ -200,7 +202,6 @@ private fun TvDirectPlayer(
     val playingState = remember { mutableStateOf(true) }
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
-    val volumeState = remember { mutableStateOf(1.0) }
 
     var hint by remember { mutableStateOf<String?>(null) }
     /** O usuário pausou de propósito: a retentativa de autoplay não deve brigar. */
@@ -218,12 +219,6 @@ private fun TvDirectPlayer(
             },
         )
     }
-    val volume = remember {
-        VolumeController(
-            currentProvider = { volumeState.value },
-            onChange = { v -> player.volume = v.toFloat() },
-        )
-    }
     val toggle = remember { PlayPauseController() }
 
     DisposableEffect(Unit) { onDispose { player.release() } }
@@ -239,7 +234,6 @@ private fun TvDirectPlayer(
             playingState.value = player.isPlaying
             positionState.value = (player.currentPosition / 1000.0).coerceAtLeast(0.0)
             durationState.value = (player.duration / 1000.0).coerceAtLeast(0.0)
-            volumeState.value = player.volume.toDouble()
             toggle.onState(player.isPlaying)
             delay(250)
         }
@@ -345,17 +339,13 @@ private fun TvDirectPlayer(
                             doSeekDown(1, native.repeatCount); true
                         }
                         Key.DirectionUp -> {
+                            // Volume removido a pedido do proprietário. A tecla é
+                            // consumida para o foco não escapar do player.
                             ui.poke(SystemClock.uptimeMillis())
-                            if (native.repeatCount == 0) {
-                                volume.up(); hint = volume.label()
-                            }
                             true
                         }
                         Key.DirectionDown -> {
                             ui.poke(SystemClock.uptimeMillis())
-                            if (native.repeatCount == 0) {
-                                volume.down(); hint = volume.label()
-                            }
                             true
                         }
                         else -> false
@@ -391,7 +381,6 @@ private fun TvDirectPlayer(
             playing = playingState.value,
             position = positionState.value,
             duration = durationState.value,
-            volume = volumeState.value,
             hint = hint,
             visible = controlsVisible,
             // Modo DIRETO: não há player de terceiro, então esta é a única
@@ -435,6 +424,49 @@ private val BRIDGE_JS: String = """
   if (window.__mf) return;
   var S = { v: null, playing: false, t: 0, d: 0, vol: 1, muted: false, ready: false, tried: 0, autoTried: 0 };
   window.__mf = S;
+
+  /**
+   * Esconde a UI do provedor.
+   *
+   * O proprietário pediu um player limpo: só OK (pausar/continuar), ← → 10 s e
+   * a barra de progresso. Nada de configurações, volume, legendas, tela cheia,
+   * seleção de servidor ou ícones extras.
+   *
+   * O player do provedor (playerflix.ink) desenha a barra dele dentro do
+   * iframe: `#ui` (controles), `.scrim-top`, `#reportWrap` (denúncia),
+   * `#toast`, o selo "embedmovies.org" e a view de episódios. Escondemos esses
+   * elementos por CSS — a barra que sobra na tela é a do app, que é a única
+   * com os números reais do <video>.
+   *
+   * O <video> em si NUNCA é escondido: é ele que toca o filme.
+   */
+  function hideProviderUi() {
+    if (document.getElementById('__mf_clean')) return;
+    var st = document.createElement('style');
+    st.id = '__mf_clean';
+    st.textContent = [
+      '#ui, .ui, #reportWrap, .report-wrap, #toast, .toast, .scrim-top,',
+      '#episodesView, #episodes, .ep-season-row, .ep-season-select,',
+      '.top-actions, .source-trigger, .icon-btn, .next-btn, .prev-btn,',
+      '.panel, .panel-body-wrap, .panel-list, .title-wrap, .crumb,',
+      '.brand-container, .pro-loader, #playerLoader, .loading-wrapper',
+    ].join(',') + '{display:none !important;visibility:hidden !important;opacity:0 !important;pointer-events:none !important;}' +
+      'video::-webkit-media-controls{display:none !important;}' +
+      'video::-webkit-media-controls-enclosure{display:none !important;}';
+    (document.head || document.documentElement).appendChild(st);
+
+    // O selo "embedmovies.org" é um <span> solto no body, sem classe.
+    var spans = document.querySelectorAll('body > span');
+    for (var i = 0; i < spans.length; i++) {
+      var s = spans[i];
+      if (s && /embedmovies|embed/i.test(s.textContent || '')) {
+        s.style.display = 'none';
+      }
+    }
+  }
+
+  hideProviderUi();
+  setInterval(hideProviderUi, 1000);
 
   function pick() {
     var vs = document.querySelectorAll('video');
@@ -575,7 +607,6 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     val playingState = remember { mutableStateOf(false) }
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
-    val volumeState = remember { mutableStateOf(1.0) }
     var hasVideo by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf<String?>(null) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
@@ -593,14 +624,6 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                     "window.__mfCmd && window.__mfCmd('seekTo',$target)",
                     null,
                 )
-            },
-        )
-    }
-    val volume = remember {
-        VolumeController(
-            currentProvider = { volumeState.value },
-            onChange = { v ->
-                webView?.evaluateJavascript("window.__mfCmd && window.__mfCmd('vol',$v)", null)
             },
         )
     }
@@ -702,10 +725,8 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                                         playingState.value = p
                                         positionState.value = o.optDouble("t", 0.0)
                                         durationState.value = o.optDouble("d", 0.0)
-                                        volumeState.value = o.optDouble("vol", 1.0)
                                         hasVideo = o.optBoolean("ready", false)
                                         toggle.onState(p)
-                                        volume.sync(volumeState.value)
                                     }
                                     "novideo" -> hasVideo = false
                                 }
@@ -798,17 +819,12 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                                     doSeekDown(-1, event.repeatCount); true
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
+                                    // Volume removido a pedido do proprietário.
                                     ui.poke(SystemClock.uptimeMillis())
-                                    if (event.repeatCount == 0) {
-                                        volume.up(); hint = volume.label()
-                                    }
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                                     ui.poke(SystemClock.uptimeMillis())
-                                    if (event.repeatCount == 0) {
-                                        volume.down(); hint = volume.label()
-                                    }
                                     true
                                 }
                                 KeyEvent.KEYCODE_BACK -> {
@@ -883,14 +899,12 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             playing = playingState.value,
             position = positionState.value,
             duration = durationState.value,
-            volume = volumeState.value,
             hint = hint,
             visible = controlsVisible,
-            // Modo EMBED: o player do provedor (iframe de outro domínio) já
-            // desenha a barra dele. Desenhar a nossa junto era a origem das
-            // DUAS barras sobrepostas na TV, então aqui só aparecem as dicas
-            // de comando (±10s, volume) — uma única barra na tela.
-            showBar = false,
+            // Modo EMBED: a UI do provedor é escondida pela ponte JS
+            // (`hideProviderUi`), então esta é a ÚNICA barra na tela — a que o
+            // proprietário pediu: tempo atual, duração e progresso.
+            showBar = true,
         )
     }
 }
@@ -909,16 +923,15 @@ private fun TvPlayerOverlay(
     playing: Boolean,
     position: Double,
     duration: Double,
-    volume: Double,
     hint: String?,
     visible: Boolean,
-    /** Desenha a barra própria da MovieFlix. `false` no modo embed. */
+    /** Desenha a barra própria da MovieFlix. */
     showBar: Boolean,
 ) {
     val pct = if (duration > 0) (position / duration).coerceIn(0.0, 1.0) else 0.0
 
     Box(Modifier.fillMaxSize()) {
-        // Dica de comando (⏩ +10s, 🔊 70%, ⏸ Pausado…)
+        // Dica de comando (⏩ +10s, ⏸ Pausado…)
         // A dica aparece SEMPRE, mesmo com os controles escondidos: é a única
         // confirmação visual de que a tecla do controle foi entendida.
         if (hint != null) {
@@ -996,19 +1009,12 @@ private fun TvPlayerOverlay(
                     }
 
                     Spacer(Modifier.width(6.dp))
-
-                    Text(
-                        "🔊 ${(volume * 100).toInt()}%",
-                        color = MfColors.TextMuted,
-                        fontSize = 14.sp,
-                        fontFamily = MfSans,
-                    )
                 }
 
                 Spacer(Modifier.height(8.dp))
 
                 Text(
-                    "OK play/pause · ← → 10s (segure para acelerar) · ↑ ↓ volume",
+                    "OK pausar/continuar · ← → 10s",
                     color = MfColors.TextDim,
                     fontSize = 12.sp,
                     fontFamily = MfSans,

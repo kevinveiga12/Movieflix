@@ -202,7 +202,15 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
 
                 Box(Modifier.weight(1f)) {
                     when (r) {
-                        TvRoute.Home -> TvHomeScreen(vm) { route = TvRoute.Detail(it) }
+                        TvRoute.Home -> TvHomeScreen(
+                            vm,
+                            onOpen = { route = TvRoute.Detail(it) },
+                            onLoginRequired = {
+                                // Assistir sem sessão → login imediato.
+                                afterLogin = TvRoute.Home
+                                route = TvRoute.Login
+                            },
+                        )
                         TvRoute.Movies -> TvCatalogScreen(vm, "movie") { route = TvRoute.Detail(it) }
                         TvRoute.Series -> TvCatalogScreen(vm, "tv") { route = TvRoute.Detail(it) }
                         TvRoute.Genres -> TvGenresScreen(vm) { route = TvRoute.Detail(it) }
