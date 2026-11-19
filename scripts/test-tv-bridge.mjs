@@ -63,8 +63,11 @@ check('a ponte não está vazia', bridge.length > 500)
 check('expõe window.__mfCmd', bridge.includes('window.__mfCmd'))
 check('tem comando seekTo (posição absoluta)', bridge.includes("cmd === 'seekTo'"))
 check('tem comando toggle', bridge.includes("cmd === 'toggle'"))
-check('tem comando vol', bridge.includes("cmd === 'vol'"))
+check('NÃO tem comando vol (volume removido a pedido)', !bridge.includes("cmd === 'vol'"))
 check('tenta autoplay ao anexar', bridge.includes('autoPlay()'))
+check('esconde a UI do provedor', bridge.includes('hideProviderUi'))
+check('mata o anel de foco (outline:none)', bridge.includes('outline:none'))
+check('faz blur no elemento ativo', bridge.includes('blur()'))
 
 // ── 2. Sintaxe ──────────────────────────────────────────────────────────────
 console.log('\n[1] Sintaxe do JavaScript')
@@ -200,19 +203,15 @@ console.log('\n[4] seekTo: posição absoluta, exata, dentro dos limites')
 }
 
 // ── 7. Volume ───────────────────────────────────────────────────────────────
-console.log('\n[5] Volume')
+console.log('\n[5] Volume removido do player (a pedido do proprietário)')
 {
   const v = makeVideo({ paused: false })
   const { win } = runBridge(v)
+  // O comando 'vol' não existe mais: a ponte não altera o volume do <video>.
+  const before = v.volume
   win.__mfCmd('vol', 0.7)
-  check('vol(0.7) → 70%', Math.abs(v.volume - 0.7) < 1e-9, `vol=${v.volume}`)
-  win.__mfCmd('vol', 1.5)
-  check('vol acima de 1 é limitado a 1', v.volume === 1, `vol=${v.volume}`)
-  win.__mfCmd('vol', -1)
-  check('vol negativo é limitado a 0', v.volume === 0, `vol=${v.volume}`)
-  v.muted = true
-  win.__mfCmd('vol', 0.5)
-  check('mexer no volume desmuta', v.muted === false)
+  check('vol não altera o volume', v.volume === before, `vol=${v.volume}`)
+  check('vol não desmuta', v.muted === false)
 }
 
 // ── 8. Estado reportado ao app ──────────────────────────────────────────────
@@ -225,7 +224,7 @@ console.log('\n[6] Estado reportado ao app (barrinha)')
   check('reporta posição real (t)', last && Math.abs(last.t - 300) < 0.001, JSON.stringify(last))
   check('reporta duração (d)', last && last.d === 600, JSON.stringify(last))
   check('reporta playing', last && last.playing === true, JSON.stringify(last))
-  check('reporta volume', last && typeof last.vol === 'number', JSON.stringify(last))
+  check('NÃO reporta volume (removido)', last && last.vol === undefined, JSON.stringify(last))
   check('reporta ready (há vídeo)', last && last.ready === true, JSON.stringify(last))
 }
 

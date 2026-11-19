@@ -149,8 +149,10 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
                   do título de onde ela veio (não a um menu qualquer).
                 */
                 if (!s.loggedIn) {
-                    LaunchedEffect(r.title.tmdbId) {
-                        afterLogin = TvRoute.Detail(r.title)
+                    LaunchedEffect(r.title.tmdbId, r.season, r.episode) {
+                        // Guarda o PLAYER (não a tela do título): depois de entrar,
+                        // a pessoa cai direto no filme que escolheu, tocando.
+                        afterLogin = TvRoute.Player(r.title, r.season, r.episode)
                         route = TvRoute.Login
                     }
                 } else {
@@ -235,8 +237,9 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
                                     route = TvRoute.Player(r.title, season, episode)
                                 } else {
                                     // Sem sessão o botão "Assistir" leva ao login,
-                                    // e não ao player.
-                                    afterLogin = TvRoute.Detail(r.title)
+                                    // e não ao player. Depois de entrar, volta
+                                    // DIRETO ao player do título escolhido.
+                                    afterLogin = TvRoute.Player(r.title, season, episode)
                                     route = TvRoute.Login
                                 }
                             },

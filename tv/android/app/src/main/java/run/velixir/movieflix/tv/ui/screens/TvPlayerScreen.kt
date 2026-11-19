@@ -12,16 +12,14 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -57,66 +54,50 @@ import run.velixir.movieflix.tv.TvViewModel
 import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.player.PlayPauseController
 import run.velixir.movieflix.tv.player.SeekController
-import run.velixir.movieflix.tv.player.UiVisibility
 import run.velixir.movieflix.tv.ui.theme.MfColors
-import run.velixir.movieflix.tv.ui.theme.MfSans
 
 /**
- * Player da TV.
+ * Player da TV — versão "limpa".
  *
- * ── Controle remoto (o que o usuário pediu) ──────────────────────────────────
+ * ── O que o proprietário pediu (e é a regra deste arquivo) ───────────────────
  *
- *   OK / Enter / Play-Pause → alterna play/pause, sempre a partir do estado REAL
- *   →  toque curto          → +10 s
- *   →  segurando            → +30 s, +1 min, +2 min, +3 min, +4 min (e 4 min)
- *   ←  toque curto          → −10 s
- *   ←  segurando            → −30 s, −1 min, −2 min, −3 min, −4 min
- *   soltar                  → para EXATAMENTE no alvo (seek absoluto)
- *   Voltar                  → sai do player
+ *   a) o vídeo começa sozinho ao abrir o filme/série;
+ *   b) na tela aparece SOMENTE a barra de progresso — nada de botões, ícones,
+ *      textos, títulos, painéis, bordas, molduras ou anel de foco;
+ *   c) OK pausa; OK de novo despausa; e assim sempre;
+ *   d) ← e → retrocedem/avançam de verdade;
+ *   e) Voltar sai do player;
+ *   f) o foco NUNCA sai do player nem revela elementos escondidos.
  *
- * Volume NÃO existe mais: o proprietário pediu para remover volume, legendas,
- * tela cheia, ajustes e troca de servidor. ↑ ↓ são consumidas (para o foco não
- * escapar do player) e não fazem nada.
+ * ── Causa raiz da borda amarela e do OK "não funcionar" ──────────────────────
  *
- * ── O que mudou nesta versão (e por quê) ─────────────────────────────────────
+ * O player do provedor roda dentro de um WebView. Na versão anterior o WebView
+ * era FOCÁVEL (`isFocusable = true`, `requestFocus()`), então ele recebia o
+ * D-pad. Dentro dele, o navegador fazia a navegação de foco do DOM: cada OK
+ * movia o foco para o próximo elemento focável da página do provedor (o painel
+ * "ASSISTIR", a engrenagem, o ícone de tela cheia…) e o Chromium desenhava o
+ * anel de foco amarelo em volta dele — exatamente a borda do canto superior
+ * direito das fotos. Como o foco estava no DOM e não no nosso player, o OK
+ * deixava de chegar ao nosso handler: era preciso apertar várias vezes.
  *
- * 1. A lógica de controle saiu daqui e foi para `player/TvPlayerControls.kt`,
- *    que é Kotlin puro e tem testes headless (`scripts/test-tv-player.sh`).
- *    Antes ela era impossível de testar e divergia do aparelho real.
+ * Correção (a causa, não o sintoma):
+ *   1. o WebView deixa de ser focável e bloqueia o foco dos descendentes
+ *      (`FOCUS_BLOCK_DESCENDANTS`) — ele nunca mais recebe o D-pad;
+ *   2. o D-pad é tratado no Box do Compose que envolve o WebView, que é o
+ *      único elemento focável da tela;
+ *   3. a ponte JS apaga qualquer `outline`/anel de foco e faz `blur()` no
+ *      elemento ativo da página do provedor, para que nem um `focus()` vindo
+ *      do próprio provedor desenhe borda;
+ *   4. a UI do provedor é escondida SEMPRE (não só quando o `<video>` é
+ *      encontrado), então não sobra nada para o foco revelar.
  *
- * 2. O avanço passou a ser ABSOLUTO. Antes cada passo era
- *    `currentTime + 10`, então o segundo passo partia de uma posição que o
- *    player ainda não tinha aplicado — segurando a seta os saltos se perdiam e
- *    o vídeo não parava no número exato. Agora o alvo é acumulado em segundos
- *    e enviado como `seekTo(alvo)`; soltar reenvia o mesmo alvo.
+ * ── Por que a ponte JS existe ────────────────────────────────────────────────
  *
- * 3. Passou a existir tratamento de SOLTAR a tecla (ACTION_UP) nos dois modos.
- *    No modo direto (ExoPlayer) não havia: o job de avanço rodava para sempre,
- *    pulando 4 min a cada 500 ms depois que o usuário soltava.
- *
- * 4. Watchdog de 1,2 s: TV Box que não entrega ACTION_UP ao WebView não deixa
- *    mais o vídeo avançando sozinho.
- *
- * 5. O vídeo começa a tocar ao abrir. O provedor costuma montar o `<video>`
- *    pausado; a ponte tenta `play()` assim que o elemento existe e de novo em
- *    `canplay`, e o ExoPlayer usa `playWhenReady = true` com uma retentativa.
- *    Se ainda assim entrar pausado, o primeiro OK despausa — porque o toggle
- *    lê `v.paused` / `isPlaying` de verdade, em vez de um contador do app.
- *
- * ── Por que o modo embed precisa de ponte JS ─────────────────────────────────
- *
- * O player do provedor roda em iframe de OUTRO domínio. A página do MovieFlix
- * não alcança o `<video>` de dentro dele (política de origem do navegador) e o
- * provedor não publica `postMessage`. No Android existe um caminho que o
- * navegador não tem: `WebViewCompat.addDocumentStartJavaScript` injeta um
- * script em TODOS os frames, inclusive nos de outra origem. É por ele que a
- * ponte abaixo controla o `<video>` real — `play()`, `pause()`, `currentTime`,
- * `volume` no elemento, não um ícone mudando.
- *
- * O estado da barrinha vem do próprio `<video>` (eventos `timeupdate`, `play`,
- * `pause`, `durationchange`), não de um contador estimado. Se o provedor não
- * tiver `<video>` (ex.: player em canvas), a ponte não encontra o elemento e o
- * app diz isso na tela, em vez de fingir.
+ * O `<video>` do provedor está num iframe de outra origem; a página do
+ * MovieFlix não o alcança. No Android, `addDocumentStartJavaScript` injeta o
+ * script em TODOS os frames, inclusive de outra origem — é por ele que
+ * controlamos o `<video>` real (`play`, `pause`, `currentTime`), e não um
+ * ícone mudando de estado.
  */
 @Composable
 fun TvPlayerScreen(
@@ -176,7 +157,7 @@ fun TvPlayerScreen(
     }
 }
 
-// ───────────────────────────── modo direto (Media3) ─────────────────────────────
+// ────────────────────────────── modo direto (Media3) ──────────────────────────────
 
 @Composable
 private fun TvDirectPlayer(
@@ -198,17 +179,13 @@ private fun TvDirectPlayer(
         }
     }
 
-    // Estado REAL do ExoPlayer — é o que a barrinha mostra e o que o toggle lê.
+    // Estado REAL do ExoPlayer — é o que a barra mostra e o que o toggle lê.
     val playingState = remember { mutableStateOf(true) }
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
 
-    var hint by remember { mutableStateOf<String?>(null) }
     /** O usuário pausou de propósito: a retentativa de autoplay não deve brigar. */
     var userPaused by remember { mutableStateOf(false) }
-    /** Controles na tela — somem 3 s depois da última tecla. */
-    val ui = remember { UiVisibility() }
-    var controlsVisible by remember { mutableStateOf(true) }
 
     val seek = remember {
         SeekController(
@@ -228,7 +205,7 @@ private fun TvDirectPlayer(
         runCatching { focusRequester.requestFocus() }
     }
 
-    // Estado real → barrinha (4× por segundo).
+    // Estado real → barra (4× por segundo).
     LaunchedEffect(Unit) {
         while (true) {
             playingState.value = player.isPlaying
@@ -257,10 +234,9 @@ private fun TvDirectPlayer(
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             // OK sem efeito → reenvia play/pause EXPLÍCITO (um toque basta).
-            toggle.retry(now)
-            // Auto-hide: sem tecla há 3 s, some com os controles.
-            ui.tick(now)
-            controlsVisible = ui.visible
+            toggle.retry(now)?.let { want ->
+                if (want) player.play() else player.pause()
+            }
             delay(50)
         }
     }
@@ -282,13 +258,6 @@ private fun TvDirectPlayer(
         }
     }
 
-    LaunchedEffect(hint) {
-        if (hint != null) {
-            delay(1200)
-            hint = null
-        }
-    }
-
     fun doToggle(repeatCount: Int) {
         // Auto-repeat do controle: só o PRIMEIRO evento (repeatCount 0) conta.
         // Antes, o auto-repeat gerava dois toggles no mesmo toque e o vídeo
@@ -296,8 +265,6 @@ private fun TvDirectPlayer(
         // vezes para conseguir pausar.
         if (repeatCount > 0) return
         if (!toggle.onKey(SystemClock.uptimeMillis())) return
-        ui.poke(SystemClock.uptimeMillis())
-        hint = toggle.hint()
         if (player.isPlaying) {
             userPaused = true
             player.pause()
@@ -308,14 +275,11 @@ private fun TvDirectPlayer(
     }
 
     fun doSeekDown(dir: Int, repeatCount: Int) {
-        ui.poke(SystemClock.uptimeMillis())
-        if (seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())) {
-            hint = seek.stepLabel()
-        }
+        seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())
     }
 
     fun doSeekUp() {
-        if (seek.onKeyUp(SystemClock.uptimeMillis())) hint = seek.stepLabel()
+        seek.onKeyUp(SystemClock.uptimeMillis())
     }
 
     Box(
@@ -338,16 +302,8 @@ private fun TvDirectPlayer(
                         Key.DirectionRight, Key.MediaFastForward -> {
                             doSeekDown(1, native.repeatCount); true
                         }
-                        Key.DirectionUp -> {
-                            // Volume removido a pedido do proprietário. A tecla é
-                            // consumida para o foco não escapar do player.
-                            ui.poke(SystemClock.uptimeMillis())
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            ui.poke(SystemClock.uptimeMillis())
-                            true
-                        }
+                        // ↑ ↓ são consumidas para o foco não escapar do player.
+                        Key.DirectionUp, Key.DirectionDown -> true
                         else -> false
                     }
                     KeyEventType.KeyUp -> when (ev.key) {
@@ -368,6 +324,8 @@ private fun TvDirectPlayer(
                     this.player = player
                     useController = false
                     isFocusable = false
+                    isFocusableInTouchMode = false
+                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -377,20 +335,12 @@ private fun TvDirectPlayer(
             modifier = Modifier.fillMaxSize(),
         )
 
-        TvPlayerOverlay(
-            playing = playingState.value,
-            position = positionState.value,
-            duration = durationState.value,
-            hint = hint,
-            visible = controlsVisible,
-            // Modo DIRETO: não há player de terceiro, então esta é a única
-            // barra da tela.
-            showBar = true,
-        )
+        // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
+        TvProgressBar(position = positionState.value, duration = durationState.value)
     }
 }
 
-// ───────────────────────────── modo embed (WebView) ─────────────────────────────
+// ────────────────────────────── modo embed (WebView) ──────────────────────────────
 
 /**
  * Origem do site oficial — o provedor só entrega o player com este Referer.
@@ -413,8 +363,9 @@ private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
  *      a cada 250 ms por até 2,5 min);
  *   2. escuta os eventos reais do elemento e reporta o estado ao app;
  *   3. tenta tocar sozinho ao abrir (o provedor monta pausado);
- *   4. expõe `window.__mfCmd(cmd, arg)` para o app mandar
- *      toggle / play / pause / seekTo / seekBy / vol.
+ *   4. esconde a UI do provedor e APAGA qualquer anel de foco;
+ *   5. expõe `window.__mfCmd(cmd, arg)` para o app mandar
+ *      toggle / play / pause / seekTo.
  *
  * `seekTo` recebe a posição ABSOLUTA em segundos — é o que faz o vídeo parar
  * exatamente no ponto mostrado na barra, sem deriva.
@@ -422,53 +373,46 @@ private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
 private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
-  var S = { v: null, playing: false, t: 0, d: 0, vol: 1, muted: false, ready: false, tried: 0, autoTried: 0 };
+  var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0 };
   window.__mf = S;
 
   /**
-   * Esconde a UI do provedor — SÓ quando conseguimos controlar o <video>.
+   * Esconde a UI do provedor e mata o anel de foco.
    *
-   * O proprietário pediu um player limpo: só OK (pausar/continuar), ← → 10 s e
-   * a barra de progresso. Nada de configurações, volume, legendas, tela cheia,
-   * seleção de servidor ou ícones extras.
-   *
-   * O player do provedor (playerflix.ink) desenha a barra dele dentro do
-   * iframe: `#ui` (controles), `.scrim-top`, `#reportWrap` (denúncia),
-   * `#toast`, o selo "embedmovies.org" e a view de episódios.
-   *
-   * REGRA DE SEGURANÇA: só escondemos depois que `attach()` achou o <video>
-   * NESTE frame. Se o provedor puser o vídeo num iframe de outra origem, a
-   * ponte não alcança o elemento, o app não consegue pausar/avançar — e
-   * esconder a UI do provedor deixaria a tela SEM controle nenhum. Nesse caso
-   * a UI do provedor fica intacta e é ela que o usuário usa.
+   * O proprietário pediu um player limpo: só a barra de progresso. Nada de
+   * configurações, volume, legendas, tela cheia, seleção de servidor, ícones,
+   * títulos ou painéis. O player do provedor (playerflix.ink) desenha a barra
+   * dele dentro do iframe: `#ui`, `.scrim-top`, `#reportWrap`, `#toast`, o selo
+   * "embedmovies.org" e a view de episódios.
    *
    * O <video> em si NUNCA é escondido: é ele que toca o filme.
+   *
+   * NUNCA deixa uma exceção escapar: cosmético (esconder a UI) não pode
+   * derrubar o controle.
    */
   function hideProviderUi() {
-    // NUNCA deixa uma exceção escapar daqui.
-    //
-    // `hideProviderUi` é chamada de dentro de `attach()`, depois de o <video>
-    // ter sido encontrado. Se ela lançasse (um DOM sem `getElementById`, um
-    // provedor que reescreveu o <head>, etc.), `attach()` abortaria ANTES de
-    // `sync()` e do `return true` — e o app ficaria eternamente achando que não
-    // há vídeo: sem barra, sem pause, sem ±10 s. O teste
-    // `scripts/test-tv-bridge.mjs` pegou exatamente essa regressão.
-    // Cosmético (esconder a UI do provedor) nunca pode derrubar o controle.
     try {
       if (!document || typeof document.getElementById !== 'function') return;
-      if (document.getElementById('__mf_clean')) return;
-      var st = document.createElement('style');
-      st.id = '__mf_clean';
-      st.textContent = [
-        '#ui, .ui, #reportWrap, .report-wrap, #toast, .toast, .scrim-top,',
-        '#episodesView, #episodes, .ep-season-row, .ep-season-select,',
-        '.top-actions, .source-trigger, .icon-btn, .next-btn, .prev-btn,',
-        '.panel, .panel-body-wrap, .panel-list, .title-wrap, .crumb,',
-        '.brand-container, .pro-loader, #playerLoader, .loading-wrapper',
-      ].join(',') + '{display:none !important;visibility:hidden !important;opacity:0 !important;pointer-events:none !important;}' +
-        'video::-webkit-media-controls{display:none !important;}' +
-        'video::-webkit-media-controls-enclosure{display:none !important;}';
-      (document.head || document.documentElement).appendChild(st);
+      if (!document.getElementById('__mf_clean')) {
+        var st = document.createElement('style');
+        st.id = '__mf_clean';
+        st.textContent = [
+          '#ui, .ui, #reportWrap, .report-wrap, #toast, .toast, .scrim-top',
+          '#episodesView, #episodes, .ep-season-row, .ep-season-select',
+          '.top-actions, .source-trigger, .icon-btn, .next-btn, .prev-btn',
+          '.panel, .panel-body-wrap, .panel-list, .title-wrap, .crumb',
+          '.brand-container, .pro-loader, #playerLoader, .loading-wrapper',
+          '.controls, .control-bar, .player-controls, .settings, .settings-panel',
+          '.volume, .volume-control, .subtitle, .subtitles, .quality, .fullscreen',
+        ].join(',') + '{display:none !important;visibility:hidden !important;opacity:0 !important;pointer-events:none !important;}' +
+          // Nenhum anel/borda de foco, em nenhum elemento, em nenhum estado.
+          '*:focus{outline:none !important;outline-offset:0 !important;box-shadow:none !important;}' +
+          '*:focus-visible{outline:none !important;box-shadow:none !important;}' +
+          '*::-moz-focus-inner{border:0 !important;}' +
+          'video::-webkit-media-controls{display:none !important;}' +
+          'video::-webkit-media-controls-enclosure{display:none !important;}';
+        (document.head || document.documentElement).appendChild(st);
+      }
 
       // O selo "embedmovies.org" é um <span> solto no body, sem classe.
       var spans = document.querySelectorAll('body > span');
@@ -477,6 +421,13 @@ private val BRIDGE_JS: String = """
         if (s && /embedmovies|embed/i.test(s.textContent || '')) {
           s.style.display = 'none';
         }
+      }
+
+      // Se o provedor focar algum elemento por conta própria, tira o foco.
+      // É isto que impede o anel amarelo de reaparecer depois de um clique.
+      var ae = document.activeElement;
+      if (ae && ae !== document.body && typeof ae.blur === 'function') {
+        ae.blur();
       }
     } catch (e) {}
   }
@@ -498,15 +449,7 @@ private val BRIDGE_JS: String = """
 
   /** Estado completo — o app lê estes campos, não só o `type`. */
   function snapshot() {
-    return {
-      type: 'state',
-      playing: S.playing,
-      t: S.t,
-      d: S.d,
-      vol: S.vol,
-      muted: S.muted,
-      ready: S.ready
-    };
+    return { type: 'state', playing: S.playing, t: S.t, d: S.d, ready: S.ready };
   }
 
   function sync() {
@@ -515,8 +458,6 @@ private val BRIDGE_JS: String = """
     S.playing = !v.paused && !v.ended;
     S.t = v.currentTime || 0;
     S.d = (isFinite(v.duration) ? v.duration : 0);
-    S.vol = (typeof v.volume === 'number') ? v.volume : 1;
-    S.muted = !!v.muted;
     S.ready = true;
   }
 
@@ -549,26 +490,25 @@ private val BRIDGE_JS: String = """
       }
       v.addEventListener('canplay', function () { autoPlay(); }, true);
       autoPlay();
-      // Só agora: temos o <video> na mão, então a barra do app funciona e a
-      // do provedor pode sair da tela sem deixar o usuário sem controle.
-      hideProviderUi();
-      setInterval(hideProviderUi, 1000);
     }
     sync();
     return true;
   }
+
+  // Esconde a UI do provedor desde o primeiro instante — não espera o <video>.
+  // O proprietário quer a tela limpa; a barra é a nossa.
+  hideProviderUi();
+  setInterval(hideProviderUi, 500);
 
   var iv = setInterval(function () {
     S.tried++;
     if (attach() || S.tried > 600) clearInterval(iv);
   }, 250);
 
-  // Tenta já, sem esperar o primeiro tick: quando o script é injetado no
-  // document-start o <video> normalmente ainda não existe, mas em recarregamento
-  // de frame ele já pode estar lá — e aí o autoplay acontece 250 ms mais cedo.
+  // Tenta já, sem esperar o primeiro tick.
   attach();
 
-  // Heartbeat: mantém a barrinha viva mesmo se o provedor não emitir eventos.
+  // Heartbeat: mantém a barra viva mesmo se o provedor não emitir eventos.
   setInterval(function () {
     if (!S.v) return;
     sync();
@@ -590,13 +530,6 @@ private val BRIDGE_JS: String = """
         if (!isFinite(t)) t = 0;
         v.currentTime = Math.max(0, d > 0 ? Math.min(d, t) : t);
       }
-      else if (cmd === 'seekBy') {
-        var d2 = isFinite(v.duration) ? v.duration : 0;
-        var t2 = (v.currentTime || 0) + Number(arg);
-        v.currentTime = Math.max(0, d2 > 0 ? Math.min(d2, t2) : t2);
-      }
-      else if (cmd === 'vol') { v.muted = false; v.volume = Math.max(0, Math.min(1, Number(arg))); }
-      else if (cmd === 'mute') { v.muted = !v.muted; }
       sync();
       post(snapshot());
       return true;
@@ -625,12 +558,15 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
     var hasVideo by remember { mutableStateOf(false) }
-    var hint by remember { mutableStateOf<String?>(null) }
+    /** Só avisa "sem vídeo" depois de dar tempo real ao provedor. */
+    var waitedLong by remember { mutableStateOf(false) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
     var legacyBridge by remember { mutableStateOf(false) }
-    /** Controles na tela — somem 3 s depois da última tecla. */
-    val ui = remember { UiVisibility() }
-    var controlsVisible by remember { mutableStateOf(true) }
+
+    // O Box do Compose é o ÚNICO elemento focável da tela. É ele que recebe o
+    // D-pad — o WebView não é focável, então o foco nunca entra no DOM do
+    // provedor e o anel amarelo não tem como aparecer.
+    val focusRequester = remember { FocusRequester() }
 
     val seek = remember {
         SeekController(
@@ -657,24 +593,24 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         // mesmo estado, obrigando a apertar OK várias vezes.
         if (repeatCount > 0) return
         if (!toggle.onKey(SystemClock.uptimeMillis())) return
-        ui.poke(SystemClock.uptimeMillis())
-        hint = toggle.hint()
         js("toggle")
     }
 
     fun doSeekDown(dir: Int, repeatCount: Int) {
-        ui.poke(SystemClock.uptimeMillis())
-        if (seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())) {
-            hint = seek.stepLabel()
-        }
+        seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())
     }
 
     fun doSeekUp() {
-        if (seek.onKeyUp(SystemClock.uptimeMillis())) hint = seek.stepLabel()
+        seek.onKeyUp(SystemClock.uptimeMillis())
     }
 
+    // Foco inicial e re-foco depois que a página carrega (o WebView pode pedir
+    // foco ao terminar de carregar; devolvemos para o Box).
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    LaunchedEffect(pageReady) { runCatching { focusRequester.requestFocus() } }
+
     // Relógio do controle: aceleração progressiva + watchdog de soltura +
-    // reenvio do OK se o player não obedeceu + auto-hide dos controles.
+    // reenvio do OK se o player não obedeceu.
     LaunchedEffect(Unit) {
         while (true) {
             val now = SystemClock.uptimeMillis()
@@ -683,16 +619,15 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             // ainda montando). Se o estado não mudou, manda play/pause
             // EXPLÍCITO — nunca outro toggle, para não desfazer o que deu certo.
             toggle.retry(now)?.let { want -> js(if (want) "play" else "pause") }
-            ui.tick(now)
-            controlsVisible = ui.visible
             delay(50)
         }
     }
 
-    LaunchedEffect(hint) {
-        if (hint != null) {
-            delay(1200)
-            hint = null
+    // Aviso honesto só depois de 12 s sem <video> (não é controle, é erro).
+    LaunchedEffect(pageReady) {
+        if (pageReady) {
+            delay(12_000)
+            waitedLong = true
         }
     }
 
@@ -706,7 +641,45 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
+            .onKeyEvent { ev ->
+                val native = ev.nativeKeyEvent
+                when (ev.type) {
+                    KeyEventType.KeyDown -> when (ev.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
+                        Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
+                        -> {
+                            doToggle(native.repeatCount); true
+                        }
+                        Key.DirectionLeft, Key.MediaRewind -> {
+                            doSeekDown(-1, native.repeatCount); true
+                        }
+                        Key.DirectionRight, Key.MediaFastForward -> {
+                            doSeekDown(1, native.repeatCount); true
+                        }
+                        // ↑ ↓ consumidas: o foco não pode escapar do player.
+                        Key.DirectionUp, Key.DirectionDown -> true
+                        Key.Back -> {
+                            onBack(); true
+                        }
+                        else -> false
+                    }
+                    KeyEventType.KeyUp -> when (ev.key) {
+                        Key.DirectionLeft, Key.DirectionRight,
+                        Key.MediaRewind, Key.MediaFastForward,
+                        -> {
+                            doSeekUp(); true
+                        }
+                        else -> false
+                    }
+                    else -> false
+                }
+            },
+    ) {
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
@@ -715,9 +688,17 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                     setBackgroundColor(android.graphics.Color.BLACK)
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    requestFocus()
+
+                    // ── A CORREÇÃO DA BORDA AMARELA ──────────────────────────
+                    // O WebView NÃO é focável e bloqueia o foco dos descendentes.
+                    // Assim o D-pad nunca entra no DOM do provedor: não há
+                    // navegação de foco, não há anel amarelo, e o OK chega
+                    // sempre ao nosso handler (no Box do Compose).
+                    isFocusable = false
+                    isFocusableInTouchMode = false
+                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                    isClickable = false
+                    isLongClickable = false
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -753,13 +734,6 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                     )
 
                     // Script em todos os frames, inclusive os de outra origem.
-                    //
-                    // `addDocumentStartJavaScript` é do androidx.webkit (não da
-                    // classe WebView da plataforma) e só existe a partir da API
-                    // 30. Abaixo disso caímos para `evaluateJavascript`, que
-                    // alcança apenas o frame principal — funciona quando o
-                    // provedor monta o <video> na própria página, e é o máximo
-                    // que a API antiga permite. A limitação é dita na tela.
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                         androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
                             this,
@@ -811,8 +785,9 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                     // O Referer é o que faz o provedor entregar o player.
                     loadUrl(url, mapOf("Referer" to SITE_ORIGIN))
 
-                    // O WebView consome as teclas antes do Compose; o listener
-                    // aqui é o único ponto que vê o D-pad primeiro.
+                    // Rede de segurança: se algum aparelho ainda entregar teclas
+                    // ao WebView, consumimos tudo aqui também (nunca devolvemos
+                    // false para o D-pad, senão o DOM voltaria a navegar).
                     setOnKeyListener { _, keyCode, event ->
                         when (event.action) {
                             KeyEvent.ACTION_DOWN -> when (keyCode) {
@@ -835,15 +810,9 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                                 -> {
                                     doSeekDown(-1, event.repeatCount); true
                                 }
-                                KeyEvent.KEYCODE_DPAD_UP -> {
-                                    // Volume removido a pedido do proprietário.
-                                    ui.poke(SystemClock.uptimeMillis())
-                                    true
-                                }
-                                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                    ui.poke(SystemClock.uptimeMillis())
-                                    true
-                                }
+                                KeyEvent.KEYCODE_DPAD_UP,
+                                KeyEvent.KEYCODE_DPAD_DOWN,
+                                -> true
                                 KeyEvent.KEYCODE_BACK -> {
                                     onBack(); true
                                 }
@@ -900,157 +869,60 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             }
         }
 
-        // Aviso honesto: a página abriu mas não há <video> para controlar.
-        if (pageReady && !hasVideo && !failed) {
+        // Aviso honesto (só erro, não controle): a página abriu mas não há
+        // <video> para controlar depois de 12 s.
+        if (pageReady && !hasVideo && !failed && waitedLong) {
             Text(
                 "O provedor não liberou o vídeo para este aparelho.",
                 color = MfColors.TextMuted,
                 fontSize = 15.sp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 90.dp),
+                    .padding(bottom = 40.dp),
             )
         }
 
-        TvPlayerOverlay(
-            playing = playingState.value,
-            position = positionState.value,
-            duration = durationState.value,
-            hint = hint,
-            visible = controlsVisible,
-            // Modo EMBED: a barra do app só aparece quando a ponte achou o
-            // <video> neste frame. Se o vídeo está num iframe de outra origem,
-            // a UI do provedor fica intacta (ver hideProviderUi) e é ela que
-            // mostra progresso — melhor uma barra de terceiro do que nenhuma.
-            showBar = hasVideo,
-        )
+        // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
+        TvProgressBar(position = positionState.value, duration = durationState.value)
     }
 }
 
-// ───────────────────────────────── overlay ─────────────────────────────────
+// ────────────────────────────────── barra ──────────────────────────────────
 
 /**
- * Barrinha de progresso + indicador de estado.
+ * A barra de progresso — e SÓ ela.
+ *
+ * Sem ícone de play/pause, sem tempo escrito, sem dica de teclas, sem título,
+ * sem painel, sem moldura. É o que o proprietário pediu: "somente a barra de
+ * progresso". Fica colada na borda inferior, fina e discreta, para não cobrir
+ * o filme.
  *
  * Os números vêm do `<video>` real (ou do ExoPlayer, no modo direto) — não de
- * um contador estimado. Quando a duração ainda não é conhecida, mostra só o
- * tempo decorrido em vez de inventar uma porcentagem.
+ * um contador estimado. Quando a duração ainda não é conhecida, a barra fica
+ * vazia em vez de inventar uma porcentagem.
  */
 @Composable
-private fun TvPlayerOverlay(
-    playing: Boolean,
-    position: Double,
-    duration: Double,
-    hint: String?,
-    visible: Boolean,
-    /** Desenha a barra própria da MovieFlix. */
-    showBar: Boolean,
-) {
+private fun TvProgressBar(position: Double, duration: Double) {
     val pct = if (duration > 0) (position / duration).coerceIn(0.0, 1.0) else 0.0
 
-    Box(Modifier.fillMaxSize()) {
-        // Dica de comando (⏩ +10s, ⏸ Pausado…)
-        // A dica aparece SEMPRE, mesmo com os controles escondidos: é a única
-        // confirmação visual de que a tecla do controle foi entendida.
-        if (hint != null) {
-            Text(
-                hint,
-                color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = MfSans,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .background(Color(0xCC000000), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 26.dp, vertical = 14.dp),
+    Box(
+        Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(Color(0x33FFFFFF)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(pct.toFloat())
+                    .fillMaxHeight()
+                    .background(MfColors.Red, RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp)),
             )
         }
-
-        // Barra de controles: some 3 s depois da última tecla (o usuário pediu
-        // para ficar só o filme na tela) e volta em qualquer tecla.
-        if (showBar && visible) {
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color(0xE6000000)),
-                        ),
-                    )
-                    .padding(horizontal = 48.dp, vertical = 26.dp),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Text(
-                        if (playing) "⏸" else "▶",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                    )
-                    Text(
-                        formatClock(position),
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontFamily = MfSans,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "/",
-                        color = MfColors.TextDim,
-                        fontSize = 15.sp,
-                    )
-                    Text(
-                        if (duration > 0) formatClock(duration) else "—",
-                        color = MfColors.TextMuted,
-                        fontSize = 15.sp,
-                        fontFamily = MfSans,
-                    )
-
-                    Spacer(Modifier.width(6.dp))
-
-                    // Trilha
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(6.dp)
-                            .background(Color(0x33FFFFFF), RoundedCornerShape(3.dp)),
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth(pct.toFloat())
-                                .height(6.dp)
-                                .background(MfColors.Red, RoundedCornerShape(3.dp)),
-                        )
-                    }
-
-                    Spacer(Modifier.width(6.dp))
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Text(
-                    "OK pausar/continuar · ← → 10s",
-                    color = MfColors.TextDim,
-                    fontSize = 12.sp,
-                    fontFamily = MfSans,
-                )
-            }
-        }
     }
-}
-
-/** 3725.0 → "1:02:05" */
-private fun formatClock(seconds: Double): String {
-    if (!seconds.isFinite() || seconds < 0) return "0:00"
-    val total = seconds.toLong()
-    val h = total / 3600
-    val m = (total % 3600) / 60
-    val s = total % 60
-    return if (h > 0) "$h:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
-    else "$m:${s.toString().padStart(2, '0')}"
 }
 
 /** Hosts do provedor que podem navegar dentro do WebView. */
