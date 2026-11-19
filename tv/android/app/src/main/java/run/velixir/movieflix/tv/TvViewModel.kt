@@ -188,7 +188,7 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
      * a enviava — linhas antigas ficam com string vazia. O site resolve a capa
      * pelo catálogo (`getById`), e é o que fazemos aqui.
      *
-     * A busca é feita em páginas de 200 (o máximo que `/api/catalog/*` aceita)
+     * A busca é feita em páginas de 200 (o máximo que a API de catálogo aceita)
      * até cobrir o `total`, e o resultado é guardado em [posterIndex] para não
      * repetir a varredura a cada visita à tela.
      */
