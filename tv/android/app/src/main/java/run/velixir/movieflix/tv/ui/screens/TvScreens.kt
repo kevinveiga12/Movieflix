@@ -1120,7 +1120,7 @@ fun TvSettingsScreen(vm: TvViewModel) {
             TvSettingRow("Qualidade", "Automática, conforme a conexão")
             TvSettingRow("Idioma", "Português (Brasil)")
             TvSettingRow("Conta", s.email ?: "não logado")
-            TvSettingRow("Versão", "MovieFlix TV 1.0.0")
+            TvSettingRow("Versão", "MovieFlix TV 1.0.2")
         }
 
         Spacer(Modifier.height(24.dp))

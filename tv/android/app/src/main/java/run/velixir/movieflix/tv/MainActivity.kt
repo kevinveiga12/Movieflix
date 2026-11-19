@@ -159,6 +159,13 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
                     TvPlayerScreen(
                         vm, r.title, r.season, r.episode,
                         onBack = { route = TvRoute.Detail(r.title) },
+                        // Sessão caiu com o player aberto (token expirado, logout
+                        // em outro aparelho): sai do player e vai ao login, e
+                        // depois de entrar volta direto ao filme.
+                        onLoginRequired = {
+                            afterLogin = TvRoute.Player(r.title, r.season, r.episode)
+                            route = TvRoute.Login
+                        },
                     )
                 }
             }

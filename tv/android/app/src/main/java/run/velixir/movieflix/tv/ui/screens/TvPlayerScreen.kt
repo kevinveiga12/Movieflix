@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,19 +117,45 @@ fun TvPlayerScreen(
     season: Int?,
     episode: Int?,
     onBack: () -> Unit,
+    onLoginRequired: () -> Unit = {},
 ) {
     var url by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(title.tmdbId, season, episode) {
+    /*
+      Trava de segurança do login obrigatório.
+
+      A navegação (MainActivity) já manda ao login antes de chegar aqui, mas o
+      player também confere por conta própria: se a sessão cair no meio do
+      caminho (token expirado, logout em outro aparelho), ele NÃO abre o vídeo —
+      chama onLoginRequired e a pessoa vai para a tela de login. Sem isso, um
+      estado deslogado ainda conseguia montar o player e "assistir".
+    */
+    val st by vm.state.collectAsState()
+    LaunchedEffect(st.loggedIn) {
+        if (!st.loggedIn) onLoginRequired()
+    }
+
+    LaunchedEffect(title.tmdbId, season, episode, st.loggedIn) {
+        if (!st.loggedIn) {
+            loading = false
+            return@LaunchedEffect
+        }
         vm.authorize(title.tmdbId, season, episode) { u, m, msg ->
             url = u
             mode = m
             message = msg
             loading = false
         }
+    }
+
+    if (!st.loggedIn) {
+        // Nada de player: a tela fica preta por um instante até a navegação
+        // trocar para o login.
+        Box(Modifier.fillMaxSize().background(Color.Black))
+        return
     }
 
     Box(
@@ -211,7 +238,7 @@ private fun TvDirectPlayer(
     val ui = remember { UiVisibility() }
     // Mouse virtual: segurar OK 2 s liga/desliga; direcional move; OK clica.
     val mouse = remember { VirtualMouseState() }
-    val hold = remember { HoldDetector(2_000L) }
+    val hold = remember { HoldDetector(HOLD_TO_ACTIVATE_MS) }
     var screenW by remember { mutableStateOf(0f) }
     var screenH by remember { mutableStateOf(0f) }
     // Versão do cursor: muda a cada tick para o Compose redesenhar a posição.
@@ -253,7 +280,7 @@ private fun TvDirectPlayer(
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             ui.tick(now)
-            // Segurar OK por 2 s liga/desliga o mouse virtual.
+            // Segurar OK liga/desliga o mouse virtual.
             if (hold.tick(now) == HoldDetector.PressResult.Hold) {
                 mouse.toggle()
                 mouseVersion++
@@ -445,6 +472,16 @@ private fun TvDirectPlayer(
 private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
 
 /**
+ * Quanto tempo o OK precisa ficar pressionado para ligar/desligar o mouse
+ * virtual.
+ *
+ * O proprietário pediu "1 ou 2 segundos". 1,2 s fica dentro dessa faixa e é
+ * curto o bastante para o gesto parecer natural, sem disparar por engano num
+ * toque normal (que dura ~100 ms).
+ */
+private const val HOLD_TO_ACTIVATE_MS = 1_200L
+
+/**
  * Ponte injetada em TODOS os frames do WebView.
  *
  * `addDocumentStartJavaScript` roda antes de qualquer script da página e
@@ -467,7 +504,7 @@ private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
   var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0,
-            clickX: null, clickY: null,
+            clickX: null, clickY: null, mouseMode: false,
             isTop: (window.parent === window) };
   window.__mf = S;
 
@@ -488,6 +525,14 @@ private val BRIDGE_JS: String = """
   function hideProviderUi() {
     try {
       if (!document || typeof document.getElementById !== 'function') return;
+      // Mouse virtual LIGADO: o cursor precisa dos controles do provedor
+      // visíveis para poder clicar neles. Removemos o CSS de limpeza e
+      // deixamos o player mostrar a própria barra.
+      if (S.mouseMode) {
+        var old = document.getElementById('__mf_clean');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        return;
+      }
       // Garantia continua: se o provedor recriar o <video> com controls=true,
       // os controles nativos voltam. Reaplicar a cada volta do laco.
       try {
@@ -747,6 +792,14 @@ private val BRIDGE_JS: String = """
   }, 500);
 
   window.__mfCmd = function (cmd, arg) {
+    // mouseMode vale para TODOS os frames, mesmo os que ainda nao tem video:
+    // e o que decide se a UI do provedor fica escondida ou clicavel.
+    if (cmd === 'mouseMode') {
+      S.mouseMode = !!Number(arg);
+      hideProviderUi();
+      forward(cmd, arg);
+      return true;
+    }
     // Este frame tem o video? Executa. Se nao, desce para os filhos.
     if (attach()) return exec(cmd, arg);
     var sent = forward(cmd, arg);
@@ -805,9 +858,13 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     val ui = remember { UiVisibility() }
     // Mouse virtual: segurar OK 2 s liga/desliga; direcional move; OK clica.
     val mouse = remember { VirtualMouseState() }
-    val hold = remember { HoldDetector(2_000L) }
+    val hold = remember { HoldDetector(HOLD_TO_ACTIVATE_MS) }
     var screenW by remember { mutableStateOf(0f) }
     var screenH by remember { mutableStateOf(0f) }
+    // Versão do cursor: muda a cada tick para o Compose redesenhar a posição.
+    // (Faltava aqui — era o erro de compilação que impedia o APK da TV de ser
+    // gerado, e por isso o mouse virtual nunca chegava ao aparelho.)
+    var mouseVersion by remember { mutableStateOf(0) }
 
     fun js(cmd: String, arg: Double? = null) {
         val a = arg?.let { ",$it" } ?: ""
@@ -849,11 +906,14 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             ui.tick(now)
-            // Segurar OK por 2 s liga/desliga o mouse virtual.
+            // Segurar OK liga/desliga o mouse virtual.
             if (hold.tick(now) == HoldDetector.PressResult.Hold) {
                 mouse.toggle()
                 mouseVersion++
                 ui.poke(now)
+                // Com o mouse ligado o provedor precisa mostrar os controles
+                // dele, senão não há o que clicar. Desligado, volta a esconder.
+                js("mouseMode", if (mouse.active) 1.0 else 0.0)
             }
             // O player do provedor às vezes ignora o primeiro toggle (iframe
             // ainda montando). Se o estado não mudou, manda play/pause
@@ -1223,14 +1283,8 @@ private fun TvProgressBar(position: Double, duration: Double, visible: Boolean) 
             Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Tempo atual / duração total — os números vêm do player real.
-            Text(
-                "${formatClock(position)} / ${formatClock(duration)}",
-                color = Color(0xE6FFFFFF),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(bottom = 6.dp),
-            )
+            // Nada de texto sobre o vídeo: só a barra. O proprietário pediu
+            // "só o vídeo e a barra de progresso" — o relógio era um overlay.
             Box(
                 Modifier
                     .fillMaxWidth()

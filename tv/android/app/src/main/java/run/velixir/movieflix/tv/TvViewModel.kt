@@ -295,6 +295,25 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                 if (r.allowed && r.source != null) onResult(r.source.url, r.source.mode, null)
                 else onResult(null, null, r.message ?: "Não foi possível liberar este título.")
             } catch (e: Exception) {
+                /*
+                  Token expirado/inválido: a sessão guardada no aparelho não vale
+                  mais. Antes o app continuava "logado" (o token existia) e o
+                  player abria mostrando um erro — dava a impressão de que dava
+                  para assistir sem conta. Agora a sessão é descartada e o estado
+                  volta a deslogado, o que faz a tela mandar a pessoa ao login.
+                */
+                if (e is ApiException && e.status == 401) {
+                    session.clear()
+                    update {
+                        it.copy(
+                            loggedIn = false,
+                            email = null,
+                            isAdmin = false,
+                            favorites = emptyList(),
+                            history = emptyList(),
+                        )
+                    }
+                }
                 onResult(null, null, friendly(e))
             }
         }
