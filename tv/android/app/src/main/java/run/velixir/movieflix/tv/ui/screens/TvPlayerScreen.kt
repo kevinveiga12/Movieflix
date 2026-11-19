@@ -426,7 +426,7 @@ private val BRIDGE_JS: String = """
   window.__mf = S;
 
   /**
-   * Esconde a UI do provedor.
+   * Esconde a UI do provedor — SÓ quando conseguimos controlar o <video>.
    *
    * O proprietário pediu um player limpo: só OK (pausar/continuar), ← → 10 s e
    * a barra de progresso. Nada de configurações, volume, legendas, tela cheia,
@@ -434,9 +434,13 @@ private val BRIDGE_JS: String = """
    *
    * O player do provedor (playerflix.ink) desenha a barra dele dentro do
    * iframe: `#ui` (controles), `.scrim-top`, `#reportWrap` (denúncia),
-   * `#toast`, o selo "embedmovies.org" e a view de episódios. Escondemos esses
-   * elementos por CSS — a barra que sobra na tela é a do app, que é a única
-   * com os números reais do <video>.
+   * `#toast`, o selo "embedmovies.org" e a view de episódios.
+   *
+   * REGRA DE SEGURANÇA: só escondemos depois que `attach()` achou o <video>
+   * NESTE frame. Se o provedor puser o vídeo num iframe de outra origem, a
+   * ponte não alcança o elemento, o app não consegue pausar/avançar — e
+   * esconder a UI do provedor deixaria a tela SEM controle nenhum. Nesse caso
+   * a UI do provedor fica intacta e é ela que o usuário usa.
    *
    * O <video> em si NUNCA é escondido: é ele que toca o filme.
    */
@@ -464,9 +468,6 @@ private val BRIDGE_JS: String = """
       }
     }
   }
-
-  hideProviderUi();
-  setInterval(hideProviderUi, 1000);
 
   function pick() {
     var vs = document.querySelectorAll('video');
@@ -536,6 +537,10 @@ private val BRIDGE_JS: String = """
       }
       v.addEventListener('canplay', function () { autoPlay(); }, true);
       autoPlay();
+      // Só agora: temos o <video> na mão, então a barra do app funciona e a
+      // do provedor pode sair da tela sem deixar o usuário sem controle.
+      hideProviderUi();
+      setInterval(hideProviderUi, 1000);
     }
     sync();
     return true;
@@ -901,10 +906,11 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             duration = durationState.value,
             hint = hint,
             visible = controlsVisible,
-            // Modo EMBED: a UI do provedor é escondida pela ponte JS
-            // (`hideProviderUi`), então esta é a ÚNICA barra na tela — a que o
-            // proprietário pediu: tempo atual, duração e progresso.
-            showBar = true,
+            // Modo EMBED: a barra do app só aparece quando a ponte achou o
+            // <video> neste frame. Se o vídeo está num iframe de outra origem,
+            // a UI do provedor fica intacta (ver hideProviderUi) e é ela que
+            // mostra progresso — melhor uma barra de terceiro do que nenhuma.
+            showBar = hasVideo,
         )
     }
 }
