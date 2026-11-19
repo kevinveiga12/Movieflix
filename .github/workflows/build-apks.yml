@@ -235,8 +235,7 @@ jobs:
             echo "=== Player: abrindo o embed direto ==="
             adb shell am force-stop run.velixir.movieflix.tv
             sleep 2
-            adb shell am start -n run.velixir.movieflix.tv/.MainActivity \
-              -e mf_route embed -e mf_tmdb 1292035
+            adb shell am start -n run.velixir.movieflix.tv/.MainActivity -e mf_route embed -e mf_tmdb 1292035
             sleep 25
             bash scripts/shot.sh screenshots/tv-player-1-aberto.png "player aberto"
 
