@@ -1182,6 +1182,28 @@ h4 {
   display: block;
 }
 
+/*
+  Cursor do mouse virtual (controle remoto).
+
+  Só é montado com o mouse ligado. `pointer-events: none` é obrigatório: o
+  clique é despachado por `document.elementFromPoint`, e um cursor que
+  capturasse o ponteiro clicaria em si mesmo em vez do controle do player.
+  O deslocamento de -50% centraliza o círculo no ponto exato do clique.
+*/
+.tv-cursor {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  border: 2px solid rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25), 0 2px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 60;
+  transition: left 60ms linear, top 60ms linear;
+}
+
 .player-overlay {
   position: absolute;
   inset: 0;

@@ -347,6 +347,69 @@ private fun testUiAutoHide() {
     check("tecla repetida reinicia a contagem", u.visible)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. Mouse virtual — segurar OK 2 s liga/desliga, direcional move, OK clica
+// ─────────────────────────────────────────────────────────────────────────────
+private fun testVirtualMouse() {
+    println("\n[12] Mouse virtual: segurar OK 2 s, direcional move, OK clica")
+
+    // ── Detector de segurar ──────────────────────────────────────────────────
+    val h = HoldDetector(2_000L)
+    h.onDown(10_000)
+    check("não dispara antes de 2 s", h.tick(11_900) == null)
+    check("dispara Hold exatamente em 2 s", h.tick(12_000) == HoldDetector.PressResult.Hold)
+    check("Hold só dispara uma vez", h.tick(12_500) == null)
+    check("soltar depois do Hold não gera toque curto", h.onUp() == null)
+
+    // Toque curto: solta antes de 2 s → Short (play/pause normal).
+    val h2 = HoldDetector(2_000L)
+    h2.onDown(20_000)
+    check("toque curto não dispara Hold", h2.tick(20_500) == null)
+    check("toque curto devolve Short ao soltar", h2.onUp() == HoldDetector.PressResult.Short)
+
+    // ── Estado do mouse ──────────────────────────────────────────────────────
+    val m = VirtualMouseState(stepPx = 28f)
+    m.setBounds(1920f, 1080f)
+    check("mouse nasce desligado", !m.active)
+    check("cursor nasce no centro (x)", near(m.x.toDouble(), 960.0))
+    check("cursor nasce no centro (y)", near(m.y.toDouble(), 540.0))
+
+    // Desligado: o direcional NÃO move (navegação convencional preservada).
+    m.move(1, 0)
+    check("desligado: direcional não move", near(m.x.toDouble(), 960.0))
+
+    m.toggle()
+    check("segurar OK liga o mouse", m.active)
+
+    m.move(1, 0)
+    check("ligado: direita soma um passo", near(m.x.toDouble(), 988.0))
+    m.move(-1, 0)
+    check("ligado: esquerda volta um passo", near(m.x.toDouble(), 960.0))
+    m.move(0, -1)
+    check("ligado: cima sobe um passo", near(m.y.toDouble(), 512.0))
+    m.move(0, 1)
+    check("ligado: baixo desce um passo", near(m.y.toDouble(), 540.0))
+
+    // Limites: não sai da tela.
+    repeat(200) { m.move(1, 0) }
+    check("cursor para na borda direita", near(m.x.toDouble(), 1920.0))
+    repeat(200) { m.move(0, 1) }
+    check("cursor para na borda inferior", near(m.y.toDouble(), 1080.0))
+    repeat(400) { m.move(-1, -1) }
+    check("cursor para no canto superior esquerdo", near(m.x.toDouble(), 0.0) && near(m.y.toDouble(), 0.0))
+
+    // Fração usada para clicar dentro do player.
+    m.setBounds(1920f, 1080f)
+    repeat(96) { m.move(1, 0) } // 96 * 28 = 2688 → limitado a 1920
+    check("ratioX no limite = 1", near(m.ratioX().toDouble(), 1.0))
+
+    m.toggle()
+    check("segurar OK de novo desliga o mouse", !m.active)
+    val before = m.x
+    m.move(1, 0)
+    check("desligado de novo: direcional não move", near(m.x.toDouble(), before.toDouble()))
+}
+
 fun main() {
     println("MovieFlix TV — testes do controle remoto do player")
     println("=".repeat(60))
@@ -361,6 +424,7 @@ fun main() {
     testLabels()
     testToggleRetry()
     testUiAutoHide()
+    testVirtualMouse()
     println("\n" + "=".repeat(60))
     println("$checks verificações, $failures falha(s)")
     if (failures > 0) {

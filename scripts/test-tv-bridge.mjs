@@ -137,12 +137,23 @@ function makeVideo({ duration = 600, paused = true, currentTime = 0 } = {}) {
 
 function makeWindow(video) {
   const posted = []
+  const clicks = []
+  const fakeEl = {
+    dispatchEvent: (ev) => {
+      clicks.push(ev)
+      return true
+    },
+  }
   const win = {
     MfPlayer: { post: (s) => posted.push(JSON.parse(s)) },
     document: {
       querySelectorAll: (sel) =>
         sel === 'video' && video ? [video] : [],
+      elementFromPoint: () => fakeEl,
+      body: fakeEl,
     },
+    innerWidth: 1920,
+    innerHeight: 1080,
     setInterval: () => 0, // não queremos timers reais no teste
     clearInterval: () => {},
     addEventListener: () => {},
@@ -151,15 +162,26 @@ function makeWindow(video) {
   win.window = win
   // Frame principal: parent === window. É o único que fala com o app.
   win.parent = win
-  return { win, posted }
+  return { win, posted, clicks }
 }
 
 function runBridge(video) {
-  const { win, posted } = makeWindow(video)
-  // A ponte usa `window` e `document` globais.
-  const fn = new Function('window', 'document', 'setInterval', 'clearInterval', bridge)
-  fn(win, win.document, win.setInterval, win.clearInterval)
-  return { win, posted }
+  const { win, posted, clicks } = makeWindow(video)
+  // A ponte usa `window`, `document` e `MouseEvent` globais.
+  const MouseEventStub = function (type, opts) {
+    this.type = type
+    Object.assign(this, opts || {})
+  }
+  const fn = new Function(
+    'window',
+    'document',
+    'setInterval',
+    'clearInterval',
+    'MouseEvent',
+    bridge,
+  )
+  fn(win, win.document, win.setInterval, win.clearInterval, MouseEventStub)
+  return { win, posted, clicks }
 }
 
 // ── 4. Estado inicial: vídeo pausado → ponte tenta tocar ────────────────────
@@ -249,6 +271,29 @@ console.log('\n[7] Provedor sem <video>')
   const ok = win.__mfCmd('toggle')
   check('comando devolve false', ok === false)
   check('avisa o app com type=novideo', posted.some((p) => p.type === 'novideo'), JSON.stringify(posted))
+}
+
+// ── 10. Mouse virtual: clique na posição do cursor ───────────────────────────
+console.log('\n[8] Mouse virtual: clickAt/clickAtY clicam no ponto do cursor')
+{
+  const v = makeVideo({ paused: false, currentTime: 10 })
+  const { win, clicks } = runBridge(v)
+
+  // O app manda X e Y em fração da tela; o clique só sai quando os dois chegam.
+  win.__mfCmd('clickAt', 0.5)
+  check('só X não clica ainda', clicks.length === 0, `clicks=${clicks.length}`)
+  win.__mfCmd('clickAtY', 0.5)
+  check('X+Y disparam o clique', clicks.length > 0, `clicks=${clicks.length}`)
+
+  const click = clicks.find((c) => c.type === 'click')
+  check('clique é do tipo click', Boolean(click))
+  check('clique cai no centro (x=960)', click && click.clientX === 960, click && `x=${click.clientX}`)
+  check('clique cai no centro (y=540)', click && click.clientY === 540, click && `y=${click.clientY}`)
+
+  // Depois de clicar, o estado é limpo: um novo X sozinho não repete o clique.
+  const before = clicks.length
+  win.__mfCmd('clickAt', 0.2)
+  check('estado limpo após o clique', clicks.length === before, `clicks=${clicks.length}`)
 }
 
 console.log('\n' + '='.repeat(60))

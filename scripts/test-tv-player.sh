@@ -13,6 +13,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/tv/android/app/src/main/java/run/velixir/movieflix/tv/player/TvPlayerControls.kt"
+MOUSE="$ROOT/tv/android/app/src/main/java/run/velixir/movieflix/tv/player/VirtualMouse.kt"
 TEST="$ROOT/scripts/tv-player-tests/TvPlayerControlsTest.kt"
 OUT="${TMPDIR:-/tmp}/movieflix-tv-player-tests"
 
@@ -30,7 +31,7 @@ echo "kotlinc: $($KOTLINC -version 2>&1 | head -1)"
 rm -rf "$OUT" && mkdir -p "$OUT"
 
 echo "Compilando…"
-"$KOTLINC" "$SRC" "$TEST" -include-runtime -d "$OUT/tests.jar" 2>&1 | grep -v '^warning:' || true
+"$KOTLINC" "$SRC" "$MOUSE" "$TEST" -include-runtime -d "$OUT/tests.jar" 2>&1 | grep -v '^warning:' || true
 
 if [ ! -f "$OUT/tests.jar" ]; then
   echo "FALHOU: a compilação não gerou o jar." >&2

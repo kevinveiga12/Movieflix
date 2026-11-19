@@ -3,6 +3,7 @@ package run.velixir.movieflix.tv.ui.screens
 import android.annotation.SuppressLint
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -11,6 +12,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +21,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,8 +44,10 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -52,9 +59,11 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 import run.velixir.movieflix.tv.TvViewModel
 import run.velixir.movieflix.tv.data.Title
+import run.velixir.movieflix.tv.player.HoldDetector
 import run.velixir.movieflix.tv.player.PlayPauseController
 import run.velixir.movieflix.tv.player.SeekController
 import run.velixir.movieflix.tv.player.UiVisibility
+import run.velixir.movieflix.tv.player.VirtualMouseState
 import run.velixir.movieflix.tv.ui.theme.MfColors
 
 /**
@@ -200,6 +209,13 @@ private fun TvDirectPlayer(
     val toggle = remember { PlayPauseController() }
     // Visibilidade da barra: aparece ao interagir, some após 5 s sem tecla.
     val ui = remember { UiVisibility() }
+    // Mouse virtual: segurar OK 2 s liga/desliga; direcional move; OK clica.
+    val mouse = remember { VirtualMouseState() }
+    val hold = remember { HoldDetector(2_000L) }
+    var screenW by remember { mutableStateOf(0f) }
+    var screenH by remember { mutableStateOf(0f) }
+    // Versão do cursor: muda a cada tick para o Compose redesenhar a posição.
+    var mouseVersion by remember { mutableStateOf(0) }
 
     DisposableEffect(Unit) { onDispose { player.release() } }
 
@@ -237,6 +253,12 @@ private fun TvDirectPlayer(
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             ui.tick(now)
+            // Segurar OK por 2 s liga/desliga o mouse virtual.
+            if (hold.tick(now) == HoldDetector.PressResult.Hold) {
+                mouse.toggle()
+                mouseVersion++
+                ui.poke(now)
+            }
             // OK sem efeito → reenvia play/pause EXPLÍCITO (um toque basta).
             toggle.retry(now)?.let { want ->
                 if (want) player.play() else player.pause()
@@ -286,9 +308,43 @@ private fun TvDirectPlayer(
         seek.onKeyUp(SystemClock.uptimeMillis())
     }
 
+    /** Move o cursor e força o redesenho (o estado do mouse não é observável). */
+    fun moveMouse(dx: Int, dy: Int) {
+        mouse.move(dx, dy)
+        mouseVersion++
+    }
+
+    /**
+     * Clique do mouse virtual no modo direto.
+     *
+     * O único player é o nosso: o clique no vídeo alterna play/pause e, quando o
+     * cursor está sobre a faixa inferior (onde fica a barra), salta para a
+     * posição correspondente. Não existe segundo conjunto de controles.
+     */
+    fun clickAtCursor() {
+        val dur = durationState.value
+        val barTop = screenH - 90f
+        if (dur > 0 && mouse.y >= barTop) {
+            player.seekTo((mouse.ratioX() * dur * 1000).toLong().coerceAtLeast(0L))
+            return
+        }
+        if (player.isPlaying) {
+            userPaused = true
+            player.pause()
+        } else {
+            userPaused = false
+            player.play()
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
+            .onSizeChanged {
+                screenW = it.width.toFloat()
+                screenH = it.height.toFloat()
+                mouse.setBounds(screenW, screenH)
+            }
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { ev ->
@@ -299,23 +355,52 @@ private fun TvDirectPlayer(
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
                         Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
                         -> {
-                            doToggle(native.repeatCount); true
+                            // SEMPRE começa a contar o "segurar 2 s" — com o
+                            // mouse ligado ou não. É o que permite desligar o
+                            // mouse segurando OK de novo. O auto-repeat do
+                            // controle não reinicia a contagem.
+                            if (native.repeatCount == 0) {
+                                hold.onDown(SystemClock.uptimeMillis())
+                            }
+                            true
                         }
                         Key.DirectionLeft, Key.MediaRewind -> {
-                            doSeekDown(-1, native.repeatCount); true
+                            if (mouse.active) moveMouse(-1, 0) else doSeekDown(-1, native.repeatCount)
+                            true
                         }
                         Key.DirectionRight, Key.MediaFastForward -> {
-                            doSeekDown(1, native.repeatCount); true
+                            if (mouse.active) moveMouse(1, 0) else doSeekDown(1, native.repeatCount)
+                            true
                         }
-                        // ↑ ↓ são consumidas para o foco não escapar do player.
-                        Key.DirectionUp, Key.DirectionDown -> true
+                        // ↑ ↓: movem o cursor com o mouse ligado; sem ele são
+                        // consumidas para o foco não escapar do player.
+                        Key.DirectionUp -> {
+                            if (mouse.active) moveMouse(0, -1)
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (mouse.active) moveMouse(0, 1)
+                            true
+                        }
                         else -> false
                     }
                     KeyEventType.KeyUp -> when (ev.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
+                        Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
+                        -> {
+                            // Toque curto (sem segurar 2 s): com o mouse ligado
+                            // é clique na posição do cursor; desligado é
+                            // play/pause normal.
+                            if (hold.onUp() == HoldDetector.PressResult.Short) {
+                                if (mouse.active) clickAtCursor() else doToggle(0)
+                            }
+                            true
+                        }
                         Key.DirectionLeft, Key.DirectionRight,
                         Key.MediaRewind, Key.MediaFastForward,
                         -> {
-                            doSeekUp(); true
+                            if (!mouse.active) doSeekUp()
+                            true
                         }
                         else -> false
                     }
@@ -342,6 +427,9 @@ private fun TvDirectPlayer(
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
         TvProgressBar(position = positionState.value, duration = durationState.value, visible = ui.visible)
+
+        // Cursor do mouse virtual (só aparece com o mouse ligado).
+        VirtualCursor(mouse, mouseVersion)
     }
 }
 
@@ -379,6 +467,7 @@ private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
   var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0,
+            clickX: null, clickY: null,
             isTop: (window.parent === window) };
   window.__mf = S;
 
@@ -525,10 +614,45 @@ private val BRIDGE_JS: String = """
         if (!isFinite(t)) t = 0;
         v.currentTime = Math.max(0, d > 0 ? Math.min(d, t) : t);
       }
+      else if (cmd === 'clickAt') {
+        // Mouse virtual: guarda a fração X e espera a Y para clicar no ponto.
+        S.clickX = Number(arg);
+        if (S.clickY != null) doClick();
+      }
+      else if (cmd === 'clickAtY') {
+        S.clickY = Number(arg);
+        if (S.clickX != null) doClick();
+      }
       sync();
       post(snapshot());
       return true;
     } catch (e) { return false; }
+  }
+
+  /**
+   * Clique sintético na posição do cursor virtual.
+   *
+   * O app manda a posição em FRAÇÃO da tela (0..1). Aqui ela vira coordenada
+   * de viewport e o evento é despachado no elemento que está naquele ponto —
+   * é assim que o mouse do controle alcança os controles nativos do player
+   * (play/pause, barra, volume, tela cheia) sem duplicar botões.
+   */
+  function doClick() {
+    var fx = S.clickX, fy = S.clickY;
+    S.clickX = null; S.clickY = null;
+    if (!isFinite(fx) || !isFinite(fy)) return;
+    var x = Math.round(fx * (window.innerWidth || 1));
+    var y = Math.round(fy * (window.innerHeight || 1));
+    var el = document.elementFromPoint(x, y) || document.body;
+    if (!el) return;
+    var opts = { bubbles: true, cancelable: true, clientX: x, clientY: y,
+                 view: window, button: 0, buttons: 1 };
+    try { el.dispatchEvent(new MouseEvent('mousemove', opts)); } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent('click', opts)); } catch (e) {}
+    // Se o alvo for o próprio <video>, o clique também alterna play/pause.
+    try { if (el === S.v) { if (S.v.paused) S.v.play(); else S.v.pause(); } } catch (e) {}
   }
 
   // Recebe estado dos filhos (repassa para cima) e comandos do pai (executa
@@ -679,6 +803,11 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     val toggle = remember { PlayPauseController() }
     // Visibilidade da barra: aparece ao interagir, some após 5 s sem tecla.
     val ui = remember { UiVisibility() }
+    // Mouse virtual: segurar OK 2 s liga/desliga; direcional move; OK clica.
+    val mouse = remember { VirtualMouseState() }
+    val hold = remember { HoldDetector(2_000L) }
+    var screenW by remember { mutableStateOf(0f) }
+    var screenH by remember { mutableStateOf(0f) }
 
     fun js(cmd: String, arg: Double? = null) {
         val a = arg?.let { ",$it" } ?: ""
@@ -702,6 +831,12 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         seek.onKeyUp(SystemClock.uptimeMillis())
     }
 
+    /** Move o cursor e força o redesenho (o estado do mouse não é observável). */
+    fun moveMouse(dx: Int, dy: Int) {
+        mouse.move(dx, dy)
+        mouseVersion++
+    }
+
     // Foco inicial e re-foco depois que a página carrega (o WebView pode pedir
     // foco ao terminar de carregar; devolvemos para o Box).
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
@@ -714,6 +849,12 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             ui.tick(now)
+            // Segurar OK por 2 s liga/desliga o mouse virtual.
+            if (hold.tick(now) == HoldDetector.PressResult.Hold) {
+                mouse.toggle()
+                mouseVersion++
+                ui.poke(now)
+            }
             // O player do provedor às vezes ignora o primeiro toggle (iframe
             // ainda montando). Se o estado não mudou, manda play/pause
             // EXPLÍCITO — nunca outro toggle, para não desfazer o que deu certo.
@@ -743,6 +884,11 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
+            .onSizeChanged {
+                screenW = it.width.toFloat()
+                screenH = it.height.toFloat()
+                mouse.setBounds(screenW, screenH)
+            }
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { ev ->
@@ -753,26 +899,60 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
                         Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
                         -> {
-                            doToggle(native.repeatCount); true
+                            // SEMPRE começa a contar o "segurar 2 s" — com o
+                            // mouse ligado ou não. É o que permite desligar o
+                            // mouse segurando OK de novo. O auto-repeat do
+                            // controle não reinicia a contagem.
+                            if (native.repeatCount == 0) {
+                                hold.onDown(SystemClock.uptimeMillis())
+                            }
+                            true
                         }
                         Key.DirectionLeft, Key.MediaRewind -> {
-                            doSeekDown(-1, native.repeatCount); true
+                            if (mouse.active) moveMouse(-1, 0) else doSeekDown(-1, native.repeatCount)
+                            true
                         }
                         Key.DirectionRight, Key.MediaFastForward -> {
-                            doSeekDown(1, native.repeatCount); true
+                            if (mouse.active) moveMouse(1, 0) else doSeekDown(1, native.repeatCount)
+                            true
                         }
-                        // ↑ ↓ consumidas: o foco não pode escapar do player.
-                        Key.DirectionUp, Key.DirectionDown -> true
+                        // ↑ ↓: movem o cursor com o mouse ligado; sem ele são
+                        // consumidas para o foco não escapar do player.
+                        Key.DirectionUp -> {
+                            if (mouse.active) moveMouse(0, -1)
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (mouse.active) moveMouse(0, 1)
+                            true
+                        }
                         Key.Back -> {
                             onBack(); true
                         }
                         else -> false
                     }
                     KeyEventType.KeyUp -> when (ev.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
+                        Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
+                        -> {
+                            // Toque curto (sem segurar 2 s): com o mouse ligado
+                            // é clique na posição do cursor; desligado é
+                            // play/pause normal.
+                            if (hold.onUp() == HoldDetector.PressResult.Short) {
+                                if (mouse.active) {
+                                    js("clickAt", mouse.ratioX().toDouble())
+                                    js("clickAtY", mouse.ratioY().toDouble())
+                                } else {
+                                    doToggle(0)
+                                }
+                            }
+                            true
+                        }
                         Key.DirectionLeft, Key.DirectionRight,
                         Key.MediaRewind, Key.MediaFastForward,
                         -> {
-                            doSeekUp(); true
+                            if (!mouse.active) doSeekUp()
+                            true
                         }
                         else -> false
                     }
@@ -984,10 +1164,38 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
         TvProgressBar(position = positionState.value, duration = durationState.value, visible = ui.visible)
+
+        // Cursor do mouse virtual (só aparece com o mouse ligado).
+        VirtualCursor(mouse, mouseVersion)
     }
 }
 
-// ────────────────────────────────── barra ──────────────────────────────────
+// ────────────────────────────── cursor do mouse virtual ──────────────────────────────
+
+/**
+ * Cursor do mouse virtual.
+ *
+ * Só é desenhado quando o mouse está ligado (segurar OK por 2 s). É um círculo
+ * branco com borda escura, do tamanho de um ponteiro de TV, posicionado na
+ * coordenada atual do [VirtualMouseState]. Não intercepta toque nem foco: é
+ * puramente visual — quem trata as teclas é o Box do player.
+ */
+@Composable
+private fun VirtualCursor(mouse: VirtualMouseState, version: Int) {
+    // `version` é lido de propósito: o estado do mouse é uma classe comum, então
+    // é ele que faz o Compose recompor quando o cursor anda.
+    @Suppress("UNUSED_EXPRESSION") version
+    if (!mouse.active) return
+    Box(
+        Modifier
+            .offset { IntOffset(mouse.x.toInt(), mouse.y.toInt()) }
+            .size(22.dp)
+            .background(Color(0xCCFFFFFF), CircleShape)
+            .border(2.dp, Color(0x99000000), CircleShape),
+    )
+}
+
+// ────────────────────────────── barra ──────────────────────────────
 
 /**
  * A barra de progresso — e SÓ ela.

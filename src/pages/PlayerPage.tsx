@@ -9,6 +9,7 @@ import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useHistory } from '../lib/userData'
 import { PlayIcon, PauseIcon, SkipBack, SkipForward, ArrowLeft } from '../components/Icons'
+import { VirtualMouse, HoldDetector, clickAtRatio } from '../lib/virtualMouse'
 
 /**
  * Intervalo de gravação do progresso.
@@ -87,6 +88,24 @@ export function PlayerPage() {
   const [uiPoke, setUiPoke] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * MOUSE VIRTUAL do controle remoto.
+   *
+   * Segurar OK por 2 s liga/desliga; com ele ligado o direcional move o cursor
+   * e o OK clica no ponto — é assim que o controle alcança os controles nativos
+   * do player (play/pause, barra, volume, tela cheia) sem duplicar botões.
+   *
+   * O estado vive num objeto mutável (não em useState) porque o cursor anda a
+   * cada tecla e não queremos uma re-renderização por passo; `mouseTick` é o
+   * contador que avisa o React para redesenhar a posição.
+   */
+  const mouseRef = useRef<VirtualMouse | null>(null)
+  if (!mouseRef.current) mouseRef.current = new VirtualMouse()
+  const holdRef = useRef<HoldDetector | null>(null)
+  if (!holdRef.current) holdRef.current = new HoldDetector()
+  const [mouseOn, setMouseOn] = useState(false)
+  const [mouseTick, setMouseTick] = useState(0)
 
   /**
    * LOGIN OBRIGATÓRIO — sem sessão, o player não abre.
@@ -397,41 +416,114 @@ export function PlayerPage() {
   //   ←             → voltar 10 s
   //   Voltar/Escape → sair do player
   // Nada de volume, legendas, tela cheia, ajustes ou troca de servidor.
+  //
+  // MOUSE VIRTUAL: segurar OK por 2 s liga/desliga. Com ele ligado, o direcional
+  // move o cursor e o OK clica no ponto — os controles nativos do player
+  // (play/pause, barra, volume, tela cheia) passam a ser alcançáveis pelo
+  // controle, sem duplicar botões. Desligado, tudo funciona como antes.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const v = videoRef.current
+    const mouse = mouseRef.current!
+    const hold = holdRef.current!
+
+    const isOk = (key: string) =>
+      key === ' ' ||
+      key === 'k' ||
+      key === 'Enter' ||
+      key === 'MediaPlayPause' ||
+      key === 'MediaPlay' ||
+      key === 'MediaPause'
+
+    function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         navigate(-1)
         return
       }
       // Qualquer tecla traz os controles de volta.
       pokeUi()
-      if (!v) return
-      switch (e.key) {
-        case ' ':
-        case 'k':
-        case 'Enter':
-        case 'MediaPlayPause':
-        case 'MediaPlay':
-        case 'MediaPause':
+
+      if (isOk(e.key)) {
+        e.preventDefault()
+        // SEMPRE começa a contar o "segurar 2 s" — com o mouse ligado ou não.
+        // É o que permite desligar o mouse segurando OK de novo. O auto-repeat
+        // do controle não reinicia a contagem.
+        if (!e.repeat) hold.onDown(performance.now())
+        return
+      }
+
+      if (e.key === 'ArrowLeft' || e.key === 'MediaRewind') {
+        e.preventDefault()
+        if (mouse.active) {
+          mouse.move(-1, 0)
+          setMouseTick((n) => n + 1)
+        } else {
+          const v = videoRef.current
+          if (v) v.currentTime = Math.max(0, v.currentTime - 10)
+        }
+        return
+      }
+
+      if (e.key === 'ArrowRight' || e.key === 'MediaFastForward') {
+        e.preventDefault()
+        if (mouse.active) {
+          mouse.move(1, 0)
+          setMouseTick((n) => n + 1)
+        } else {
+          const v = videoRef.current
+          if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
+        }
+        return
+      }
+
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (mouse.active) {
           e.preventDefault()
-          void togglePlay()
-          break
-        case 'ArrowRight':
-        case 'MediaFastForward':
-          e.preventDefault()
-          v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
-          break
-        case 'ArrowLeft':
-        case 'MediaRewind':
-          e.preventDefault()
-          v.currentTime = Math.max(0, v.currentTime - 10)
-          break
+          mouse.move(0, e.key === 'ArrowUp' ? -1 : 1)
+          setMouseTick((n) => n + 1)
+        }
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+
+    function onKeyUp(e: KeyboardEvent) {
+      if (!isOk(e.key)) return
+      // Toque curto (sem segurar 2 s): com o mouse ligado é clique na posição
+      // do cursor; desligado é play/pause normal.
+      if (hold.onUp() === 'short') {
+        if (mouse.active) {
+          clickAtRatio(document, window, mouse.ratioX(), mouse.ratioY())
+          setMouseTick((n) => n + 1)
+        } else {
+          void togglePlay()
+        }
+      }
+    }
+
+    // Relógio do "segurar OK": liga/desliga o mouse no instante dos 2 s.
+    const timer = window.setInterval(() => {
+      if (hold.tick(performance.now()) === 'hold') {
+        mouse.toggle()
+        setMouseOn(mouse.active)
+        setMouseTick((n) => n + 1)
+      }
+    }, 50)
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Tamanho da tela para o cursor: centraliza na primeira medição e mantém o
+  // cursor dentro da área visível quando a janela muda.
+  useEffect(() => {
+    const mouse = mouseRef.current!
+    const sync = () => mouse.setBounds(window.innerWidth, window.innerHeight)
+    sync()
+    window.addEventListener('resize', sync)
+    return () => window.removeEventListener('resize', sync)
   }, [])
 
   async function togglePlay() {
@@ -708,6 +800,25 @@ export function PlayerPage() {
             </div>
           )}
         </div>
+
+        {/*
+          CURSOR DO MOUSE VIRTUAL.
+
+          Só aparece com o mouse ligado (segurar OK por 2 s). É puramente
+          visual: `pointer-events: none` garante que ele não intercepta o clique
+          que ele mesmo dispara. `mouseTick` é lido para o React redesenhar a
+          posição a cada passo do direcional.
+        */}
+        {mouseOn && (
+          <div
+            className="tv-cursor"
+            data-tick={mouseTick}
+            style={{
+              left: `${mouseRef.current!.ratioX() * 100}%`,
+              top: `${mouseRef.current!.ratioY() * 100}%`,
+            }}
+          />
+        )}
       </div>
     </div>
   )

@@ -116,7 +116,14 @@ const PROVIDER_HTML = `<!doctype html>
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true })
 
-  const browser = await chromium.launch()
+  // O cache do sandbox pode ter uma build do Chromium diferente da que esta
+  // versão do Playwright espera; apontar o executável evita o "Please run
+  // npx playwright install" em máquina que já tem o navegador.
+  const browser = await chromium.launch({
+    executablePath:
+      process.env.PW_EXECUTABLE_PATH ||
+      '/root/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell',
+  })
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
 
   const jsErrors = []
