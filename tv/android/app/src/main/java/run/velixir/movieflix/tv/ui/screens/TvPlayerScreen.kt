@@ -378,7 +378,8 @@ private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
 private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
-  var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0 };
+  var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0,
+            isTop: (window.parent === window) };
   window.__mf = S;
 
   /**
@@ -401,15 +402,31 @@ private val BRIDGE_JS: String = """
       if (!document.getElementById('__mf_clean')) {
         var st = document.createElement('style');
         st.id = '__mf_clean';
+        // O player do provedor e o ArtPlayer (v2.watchplay.shop). A lista
+        // antiga mirava #ui/.scrim-top/.controls, que sao do shell do
+        // playerflix.ink e NAO existem no frame que desenha os botoes — por
+        // isso os controles apareciam duplicados. Estes sao os seletores
+        // reais, lidos do DOM em producao.
         st.textContent = [
-          '#ui, .ui, #reportWrap, .report-wrap, #toast, .toast, .scrim-top',
-          '#episodesView, #episodes, .ep-season-row, .ep-season-select',
-          '.top-actions, .source-trigger, .icon-btn, .next-btn, .prev-btn',
-          '.panel, .panel-body-wrap, .panel-list, .title-wrap, .crumb',
-          '.brand-container, .pro-loader, #playerLoader, .loading-wrapper',
-          '.controls, .control-bar, .player-controls, .settings, .settings-panel',
-          '.volume, .volume-control, .subtitle, .subtitles, .quality, .fullscreen',
+          '.art-controls', '.art-bottom', '.art-mask', '.art-loading',
+          '.art-poster', '.art-notice', '.art-info', '.art-settings',
+          '.art-contextmenus', '.art-layers', '.art-subtitle', '.art-danmuku',
+          '.art-progress-tip', '.art-control-thumbnails', '.art-auto-playback',
+          '.art-state', '.art-icon', '#wp-initial-play',
+          '.art-control-volume', '.art-control-fullscreen',
+          '.art-control-playAndPause', '.art-control-time',
+          '.art-controls-left', '.art-controls-center', '.art-controls-right',
+          '#ui', '.ui', '#reportWrap', '.report-wrap', '#toast', '.toast',
+          '.scrim-top', '#episodesView', '#episodes', '.ep-season-row',
+          '.ep-season-select', '.top-actions', '.source-trigger', '.icon-btn',
+          '.next-btn', '.prev-btn', '.panel', '.panel-body-wrap', '.panel-list',
+          '.title-wrap', '.crumb', '.brand-container', '.pro-loader',
+          '#playerLoader', '.loading-wrapper', '.controls', '.control-bar',
+          '.player-controls', '.settings', '.settings-panel', '.volume',
+          '.volume-control', '.subtitle', '.subtitles', '.quality', '.fullscreen',
         ].join(',') + '{display:none !important;visibility:hidden !important;opacity:0 !important;pointer-events:none !important;}' +
+          // O <video> NUNCA e escondido: e ele que toca o filme.
+          'video{display:block !important;visibility:visible !important;opacity:1 !important;}' +
           // Nenhum anel/borda de foco, em nenhum elemento, em nenhum estado.
           '*:focus{outline:none !important;outline-offset:0 !important;box-shadow:none !important;}' +
           '*:focus-visible{outline:none !important;box-shadow:none !important;}' +
@@ -428,12 +445,11 @@ private val BRIDGE_JS: String = """
         }
       }
 
-      // Se o provedor focar algum elemento por conta própria, tira o foco.
-      // É isto que impede o anel amarelo de reaparecer depois de um clique.
-      var ae = document.activeElement;
-      if (ae && ae !== document.body && typeof ae.blur === 'function') {
-        ae.blur();
-      }
+      // NAO chamar blur() aqui. O laco de 500 ms chamava blur no
+      // activeElement a cada volta; o provedor devolvia o foco e os dois
+      // brigavam — era isso que fazia o OK precisar de varias pressoes e o
+      // anel amarelo piscar. O foco agora fica no Box do Compose (o WebView
+      // nao e focavel), entao nao ha o que roubar.
     } catch (e) {}
   }
 
@@ -446,11 +462,82 @@ private val BRIDGE_JS: String = """
     return vs.length ? vs[0] : null;
   }
 
+  /**
+   * Reporta o estado ao app.
+   *
+   * O <video> vive no frame mais fundo (v2.watchplay.shop), que NAO tem a
+   * interface MfPlayer — ela so existe no frame principal. Por isso o estado
+   * sobe por postMessage ate o topo, que repassa ao app.
+   */
   function post(o) {
     try {
-      if (window.MfPlayer && window.MfPlayer.post) window.MfPlayer.post(JSON.stringify(o));
+      if (S.isTop) {
+        if (window.MfPlayer && window.MfPlayer.post) window.MfPlayer.post(JSON.stringify(o));
+      } else if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ __mfState: o }, '*');
+      }
     } catch (e) {}
   }
+
+  /**
+   * Manda o comando para os iframes filhos.
+   *
+   * `evaluateJavascript` do WebView so alcanca o frame principal (myembed.biz),
+   * que nao tem <video>. Sem este repasse o comando morria ali e o OK "nao
+   * funcionava". Cada frame sem video repassa para os seus filhos, entao o
+   * comando desce myembed -> playerflix -> watchplay, onde o video esta.
+   */
+  function forward(cmd, arg) {
+    var sent = false;
+    try {
+      var fs = document.querySelectorAll('iframe');
+      for (var i = 0; i < fs.length; i++) {
+        try {
+          fs[i].contentWindow.postMessage({ __mfCmd: cmd, __mfArg: arg }, '*');
+          sent = true;
+        } catch (x) {}
+      }
+    } catch (e) {}
+    return sent;
+  }
+
+  /** Executa o comando no <video> DESTE frame. */
+  function exec(cmd, arg) {
+    if (!attach()) return false;
+    var v = S.v;
+    try {
+      if (cmd === 'toggle') {
+        if (v.paused) { S.autoTried = 99; v.play(); } else { S.autoTried = 99; v.pause(); }
+      }
+      else if (cmd === 'play') { S.autoTried = 99; v.play(); }
+      else if (cmd === 'pause') { S.autoTried = 99; v.pause(); }
+      else if (cmd === 'seekTo') {
+        var d = isFinite(v.duration) ? v.duration : 0;
+        var t = Number(arg);
+        if (!isFinite(t)) t = 0;
+        v.currentTime = Math.max(0, d > 0 ? Math.min(d, t) : t);
+      }
+      sync();
+      post(snapshot());
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // Recebe estado dos filhos (repassa para cima) e comandos do pai (executa
+  // ou continua descendo). Chamar __mfCmd aqui e o que faz o comando cascatear.
+  window.addEventListener('message', function (e) {
+    var d = e && e.data;
+    if (!d) return;
+    if (d.__mfState) {
+      if (S.isTop) {
+        try { if (window.MfPlayer && window.MfPlayer.post) window.MfPlayer.post(JSON.stringify(d.__mfState)); } catch (x) {}
+      } else if (window.parent && window.parent !== window) {
+        try { window.parent.postMessage({ __mfState: d.__mfState }, '*'); } catch (x) {}
+      }
+      return;
+    }
+    if (d.__mfCmd) window.__mfCmd(d.__mfCmd, d.__mfArg);
+  });
 
   /** Estado completo — o app lê estes campos, não só o `type`. */
   function snapshot() {
@@ -503,7 +590,9 @@ private val BRIDGE_JS: String = """
   // Esconde a UI do provedor desde o primeiro instante — não espera o <video>.
   // O proprietário quer a tela limpa; a barra é a nossa.
   hideProviderUi();
-  setInterval(hideProviderUi, 500);
+  // 1 s basta para reaplicar o CSS quando o provedor redesenha a UI. Antes era
+  // 500 ms E com blur() a cada volta, o que quebrava o foco.
+  setInterval(hideProviderUi, 1000);
 
   var iv = setInterval(function () {
     S.tried++;
@@ -521,24 +610,13 @@ private val BRIDGE_JS: String = """
   }, 500);
 
   window.__mfCmd = function (cmd, arg) {
-    if (!attach()) { post({ type: 'novideo' }); return false; }
-    var v = S.v;
-    try {
-      if (cmd === 'toggle') {
-        if (v.paused) { S.autoTried = 99; v.play(); } else { S.autoTried = 99; v.pause(); }
-      }
-      else if (cmd === 'play') { S.autoTried = 99; v.play(); }
-      else if (cmd === 'pause') { S.autoTried = 99; v.pause(); }
-      else if (cmd === 'seekTo') {
-        var d = isFinite(v.duration) ? v.duration : 0;
-        var t = Number(arg);
-        if (!isFinite(t)) t = 0;
-        v.currentTime = Math.max(0, d > 0 ? Math.min(d, t) : t);
-      }
-      sync();
-      post(snapshot());
-      return true;
-    } catch (e) { return false; }
+    // Este frame tem o video? Executa. Se nao, desce para os filhos.
+    if (attach()) return exec(cmd, arg);
+    var sent = forward(cmd, arg);
+    // Sem video aqui e sem filhos para repassar: avisa o app (erro real, nao
+    // controle). Se repassou, o frame de baixo responde.
+    if (!sent) post({ type: 'novideo' });
+    return sent;
   };
 
   post({ type: 'ready' });

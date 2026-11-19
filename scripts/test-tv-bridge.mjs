@@ -67,7 +67,14 @@ check('NÃO tem comando vol (volume removido a pedido)', !bridge.includes("cmd =
 check('tenta autoplay ao anexar', bridge.includes('autoPlay()'))
 check('esconde a UI do provedor', bridge.includes('hideProviderUi'))
 check('mata o anel de foco (outline:none)', bridge.includes('outline:none'))
-check('faz blur no elemento ativo', bridge.includes('blur()'))
+check('NÃO chama blur() no laço (briga de foco)', !bridge.includes('ae.blur()'))
+check('esconde os controles REAIS do ArtPlayer', bridge.includes('.art-controls'))
+check('esconde a barra inferior do ArtPlayer', bridge.includes('.art-bottom'))
+check('esconde o botão de play inicial', bridge.includes('#wp-initial-play'))
+check('nunca esconde o <video>', bridge.includes('video{display:block'))
+check('repassa comando para iframes filhos', bridge.includes('__mfCmd: cmd'))
+check('sobe estado por postMessage', bridge.includes('__mfState'))
+check('só o frame do topo fala com o app', bridge.includes('S.isTop'))
 
 // ── 2. Sintaxe ──────────────────────────────────────────────────────────────
 console.log('\n[1] Sintaxe do JavaScript')
@@ -131,12 +138,17 @@ function makeWindow(video) {
   const win = {
     MfPlayer: { post: (s) => posted.push(JSON.parse(s)) },
     document: {
-      querySelectorAll: (sel) => (sel === 'video' && video ? [video] : []),
+      querySelectorAll: (sel) =>
+        sel === 'video' && video ? [video] : [],
     },
     setInterval: () => 0, // não queremos timers reais no teste
     clearInterval: () => {},
+    addEventListener: () => {},
+    postMessage: () => {},
   }
   win.window = win
+  // Frame principal: parent === window. É o único que fala com o app.
+  win.parent = win
   return { win, posted }
 }
 
