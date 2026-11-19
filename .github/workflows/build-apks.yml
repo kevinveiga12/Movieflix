@@ -257,6 +257,38 @@ jobs:
             adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO NO PLAYER" || echo "TV MORTO NO PLAYER"
             adb logcat -d -b crash | tail -40 || true
 
+            # ── Ponte JS provada com um vídeo controlado ────────────────────────
+            #
+            # O provedor bloqueia IP de datacenter, então no CI ele não entrega
+            # vídeo (a captura acima mostra a mensagem honesta do app). Para
+            # provar que a ponte controla um <video> de verdade — OK, setas e
+            # barrinha lendo a posição real — abrimos um MP4 público no MESMO
+            # componente WebView, com a MESMA ponte injetada.
+            echo "=== Ponte JS: video de teste ==="
+            adb shell am force-stop run.velixir.movieflix.tv
+            sleep 2
+            adb shell am start -n run.velixir.movieflix.tv/.MainActivity -e mf_route embed -e mf_url "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
+            sleep 20
+            bash scripts/shot.sh screenshots/tv-bridge-1-tocando.png "ponte tocando"
+
+            echo "=== Ponte JS: OK pausa ==="
+            adb shell input keyevent KEYCODE_DPAD_CENTER
+            sleep 2
+            bash scripts/shot.sh screenshots/tv-bridge-2-pausado.png "ponte pausado"
+
+            echo "=== Ponte JS: OK volta a tocar ==="
+            adb shell input keyevent KEYCODE_DPAD_CENTER
+            sleep 2
+            bash scripts/shot.sh screenshots/tv-bridge-3-retomou.png "ponte retomou"
+
+            echo "=== Ponte JS: seta direita avanca ==="
+            adb shell input keyevent KEYCODE_DPAD_RIGHT
+            sleep 2
+            bash scripts/shot.sh screenshots/tv-bridge-4-avancou.png "ponte avancou"
+
+            adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO NA PONTE" || echo "TV MORTO NA PONTE"
+            adb logcat -d -b crash | tail -40 || true
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:

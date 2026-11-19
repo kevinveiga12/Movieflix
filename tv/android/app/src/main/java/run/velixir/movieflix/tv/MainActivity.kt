@@ -52,6 +52,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Gancho de captura: `adb shell am start -n ... --es mf_route plans`.
         val initialRoute = intent?.getStringExtra("mf_route")
+        // URL opcional para a rota de diagnóstico do player (captura no CI).
+        val intentUrl = intent?.getStringExtra("mf_url")
         setContent {
             MovieFlixTheme {
                 Box(
@@ -59,7 +61,7 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(MfColors.Bg),
                 ) {
-                    MovieFlixTvApp(initialRoute = initialRoute)
+                    MovieFlixTvApp(initialRoute = initialRoute, intentUrl = intentUrl)
                 }
             }
         }
@@ -84,11 +86,11 @@ sealed interface TvRoute {
     data class Player(val title: Title, val season: Int?, val episode: Int?) : TvRoute
 
     /** Diagnóstico do embed: abre o provedor direto, sem login (só para o CI). */
-    data object EmbedDiag : TvRoute
+    data class EmbedDiag(val url: String) : TvRoute
 }
 
 @Composable
-fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) {
+fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, intentUrl: String? = null) {
     var route by remember { mutableStateOf<TvRoute>(TvRoute.Home) }
     val s by vm.state.collectAsState()
 
@@ -99,7 +101,9 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) 
             "account" -> route = TvRoute.Account
             "admin" -> route = TvRoute.Admin
             "player" -> s.movies.firstOrNull()?.let { route = TvRoute.Player(it, null, null) }
-            "embed" -> route = TvRoute.EmbedDiag
+            "embed" -> route = TvRoute.EmbedDiag(
+                intentUrl ?: "https://myembed.biz/filme/1292035",
+            )
         }
     }
 
@@ -131,8 +135,8 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) 
                 onBack = { route = TvRoute.Detail(r.title) },
             )
 
-            TvRoute.EmbedDiag -> Box(Modifier.fillMaxSize()) {
-                TvEmbedPlayer("https://myembed.biz/filme/1292035", onBack = { route = TvRoute.Home })
+            is TvRoute.EmbedDiag -> Box(Modifier.fillMaxSize()) {
+                TvEmbedPlayer(r.url, onBack = { route = TvRoute.Home })
             }
 
             else -> Row(Modifier.fillMaxSize()) {
