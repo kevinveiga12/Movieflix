@@ -64,6 +64,46 @@ jobs:
       - name: Pillow (para checar screenshots)
         run: pip install --quiet pillow
 
+      # ── Testes do controle remoto do player (JVM, sem emulador) ────────────
+      #
+      # A lógica de OK / setas / volume vive em `player/TvPlayerControls.kt`, que
+      # é Kotlin puro. Aqui ela é compilada e exercitada com um relógio
+      # controlado: toque curto, segurar com aceleração progressiva, parada
+      # exata, watchdog de soltura e volume. Roda em segundos e falha o build
+      # antes de gerar APK se o comportamento quebrar.
+      - name: Testes do controle do player (JVM)
+        run: |
+          curl -sL -o /tmp/kotlin.zip \
+            https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q -o /tmp/kotlin.zip -d /opt/kotlinc
+          KOTLINC=/opt/kotlinc/kotlinc/bin/kotlinc bash scripts/test-tv-player.sh
+
+      # ── Testes da ponte JS do player (modo embed) ──────────────────────────
+      #
+      # Extrai o BRIDGE_JS do próprio TvPlayerScreen.kt, valida a sintaxe e
+      # executa contra um DOM falso: OK alternando, seekTo absoluto, volume e o
+      # estado reportado à barrinha. Se a ponte quebrar, o controle remoto do
+      # modo embed para de funcionar sem erro visível — este passo pega isso.
+      - name: Testes da ponte JS do player
+        run: node scripts/test-tv-bridge.mjs
+
+      # ── Testes da rota de capas (histórico/favoritos da TV) ────────────────
+      #
+      # Sobe o Express e confere que `/api/catalog/posters` resolve capa de
+      # filme E de série, em lote, e que as rotas antigas do catálogo não
+      # mudaram. O catálogo é estático, então não precisa de Supabase aqui.
+      - name: Testes da rota de capas
+        run: |
+          npm ci --include=dev
+          npm run build
+          PORT=3999 node server/index.js &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3999/api/health > /dev/null && break
+            sleep 1
+          done
+          node scripts/test-tv-posters.mjs http://127.0.0.1:3999
+          kill %1 || true
+
       # Chave de assinatura. Gerada uma vez por execucao e publicada como
       # artefato para o dono do projeto guardar. Sem ela, uma atualizacao
       # futura nao pode ser instalada por cima da anterior.
@@ -253,6 +293,29 @@ jobs:
             adb shell input keyevent --longpress KEYCODE_DPAD_RIGHT
             sleep 3
             bash scripts/shot.sh screenshots/tv-player-4-segurou.png "player apos segurar"
+
+            # ── Volume pelas setas ↑ ↓ ────────────────────────────────────────
+            echo "=== Player: volume ↑ ↓ ==="
+            adb shell input keyevent KEYCODE_DPAD_UP
+            sleep 1
+            bash scripts/shot.sh screenshots/tv-player-5-volume-up.png "volume subiu"
+            adb shell input keyevent KEYCODE_DPAD_DOWN
+            adb shell input keyevent KEYCODE_DPAD_DOWN
+            sleep 1
+            bash scripts/shot.sh screenshots/tv-player-6-volume-down.png "volume desceu"
+
+            # ── Parada exata: soltar a seta não pode continuar pulando ────────
+            #
+            # Segura 2 s, solta, espera 3 s e tira duas capturas com 2 s de
+            # intervalo. Se o avanço continuasse sozinho (o bug antigo do modo
+            # direto), o tempo na barra mudaria entre as duas.
+            echo "=== Player: parada exata ao soltar ==="
+            adb shell input keyevent --longpress KEYCODE_DPAD_RIGHT
+            sleep 3
+            bash scripts/shot.sh screenshots/tv-player-7-soltou-a.png "apos soltar A"
+            sleep 2
+            bash scripts/shot.sh screenshots/tv-player-7-soltou-b.png "apos soltar B"
+            python3 scripts/check-screenshot.py screenshots/tv-player-7-soltou-b.png "player parado apos soltar"
 
             adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO NO PLAYER" || echo "TV MORTO NO PLAYER"
             adb logcat -d -b crash | tail -40 || true

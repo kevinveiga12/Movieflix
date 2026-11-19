@@ -396,10 +396,16 @@ fun TvFavoritesScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             TvEmpty("Você ainda não salvou favoritos.", "♡")
             return@Column
         }
+        // A capa vem de `FavoriteRow.posterUrl`, preenchido pelo ViewModel a
+        // partir do catálogo (`/api/catalog/posters`). Antes este `Title` era
+        // montado SEM `posterUrl`, então o card recebia string vazia e o Coil
+        // desenhava só o fundo cinza — era exatamente o "cinza/preto" que o
+        // usuário via nos Favoritos da TV.
         val titles = s.favorites.map {
             Title(
                 id = it.tmdbId.toString(),
                 title = it.title,
+                posterUrl = it.posterUrl,
                 tmdbId = it.tmdbId,
                 type = it.mediaType,
                 mediaType = it.mediaType,

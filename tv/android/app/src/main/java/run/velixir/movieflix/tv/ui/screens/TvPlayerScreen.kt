@@ -1,6 +1,7 @@
 package run.velixir.movieflix.tv.ui.screens
 
 import android.annotation.SuppressLint
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -10,6 +11,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,10 +30,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -45,45 +48,72 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 import run.velixir.movieflix.tv.TvViewModel
 import run.velixir.movieflix.tv.data.Title
+import run.velixir.movieflix.tv.player.PlayPauseController
+import run.velixir.movieflix.tv.player.SeekController
+import run.velixir.movieflix.tv.player.VolumeController
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MfSans
 
 /**
  * Player da TV.
  *
- * Controle remoto (os dois modos):
- *   OK / Enter            → play/pause de verdade
- *   ← / →                 → toque curto: ±10 s. Segurando: 30 s, 1 min, 2 min,
- *                           3 min, 4 min, e depois 4 min por repetição
- *   ↑ / ↓                 → volume ±10 %
- *   Voltar                → sai do player
+ * ── Controle remoto (o que o usuário pediu) ──────────────────────────────────
  *
- * ── Por que o OK não funcionava no modo embed ──────────────────────────────
+ *   OK / Enter / Play-Pause → alterna play/pause, sempre a partir do estado REAL
+ *   →  toque curto          → +10 s
+ *   →  segurando            → +30 s, +1 min, +2 min, +3 min, +4 min (e 4 min)
+ *   ←  toque curto          → −10 s
+ *   ←  segurando            → −30 s, −1 min, −2 min, −3 min, −4 min
+ *   soltar                  → para EXATAMENTE no alvo (seek absoluto)
+ *   ↑ / ↓                   → volume ±10 %
+ *   Voltar                  → sai do player
+ *
+ * ── O que mudou nesta versão (e por quê) ─────────────────────────────────────
+ *
+ * 1. A lógica de controle saiu daqui e foi para `player/TvPlayerControls.kt`,
+ *    que é Kotlin puro e tem testes headless (`scripts/test-tv-player.sh`).
+ *    Antes ela era impossível de testar e divergia do aparelho real.
+ *
+ * 2. O avanço passou a ser ABSOLUTO. Antes cada passo era
+ *    `currentTime + 10`, então o segundo passo partia de uma posição que o
+ *    player ainda não tinha aplicado — segurando a seta os saltos se perdiam e
+ *    o vídeo não parava no número exato. Agora o alvo é acumulado em segundos
+ *    e enviado como `seekTo(alvo)`; soltar reenvia o mesmo alvo.
+ *
+ * 3. Passou a existir tratamento de SOLTAR a tecla (ACTION_UP) nos dois modos.
+ *    No modo direto (ExoPlayer) não havia: o job de avanço rodava para sempre,
+ *    pulando 4 min a cada 500 ms depois que o usuário soltava.
+ *
+ * 4. Watchdog de 1,2 s: TV Box que não entrega ACTION_UP ao WebView não deixa
+ *    mais o vídeo avançando sozinho.
+ *
+ * 5. O vídeo começa a tocar ao abrir. O provedor costuma montar o `<video>`
+ *    pausado; a ponte tenta `play()` assim que o elemento existe e de novo em
+ *    `canplay`, e o ExoPlayer usa `playWhenReady = true` com uma retentativa.
+ *    Se ainda assim entrar pausado, o primeiro OK despausa — porque o toggle
+ *    lê `v.paused` / `isPlaying` de verdade, em vez de um contador do app.
+ *
+ * ── Por que o modo embed precisa de ponte JS ─────────────────────────────────
  *
  * O player do provedor roda em iframe de OUTRO domínio. A página do MovieFlix
- * não alcança o `<video>` de dentro dele (política de origem do navegador), e
- * o provedor não publica `postMessage` — verificado em 2026-11-18: a página do
- * playerflix.ink devolve 0 bytes para requisição direta e não expõe canal.
+ * não alcança o `<video>` de dentro dele (política de origem do navegador) e o
+ * provedor não publica `postMessage`. No Android existe um caminho que o
+ * navegador não tem: `WebViewCompat.addDocumentStartJavaScript` injeta um
+ * script em TODOS os frames, inclusive nos de outra origem. É por ele que a
+ * ponte abaixo controla o `<video>` real — `play()`, `pause()`, `currentTime`,
+ * `volume` no elemento, não um ícone mudando.
  *
- * No Android, porém, existe um caminho que o navegador não tem:
- * `WebView.addDocumentStartJavaScript` injeta um script em TODOS os frames,
- * inclusive nos de outra origem. É por ele que a ponte abaixo alcança o
- * `<video>` real do provedor e o controla de verdade — não é um ícone mudando,
- * é `video.play()` / `video.pause()` / `video.currentTime` no elemento.
- *
- * O estado que aparece na barrinha vem do próprio `<video>` (eventos
- * `timeupdate`, `play`, `pause`, `durationchange`), não de um contador
- * estimado. Se o provedor não tiver `<video>` (ex.: player em canvas), a ponte
- * não encontra o elemento e o app diz isso na tela, em vez de fingir.
+ * O estado da barrinha vem do próprio `<video>` (eventos `timeupdate`, `play`,
+ * `pause`, `durationchange`), não de um contador estimado. Se o provedor não
+ * tiver `<video>` (ex.: player em canvas), a ponte não encontra o elemento e o
+ * app diz isso na tela, em vez de fingir.
  */
 @Composable
 fun TvPlayerScreen(
@@ -143,7 +173,7 @@ fun TvPlayerScreen(
     }
 }
 
-// ─────────────────────────── modo direto (Media3) ───────────────────────────
+// ───────────────────────────── modo direto (Media3) ─────────────────────────────
 
 @Composable
 private fun TvDirectPlayer(
@@ -154,36 +184,84 @@ private fun TvDirectPlayer(
     vm: TvViewModel,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(url))
             prepare()
+            // Começa tocando. Se o aparelho recusar, a retentativa abaixo resolve.
             playWhenReady = true
         }
     }
 
-    var playing by remember { mutableStateOf(true) }
-    var position by remember { mutableStateOf(0.0) }
-    var duration by remember { mutableStateOf(0.0) }
-    var volume by remember { mutableStateOf(1.0) }
+    // Estado REAL do ExoPlayer — é o que a barrinha mostra e o que o toggle lê.
+    val playingState = remember { mutableStateOf(true) }
+    val positionState = remember { mutableStateOf(0.0) }
+    val durationState = remember { mutableStateOf(0.0) }
+    val volumeState = remember { mutableStateOf(1.0) }
+
     var hint by remember { mutableStateOf<String?>(null) }
-    var seekJob by remember { mutableStateOf<Job?>(null) }
+    /** O usuário pausou de propósito: a retentativa de autoplay não deve brigar. */
+    var userPaused by remember { mutableStateOf(false) }
+
+    val seek = remember {
+        SeekController(
+            positionProvider = { positionState.value },
+            durationProvider = { durationState.value },
+            onSeek = { target ->
+                player.seekTo((target * 1000).toLong().coerceAtLeast(0L))
+            },
+        )
+    }
+    val volume = remember {
+        VolumeController(
+            currentProvider = { volumeState.value },
+            onChange = { v -> player.volume = v.toFloat() },
+        )
+    }
+    val toggle = remember { PlayPauseController() }
 
     DisposableEffect(Unit) { onDispose { player.release() } }
 
-    // Estado real do ExoPlayer → barrinha.
+    // Foco: sem isto o Compose não recebe as teclas do controle.
+    LaunchedEffect(Unit) {
+        runCatching { focusRequester.requestFocus() }
+    }
+
+    // Estado real → barrinha (4× por segundo).
     LaunchedEffect(Unit) {
         while (true) {
-            playing = player.isPlaying
-            position = (player.currentPosition / 1000.0).coerceAtLeast(0.0)
-            duration = (player.duration / 1000.0).coerceAtLeast(0.0)
-            volume = player.volume.toDouble()
+            playingState.value = player.isPlaying
+            positionState.value = (player.currentPosition / 1000.0).coerceAtLeast(0.0)
+            durationState.value = (player.duration / 1000.0).coerceAtLeast(0.0)
+            volumeState.value = player.volume.toDouble()
+            toggle.onState(player.isPlaying)
             delay(250)
         }
     }
 
+    // Autoplay: se o aparelho montou pausado, tenta tocar de novo — mas nunca
+    // contra a vontade do usuário (userPaused).
+    LaunchedEffect(Unit) {
+        repeat(6) {
+            delay(700)
+            if (!userPaused && !player.isPlaying && player.playbackState != Player.STATE_ENDED) {
+                player.play()
+            }
+        }
+    }
+
+    // Relógio do controle: acelera o avanço enquanto a tecla está pressionada e
+    // solta a tecla quando o aparelho não manda ACTION_UP.
+    LaunchedEffect(Unit) {
+        while (true) {
+            seek.tick(SystemClock.uptimeMillis())
+            delay(50)
+        }
+    }
+
+    // Salva o progresso a cada 10 s (é o que alimenta "continuar assistindo").
     LaunchedEffect(Unit) {
         while (true) {
             delay(10_000)
@@ -200,41 +278,6 @@ private fun TvDirectPlayer(
         }
     }
 
-    fun toggle() {
-        if (player.isPlaying) player.pause() else player.play()
-        hint = if (player.isPlaying) "▶ Reproduzindo" else "⏸ Pausado"
-    }
-
-    fun seekBy(seconds: Double) {
-        val dur = player.duration
-        val target = (player.currentPosition + (seconds * 1000).toLong())
-            .coerceIn(0L, if (dur > 0) dur else Long.MAX_VALUE)
-        player.seekTo(target)
-        hint = if (seconds > 0) "⏩ +${seconds.toInt()}s" else "⏪ ${seconds.toInt()}s"
-    }
-
-    fun startSeek(dir: Int) {
-        seekJob?.cancel()
-        seekBy(dir * 10.0)
-        seekJob = scope.launch {
-            delay(600)
-            for (s in listOf(30.0, 60.0, 120.0, 180.0, 240.0)) {
-                seekBy(dir * s)
-                delay(500)
-            }
-            while (isActive) {
-                seekBy(dir * 240.0)
-                delay(500)
-            }
-        }
-    }
-
-    fun changeVolume(delta: Double) {
-        val v = (player.volume + delta).coerceIn(0.0, 1.0)
-        player.volume = v.toFloat()
-        hint = "🔊 ${(v * 100).toInt()}%"
-    }
-
     LaunchedEffect(hint) {
         if (hint != null) {
             delay(1200)
@@ -242,26 +285,69 @@ private fun TvDirectPlayer(
         }
     }
 
+    fun doToggle() {
+        if (!toggle.onKey(SystemClock.uptimeMillis())) return
+        hint = toggle.hint()
+        if (player.isPlaying) {
+            userPaused = true
+            player.pause()
+        } else {
+            userPaused = false
+            player.play()
+        }
+    }
+
+    fun doSeekDown(dir: Int, repeatCount: Int) {
+        if (seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())) {
+            hint = seek.stepLabel()
+        }
+    }
+
+    fun doSeekUp() {
+        if (seek.onKeyUp(SystemClock.uptimeMillis())) hint = seek.stepLabel()
+    }
+
     Box(
         Modifier
             .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
             .onKeyEvent { ev ->
-                if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
-                when (ev.key) {
-                    Key.DirectionCenter, Key.Enter, Key.Spacebar, Key.MediaPlayPause -> {
-                        toggle(); true
+                val native = ev.nativeKeyEvent
+                when (ev.type) {
+                    KeyEventType.KeyDown -> when (ev.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
+                        Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
+                        -> {
+                            doToggle(); true
+                        }
+                        Key.DirectionLeft, Key.MediaRewind -> {
+                            doSeekDown(-1, native.repeatCount); true
+                        }
+                        Key.DirectionRight, Key.MediaFastForward -> {
+                            doSeekDown(1, native.repeatCount); true
+                        }
+                        Key.DirectionUp -> {
+                            if (native.repeatCount == 0) {
+                                volume.up(); hint = volume.label()
+                            }
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (native.repeatCount == 0) {
+                                volume.down(); hint = volume.label()
+                            }
+                            true
+                        }
+                        else -> false
                     }
-                    Key.DirectionLeft, Key.MediaRewind -> {
-                        if (ev.nativeKeyEvent.repeatCount == 0) startSeek(-1); true
-                    }
-                    Key.DirectionRight, Key.MediaFastForward -> {
-                        if (ev.nativeKeyEvent.repeatCount == 0) startSeek(1); true
-                    }
-                    Key.DirectionUp -> {
-                        if (ev.nativeKeyEvent.repeatCount == 0) changeVolume(0.1); true
-                    }
-                    Key.DirectionDown -> {
-                        if (ev.nativeKeyEvent.repeatCount == 0) changeVolume(-0.1); true
+                    KeyEventType.KeyUp -> when (ev.key) {
+                        Key.DirectionLeft, Key.DirectionRight,
+                        Key.MediaRewind, Key.MediaFastForward,
+                        -> {
+                            doSeekUp(); true
+                        }
+                        else -> false
                     }
                     else -> false
                 }
@@ -272,6 +358,7 @@ private fun TvDirectPlayer(
                 PlayerView(ctx).apply {
                     this.player = player
                     useController = false
+                    isFocusable = false
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -282,16 +369,16 @@ private fun TvDirectPlayer(
         )
 
         TvPlayerOverlay(
-            playing = playing,
-            position = position,
-            duration = duration,
-            volume = volume,
+            playing = playingState.value,
+            position = positionState.value,
+            duration = durationState.value,
+            volume = volumeState.value,
             hint = hint,
         )
     }
 }
 
-// ─────────────────────────── modo embed (WebView) ───────────────────────────
+// ───────────────────────────── modo embed (WebView) ─────────────────────────────
 
 /**
  * Origem do site oficial — o provedor só entrega o player com este Referer.
@@ -313,12 +400,17 @@ private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
  *   1. procura o `<video>` (o provedor pode criá-lo depois, então tenta de novo
  *      a cada 250 ms por até 2,5 min);
  *   2. escuta os eventos reais do elemento e reporta o estado ao app;
- *   3. expõe `window.__mfCmd(cmd, arg)` para o app mandar play/pause/seek/volume.
+ *   3. tenta tocar sozinho ao abrir (o provedor monta pausado);
+ *   4. expõe `window.__mfCmd(cmd, arg)` para o app mandar
+ *      toggle / play / pause / seekTo / seekBy / vol.
+ *
+ * `seekTo` recebe a posição ABSOLUTA em segundos — é o que faz o vídeo parar
+ * exatamente no ponto mostrado na barra, sem deriva.
  */
 private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
-  var S = { v: null, playing: false, t: 0, d: 0, vol: 1, muted: false, ready: false, tried: 0 };
+  var S = { v: null, playing: false, t: 0, d: 0, vol: 1, muted: false, ready: false, tried: 0, autoTried: 0 };
   window.__mf = S;
 
   function pick() {
@@ -360,6 +452,23 @@ private val BRIDGE_JS: String = """
     S.ready = true;
   }
 
+  /**
+   * O provedor monta o vídeo pausado. Tenta tocar algumas vezes: o navegador
+   * pode recusar antes de haver dados, e aí tentamos de novo em canplay.
+   * Nunca insiste depois que o usuário pausou (o app manda 'pause' e o
+   * autoTried é encerrado).
+   */
+  function autoPlay() {
+    var v = S.v;
+    if (!v || S.autoTried > 12) return;
+    S.autoTried++;
+    if (!v.paused) return;
+    try {
+      var p = v.play();
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+  }
+
   function attach() {
     var v = pick();
     if (!v) return false;
@@ -370,9 +479,8 @@ private val BRIDGE_JS: String = """
       for (var i = 0; i < evs.length; i++) {
         v.addEventListener(evs[i], function () { sync(); post(snapshot()); }, true);
       }
-      // O provedor costuma montar o vídeo já pausado. Tenta tocar assim que o
-      // elemento existe; se o navegador recusar, o OK do controle resolve.
-      try { if (v.paused) { var p = v.play(); if (p && p.catch) p.catch(function(){}); } } catch (e) {}
+      v.addEventListener('canplay', function () { autoPlay(); }, true);
+      autoPlay();
     }
     sync();
     return true;
@@ -383,19 +491,39 @@ private val BRIDGE_JS: String = """
     if (attach() || S.tried > 600) clearInterval(iv);
   }, 250);
 
+  // Tenta já, sem esperar o primeiro tick: quando o script é injetado no
+  // document-start o <video> normalmente ainda não existe, mas em recarregamento
+  // de frame ele já pode estar lá — e aí o autoplay acontece 250 ms mais cedo.
+  attach();
+
+  // Heartbeat: mantém a barrinha viva mesmo se o provedor não emitir eventos.
+  setInterval(function () {
+    if (!S.v) return;
+    sync();
+    post(snapshot());
+  }, 500);
+
   window.__mfCmd = function (cmd, arg) {
     if (!attach()) { post({ type: 'novideo' }); return false; }
     var v = S.v;
     try {
-      if (cmd === 'toggle') { if (v.paused) { v.play(); } else { v.pause(); } }
-      else if (cmd === 'play') { v.play(); }
-      else if (cmd === 'pause') { v.pause(); }
-      else if (cmd === 'seekBy') {
+      if (cmd === 'toggle') {
+        if (v.paused) { S.autoTried = 99; v.play(); } else { S.autoTried = 99; v.pause(); }
+      }
+      else if (cmd === 'play') { S.autoTried = 99; v.play(); }
+      else if (cmd === 'pause') { S.autoTried = 99; v.pause(); }
+      else if (cmd === 'seekTo') {
         var d = isFinite(v.duration) ? v.duration : 0;
-        var t = (v.currentTime || 0) + arg;
+        var t = Number(arg);
+        if (!isFinite(t)) t = 0;
         v.currentTime = Math.max(0, d > 0 ? Math.min(d, t) : t);
       }
-      else if (cmd === 'vol') { v.muted = false; v.volume = Math.max(0, Math.min(1, arg)); }
+      else if (cmd === 'seekBy') {
+        var d2 = isFinite(v.duration) ? v.duration : 0;
+        var t2 = (v.currentTime || 0) + Number(arg);
+        v.currentTime = Math.max(0, d2 > 0 ? Math.min(d2, t2) : t2);
+      }
+      else if (cmd === 'vol') { v.muted = false; v.volume = Math.max(0, Math.min(1, Number(arg))); }
       else if (cmd === 'mute') { v.muted = !v.muted; }
       sync();
       post(snapshot());
@@ -421,65 +549,64 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     var pageReady by remember { mutableStateOf(false) }
 
     // Estado REAL do vídeo, reportado pelo JS.
-    var playing by remember { mutableStateOf(false) }
-    var position by remember { mutableStateOf(0.0) }
-    var duration by remember { mutableStateOf(0.0) }
-    var volume by remember { mutableStateOf(1.0) }
+    val playingState = remember { mutableStateOf(false) }
+    val positionState = remember { mutableStateOf(0.0) }
+    val durationState = remember { mutableStateOf(0.0) }
+    val volumeState = remember { mutableStateOf(1.0) }
     var hasVideo by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf<String?>(null) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
     var legacyBridge by remember { mutableStateOf(false) }
 
-    val scope = rememberCoroutineScope()
-    var seekJob by remember { mutableStateOf<Job?>(null) }
+    val seek = remember {
+        SeekController(
+            positionProvider = { positionState.value },
+            durationProvider = { durationState.value },
+            onSeek = { target ->
+                webView?.evaluateJavascript(
+                    "window.__mfCmd && window.__mfCmd('seekTo',$target)",
+                    null,
+                )
+            },
+        )
+    }
+    val volume = remember {
+        VolumeController(
+            currentProvider = { volumeState.value },
+            onChange = { v ->
+                webView?.evaluateJavascript("window.__mfCmd && window.__mfCmd('vol',$v)", null)
+            },
+        )
+    }
+    val toggle = remember { PlayPauseController() }
 
     fun js(cmd: String, arg: Double? = null) {
         val a = arg?.let { ",$it" } ?: ""
         webView?.evaluateJavascript("window.__mfCmd && window.__mfCmd('$cmd'$a)", null)
     }
 
-    fun toggle() {
+    fun doToggle() {
+        if (!toggle.onKey(SystemClock.uptimeMillis())) return
+        hint = toggle.hint()
         js("toggle")
-        hint = if (playing) "⏸ Pausado" else "▶ Reproduzindo"
     }
 
-    fun seekBy(seconds: Double) {
-        js("seekBy", seconds)
-        hint = if (seconds > 0) "⏩ +${seconds.toInt()}s" else "⏪ ${seconds.toInt()}s"
-    }
-
-    /**
-     * Toque curto = 10 s. Segurando, os saltos crescem: 30 s, 1 min, 2 min,
-     * 3 min, 4 min — e daí em diante 4 min por repetição. Ao soltar, o job é
-     * cancelado e o vídeo fica exatamente onde parou; a barrinha mostra a
-     * posição real que o `<video>` reporta.
-     */
-    fun startSeek(dir: Int) {
-        seekJob?.cancel()
-        seekBy(dir * 10.0)
-        seekJob = scope.launch {
-            delay(600)
-            for (s in listOf(30.0, 60.0, 120.0, 180.0, 240.0)) {
-                seekBy(dir * s)
-                delay(500)
-            }
-            while (isActive) {
-                seekBy(dir * 240.0)
-                delay(500)
-            }
+    fun doSeekDown(dir: Int, repeatCount: Int) {
+        if (seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())) {
+            hint = seek.stepLabel()
         }
     }
 
-    fun stopSeek() {
-        seekJob?.cancel()
-        seekJob = null
+    fun doSeekUp() {
+        if (seek.onKeyUp(SystemClock.uptimeMillis())) hint = seek.stepLabel()
     }
 
-    fun changeVolume(delta: Double) {
-        val v = (volume + delta).coerceIn(0.0, 1.0)
-        volume = v
-        js("vol", v)
-        hint = "🔊 ${(v * 100).toInt()}%"
+    // Relógio do controle: aceleração progressiva + watchdog de soltura.
+    LaunchedEffect(Unit) {
+        while (true) {
+            seek.tick(SystemClock.uptimeMillis())
+            delay(50)
+        }
     }
 
     LaunchedEffect(hint) {
@@ -491,7 +618,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
 
     DisposableEffect(Unit) {
         onDispose {
-            seekJob?.cancel()
+            seek.cancel()
             webView?.let {
                 it.loadUrl("about:blank")
                 it.destroy()
@@ -531,11 +658,14 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                                 val o = JSONObject(msg)
                                 when (o.optString("type")) {
                                     "state" -> {
-                                        playing = o.optBoolean("playing", false)
-                                        position = o.optDouble("t", 0.0)
-                                        duration = o.optDouble("d", 0.0)
-                                        volume = o.optDouble("vol", 1.0)
+                                        val p = o.optBoolean("playing", false)
+                                        playingState.value = p
+                                        positionState.value = o.optDouble("t", 0.0)
+                                        durationState.value = o.optDouble("d", 0.0)
+                                        volumeState.value = o.optDouble("vol", 1.0)
                                         hasVideo = o.optBoolean("ready", false)
+                                        toggle.onState(p)
+                                        volume.sync(volumeState.value)
                                     }
                                     "novideo" -> hasVideo = false
                                 }
@@ -606,51 +736,56 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                     // O WebView consome as teclas antes do Compose; o listener
                     // aqui é o único ponto que vê o D-pad primeiro.
                     setOnKeyListener { _, keyCode, event ->
-                        if (event.action == KeyEvent.ACTION_DOWN) {
-                            when (keyCode) {
+                        when (event.action) {
+                            KeyEvent.ACTION_DOWN -> when (keyCode) {
                                 KeyEvent.KEYCODE_DPAD_CENTER,
                                 KeyEvent.KEYCODE_ENTER,
                                 KeyEvent.KEYCODE_NUMPAD_ENTER,
-                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                                    if (event.repeatCount == 0) toggle()
-                                    true
+                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                                KeyEvent.KEYCODE_MEDIA_PLAY,
+                                KeyEvent.KEYCODE_MEDIA_PAUSE,
+                                -> {
+                                    doToggle(); true
                                 }
                                 KeyEvent.KEYCODE_DPAD_RIGHT,
-                                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                                    if (event.repeatCount == 0) startSeek(1)
-                                    true
+                                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                                -> {
+                                    doSeekDown(1, event.repeatCount); true
                                 }
                                 KeyEvent.KEYCODE_DPAD_LEFT,
-                                KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                                    if (event.repeatCount == 0) startSeek(-1)
-                                    true
+                                KeyEvent.KEYCODE_MEDIA_REWIND,
+                                -> {
+                                    doSeekDown(-1, event.repeatCount); true
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
-                                    if (event.repeatCount == 0) changeVolume(0.1)
+                                    if (event.repeatCount == 0) {
+                                        volume.up(); hint = volume.label()
+                                    }
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                    if (event.repeatCount == 0) changeVolume(-0.1)
+                                    if (event.repeatCount == 0) {
+                                        volume.down(); hint = volume.label()
+                                    }
                                     true
                                 }
                                 KeyEvent.KEYCODE_BACK -> {
-                                    onBack()
-                                    true
+                                    onBack(); true
                                 }
                                 else -> false
                             }
-                        } else if (event.action == KeyEvent.ACTION_UP) {
-                            when (keyCode) {
+                            KeyEvent.ACTION_UP -> when (keyCode) {
                                 KeyEvent.KEYCODE_DPAD_RIGHT,
                                 KeyEvent.KEYCODE_DPAD_LEFT,
                                 KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-                                KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                                    stopSeek()
-                                    true
+                                KeyEvent.KEYCODE_MEDIA_REWIND,
+                                -> {
+                                    doSeekUp(); true
                                 }
                                 else -> false
                             }
-                        } else false
+                            else -> false
+                        }
                     }
 
                     webView = this
@@ -703,16 +838,16 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         }
 
         TvPlayerOverlay(
-            playing = playing,
-            position = position,
-            duration = duration,
-            volume = volume,
+            playing = playingState.value,
+            position = positionState.value,
+            duration = durationState.value,
+            volume = volumeState.value,
             hint = hint,
         )
     }
 }
 
-// ─────────────────────────────── overlay ───────────────────────────────
+// ───────────────────────────────── overlay ─────────────────────────────────
 
 /**
  * Barrinha de progresso + indicador de estado.

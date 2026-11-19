@@ -163,12 +163,30 @@ fun TvPosterCard(
                     },
                 ),
         ) {
-            AsyncImage(
-                model = title.posterUrl,
-                contentDescription = title.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+            // Fundo com o título: se a capa faltar (ou a URL falhar), o card
+            // mostra o nome do título em vez de um retângulo cinza vazio. Era o
+            // que o usuário via no Histórico/Favoritos da TV.
+            Text(
+                title.title,
+                color = MfColors.TextMuted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = MfSans,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 12.dp),
             )
+
+            if (title.posterUrl.isNotBlank()) {
+                AsyncImage(
+                    model = title.posterUrl,
+                    contentDescription = title.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
 
             // Selo de qualidade — o .card-badge do site.
             if (title.quality.isNotBlank()) {

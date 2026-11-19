@@ -3,6 +3,9 @@ package run.velixir.movieflix.tv.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -89,6 +92,31 @@ class MovieFlixApi(
     }
 
     suspend fun genres(): GenresResponse = json.decodeFromString(get("/api/catalog/genres"))
+
+    /**
+     * Resolve a CAPA de vários títulos de uma vez, por `tmdb_id`.
+     *
+     * É o que faz Histórico e Favoritos mostrarem imagem na TV. A tabela
+     * `favorites` não tem `poster_url` e `watch_history` pode ter linhas antigas
+     * sem ela, então a capa vem do catálogo — mas por uma rota de índice
+     * (`/api/catalog/posters`), não varrendo 26 mil títulos em páginas de 200.
+     *
+     * Devolve `tmdb_id → url` só para os ids que têm capa.
+     */
+    suspend fun posters(ids: List<Long>): Map<Long, String> {
+        val clean = ids.filter { it > 0 }.distinct().take(200)
+        if (clean.isEmpty()) return emptyMap()
+        val q = clean.joinToString(",")
+        val raw = get("/api/catalog/posters?ids=$q")
+        val obj = json.parseToJsonElement(raw).jsonObject["posters"]?.jsonObject ?: return emptyMap()
+        val out = mutableMapOf<Long, String>()
+        for ((k, v) in obj) {
+            val id = k.toLongOrNull() ?: continue
+            val url = v.jsonPrimitive.contentOrNull ?: continue
+            if (url.startsWith("http")) out[id] = url
+        }
+        return out
+    }
 
     suspend fun seasons(tmdbId: Long): SeasonsResponse =
         json.decodeFromString(get("/api/db/series/$tmdbId/episodes"))

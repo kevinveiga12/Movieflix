@@ -188,35 +188,30 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
      * a enviava — linhas antigas ficam com string vazia. O site resolve a capa
      * pelo catálogo (`getById`), e é o que fazemos aqui.
      *
-     * A busca é feita em páginas de 200 (o máximo que a API de catálogo aceita)
-     * até cobrir o `total`, e o resultado é guardado em [posterIndex] para não
-     * repetir a varredura a cada visita à tela.
+     * ── O que estava errado antes ────────────────────────────────────────────
+     *
+     * A versão anterior varria o catálogo em páginas de 200 (`api.movies` +
+     * `api.series`) até achar os ids, com um teto de 2.000 itens. O catálogo
+     * tem 18.003 filmes e 8.088 séries: o laço nunca chegava nos títulos do
+     * usuário, então a maioria das capas continuava vazia e o card aparecia
+     * cinza. Além disso eram dezenas de requisições por visita à tela.
+     *
+     * Agora é UMA requisição para até 200 ids (`/api/catalog/posters`), que
+     * resolve por índice no servidor. O resultado fica em [posterIndex] para
+     * não repetir a chamada a cada visita.
      */
     private suspend fun resolvePosters() {
         val need = (_state.value.favorites.map { it.tmdbId } +
             _state.value.history.map { it.tmdbId })
             .filter { it > 0 && posterIndex[it] == null }
-            .toSet()
-        if (need.isEmpty()) {
-            applyPosters()
-            return
-        }
+            .distinct()
 
-        runCatching {
-            var offset = 0
-            var total = Int.MAX_VALUE
-            while (offset < total && offset < 2000) {
-                val movies = api.movies(limit = 200, offset = offset)
-                val series = api.series(limit = 200, offset = offset)
-                total = maxOf(movies.total, series.total)
-                for (t in movies.items + series.items) {
-                    if (t.tmdbId > 0 && t.posterUrl.isNotBlank()) {
-                        posterIndex[t.tmdbId] = t.posterUrl
-                    }
-                }
-                if (movies.items.isEmpty() && series.items.isEmpty()) break
-                offset += 200
-                if (need.all { posterIndex[it] != null }) break
+        if (need.isNotEmpty()) {
+            // Em lotes de 200 (o limite da rota), para o caso de um histórico
+            // muito grande. Normalmente é uma chamada só.
+            for (chunk in need.chunked(200)) {
+                val found = runCatching { api.posters(chunk) }.getOrDefault(emptyMap())
+                posterIndex.putAll(found)
             }
         }
 
