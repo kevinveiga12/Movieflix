@@ -62,6 +62,25 @@ object TvPlayerTiming {
 
     /** Janela de debounce do OK, para o auto-repeat do controle não piscar. */
     const val TOGGLE_DEBOUNCE_MS: Long = 250L
+
+    /**
+     * Depois de mandar OK, quanto tempo esperar antes de concluir que o player
+     * não obedeceu. É o que transforma "precisa apertar várias vezes" em
+     * "um toque só": se o estado não mudou neste tempo, o app reenvia o comando
+     * (play ou pause EXPLÍCITO, não um novo toggle).
+     */
+    const val TOGGLE_CONFIRM_MS: Long = 400L
+
+    /** Quantas vezes o comando é (re)enviado no mesmo toque. 3 = ~1,2 s. */
+    const val TOGGLE_MAX_ATTEMPTS: Int = 3
+
+    /**
+     * Tempo sem interação até os controles sumirem da tela.
+     *
+     * O usuário pediu 3 segundos: na TV a barra parada na frente do filme
+     * incomoda. Qualquer tecla do controle a traz de volta.
+     */
+    const val UI_HIDE_MS: Long = 3_000L
 }
 
 /**
@@ -301,6 +320,8 @@ class VolumeController(
  */
 class PlayPauseController(
     private val debounceMs: Long = TvPlayerTiming.TOGGLE_DEBOUNCE_MS,
+    private val confirmMs: Long = TvPlayerTiming.TOGGLE_CONFIRM_MS,
+    private val maxAttempts: Int = TvPlayerTiming.TOGGLE_MAX_ATTEMPTS,
 ) {
     /** Último estado REAL reportado pelo player. */
     var playing: Boolean = false
@@ -309,22 +330,103 @@ class PlayPauseController(
     /** Null = nenhum toque ainda (ver a nota sobre `Long.MIN_VALUE` acima). */
     private var lastToggleAt: Long? = null
 
+    /**
+     * Estado que o player DEVE assumir depois do toque (`null` = nada pendente).
+     *
+     * Guardar o alvo, e não "mais um toggle", é o que permite reenviar sem
+     * risco: se o primeiro comando funcionou mas o estado demorou a chegar,
+     * reenviar o mesmo alvo (play/pause) não inverte de novo o vídeo.
+     */
+    private var expected: Boolean? = null
+    private var lastSentAt: Long = 0L
+    private var attempts: Int = 0
+
     /** @return true se o comando deve ser enviado ao player. */
     fun onKey(now: Long): Boolean {
         val since = lastToggleAt?.let { now - it }
         if (since != null && since < debounceMs) return false
         lastToggleAt = now
+        expected = !playing
+        lastSentAt = now
+        attempts = 1
         return true
     }
 
     /** O player reportou o estado real. */
     fun onState(isPlaying: Boolean) {
         playing = isPlaying
+        if (expected != null && isPlaying == expected) {
+            expected = null
+            attempts = 0
+        }
     }
+
+    /**
+     * O toque ainda não surtiu efeito e já passou o tempo de confirmação.
+     *
+     * @return o comando EXPLÍCITO a reenviar (`true` = play, `false` = pause),
+     *         ou `null` se não há nada a fazer.
+     */
+    fun retry(now: Long): Boolean? {
+        val want = expected ?: return null
+        if (attempts >= maxAttempts) {
+            expected = null
+            return null
+        }
+        if (now - lastSentAt < confirmMs) return null
+        lastSentAt = now
+        attempts++
+        return want
+    }
+
+    /** Há um comando aguardando confirmação. */
+    val pending: Boolean get() = expected != null
 
     /**
      * Dica a mostrar AGORA, antes de o player confirmar: o resultado esperado
      * do toggle é o inverso do estado atual.
      */
     fun hint(): String = if (playing) "⏸ Pausado" else "▶ Reproduzindo"
+}
+
+/**
+ * Visibilidade dos controles na tela, com auto-hide.
+ *
+ * Puro (só números), pelo mesmo motivo do [SeekController]: dá para testar em
+ * JVM o que antes dependia de olhar a TV. A tela chama [poke] em toda tecla e
+ * [tick] no laço de 50 ms do player.
+ */
+class UiVisibility(
+    private val hideAfterMs: Long = TvPlayerTiming.UI_HIDE_MS,
+) {
+    var visible: Boolean = true
+        private set
+
+    /**
+     * Instante da última interação.
+     *
+     * `null` = nenhuma ainda. NÃO usar 0 como sentinela: `uptimeMillis()` na TV
+     * já está em milhares de milissegundos no primeiro tick, então a barra
+     * nasceria escondida (some antes de o usuário ver). O primeiro [tick]
+     * apenas marca o início da contagem.
+     */
+    private var lastInteractionAt: Long? = null
+
+    /** Houve interação: mostra e reinicia o relógio. */
+    fun poke(now: Long) {
+        visible = true
+        lastInteractionAt = now
+    }
+
+    /** Esconde quando o tempo sem interação passa do limite. */
+    fun tick(now: Long) {
+        val since = lastInteractionAt
+        if (since == null) {
+            // Primeira volta do laço: começa a contar daqui.
+            lastInteractionAt = now
+            visible = true
+            return
+        }
+        if (visible && now - since >= hideAfterMs) visible = false
+    }
 }

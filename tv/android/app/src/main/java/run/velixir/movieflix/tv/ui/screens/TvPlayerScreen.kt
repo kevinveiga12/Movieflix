@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.nativeKeyEvent
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +57,7 @@ import run.velixir.movieflix.tv.TvViewModel
 import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.player.PlayPauseController
 import run.velixir.movieflix.tv.player.SeekController
+import run.velixir.movieflix.tv.player.UiVisibility
 import run.velixir.movieflix.tv.player.VolumeController
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MfSans
@@ -205,6 +205,9 @@ private fun TvDirectPlayer(
     var hint by remember { mutableStateOf<String?>(null) }
     /** O usuário pausou de propósito: a retentativa de autoplay não deve brigar. */
     var userPaused by remember { mutableStateOf(false) }
+    /** Controles na tela — somem 3 s depois da última tecla. */
+    val ui = remember { UiVisibility() }
+    var controlsVisible by remember { mutableStateOf(true) }
 
     val seek = remember {
         SeekController(
@@ -257,7 +260,13 @@ private fun TvDirectPlayer(
     // solta a tecla quando o aparelho não manda ACTION_UP.
     LaunchedEffect(Unit) {
         while (true) {
-            seek.tick(SystemClock.uptimeMillis())
+            val now = SystemClock.uptimeMillis()
+            seek.tick(now)
+            // OK sem efeito → reenvia play/pause EXPLÍCITO (um toque basta).
+            toggle.retry(now)
+            // Auto-hide: sem tecla há 3 s, some com os controles.
+            ui.tick(now)
+            controlsVisible = ui.visible
             delay(50)
         }
     }
@@ -286,8 +295,14 @@ private fun TvDirectPlayer(
         }
     }
 
-    fun doToggle() {
+    fun doToggle(repeatCount: Int) {
+        // Auto-repeat do controle: só o PRIMEIRO evento (repeatCount 0) conta.
+        // Antes, o auto-repeat gerava dois toggles no mesmo toque e o vídeo
+        // voltava ao estado anterior — era isso que exigia apertar OK várias
+        // vezes para conseguir pausar.
+        if (repeatCount > 0) return
         if (!toggle.onKey(SystemClock.uptimeMillis())) return
+        ui.poke(SystemClock.uptimeMillis())
         hint = toggle.hint()
         if (player.isPlaying) {
             userPaused = true
@@ -299,6 +314,7 @@ private fun TvDirectPlayer(
     }
 
     fun doSeekDown(dir: Int, repeatCount: Int) {
+        ui.poke(SystemClock.uptimeMillis())
         if (seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())) {
             hint = seek.stepLabel()
         }
@@ -320,7 +336,7 @@ private fun TvDirectPlayer(
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
                         Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
                         -> {
-                            doToggle(); true
+                            doToggle(native.repeatCount); true
                         }
                         Key.DirectionLeft, Key.MediaRewind -> {
                             doSeekDown(-1, native.repeatCount); true
@@ -329,12 +345,14 @@ private fun TvDirectPlayer(
                             doSeekDown(1, native.repeatCount); true
                         }
                         Key.DirectionUp -> {
+                            ui.poke(SystemClock.uptimeMillis())
                             if (native.repeatCount == 0) {
                                 volume.up(); hint = volume.label()
                             }
                             true
                         }
                         Key.DirectionDown -> {
+                            ui.poke(SystemClock.uptimeMillis())
                             if (native.repeatCount == 0) {
                                 volume.down(); hint = volume.label()
                             }
@@ -375,6 +393,10 @@ private fun TvDirectPlayer(
             duration = durationState.value,
             volume = volumeState.value,
             hint = hint,
+            visible = controlsVisible,
+            // Modo DIRETO: não há player de terceiro, então esta é a única
+            // barra da tela.
+            showBar = true,
         )
     }
 }
@@ -558,6 +580,9 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     var hint by remember { mutableStateOf<String?>(null) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
     var legacyBridge by remember { mutableStateOf(false) }
+    /** Controles na tela — somem 3 s depois da última tecla. */
+    val ui = remember { UiVisibility() }
+    var controlsVisible by remember { mutableStateOf(true) }
 
     val seek = remember {
         SeekController(
@@ -586,13 +611,19 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         webView?.evaluateJavascript("window.__mfCmd && window.__mfCmd('$cmd'$a)", null)
     }
 
-    fun doToggle() {
+    fun doToggle(repeatCount: Int) {
+        // Um toque = um toggle. O auto-repeat do controle (repeatCount > 0) é
+        // ignorado: era ele que disparava dois comandos e deixava o vídeo no
+        // mesmo estado, obrigando a apertar OK várias vezes.
+        if (repeatCount > 0) return
         if (!toggle.onKey(SystemClock.uptimeMillis())) return
+        ui.poke(SystemClock.uptimeMillis())
         hint = toggle.hint()
         js("toggle")
     }
 
     fun doSeekDown(dir: Int, repeatCount: Int) {
+        ui.poke(SystemClock.uptimeMillis())
         if (seek.onKeyDown(dir, repeatCount, SystemClock.uptimeMillis())) {
             hint = seek.stepLabel()
         }
@@ -602,10 +633,18 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         if (seek.onKeyUp(SystemClock.uptimeMillis())) hint = seek.stepLabel()
     }
 
-    // Relógio do controle: aceleração progressiva + watchdog de soltura.
+    // Relógio do controle: aceleração progressiva + watchdog de soltura +
+    // reenvio do OK se o player não obedeceu + auto-hide dos controles.
     LaunchedEffect(Unit) {
         while (true) {
-            seek.tick(SystemClock.uptimeMillis())
+            val now = SystemClock.uptimeMillis()
+            seek.tick(now)
+            // O player do provedor às vezes ignora o primeiro toggle (iframe
+            // ainda montando). Se o estado não mudou, manda play/pause
+            // EXPLÍCITO — nunca outro toggle, para não desfazer o que deu certo.
+            toggle.retry(now)?.let { want -> js(if (want) "play" else "pause") }
+            ui.tick(now)
+            controlsVisible = ui.visible
             delay(50)
         }
     }
@@ -746,7 +785,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                                 KeyEvent.KEYCODE_MEDIA_PLAY,
                                 KeyEvent.KEYCODE_MEDIA_PAUSE,
                                 -> {
-                                    doToggle(); true
+                                    doToggle(event.repeatCount); true
                                 }
                                 KeyEvent.KEYCODE_DPAD_RIGHT,
                                 KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
@@ -759,12 +798,14 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                                     doSeekDown(-1, event.repeatCount); true
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
+                                    ui.poke(SystemClock.uptimeMillis())
                                     if (event.repeatCount == 0) {
                                         volume.up(); hint = volume.label()
                                     }
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    ui.poke(SystemClock.uptimeMillis())
                                     if (event.repeatCount == 0) {
                                         volume.down(); hint = volume.label()
                                     }
@@ -844,6 +885,12 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             duration = durationState.value,
             volume = volumeState.value,
             hint = hint,
+            visible = controlsVisible,
+            // Modo EMBED: o player do provedor (iframe de outro domínio) já
+            // desenha a barra dele. Desenhar a nossa junto era a origem das
+            // DUAS barras sobrepostas na TV, então aqui só aparecem as dicas
+            // de comando (±10s, volume) — uma única barra na tela.
+            showBar = false,
         )
     }
 }
@@ -864,11 +911,16 @@ private fun TvPlayerOverlay(
     duration: Double,
     volume: Double,
     hint: String?,
+    visible: Boolean,
+    /** Desenha a barra própria da MovieFlix. `false` no modo embed. */
+    showBar: Boolean,
 ) {
     val pct = if (duration > 0) (position / duration).coerceIn(0.0, 1.0) else 0.0
 
     Box(Modifier.fillMaxSize()) {
         // Dica de comando (⏩ +10s, 🔊 70%, ⏸ Pausado…)
+        // A dica aparece SEMPRE, mesmo com os controles escondidos: é a única
+        // confirmação visual de que a tecla do controle foi entendida.
         if (hint != null) {
             Text(
                 hint,
@@ -883,81 +935,85 @@ private fun TvPlayerOverlay(
             )
         }
 
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color(0xE6000000)),
-                    ),
-                )
-                .padding(horizontal = 48.dp, vertical = 26.dp),
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+        // Barra de controles: some 3 s depois da última tecla (o usuário pediu
+        // para ficar só o filme na tela) e volta em qualquer tecla.
+        if (showBar && visible) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color(0xE6000000)),
+                        ),
+                    )
+                    .padding(horizontal = 48.dp, vertical = 26.dp),
             ) {
-                Text(
-                    if (playing) "⏸" else "▶",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                )
-                Text(
-                    formatClock(position),
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontFamily = MfSans,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "/",
-                    color = MfColors.TextDim,
-                    fontSize = 15.sp,
-                )
-                Text(
-                    if (duration > 0) formatClock(duration) else "—",
-                    color = MfColors.TextMuted,
-                    fontSize = 15.sp,
-                    fontFamily = MfSans,
-                )
-
-                Spacer(Modifier.width(6.dp))
-
-                // Trilha
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(6.dp)
-                        .background(Color(0x33FFFFFF), RoundedCornerShape(3.dp)),
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
+                    Text(
+                        if (playing) "⏸" else "▶",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                    )
+                    Text(
+                        formatClock(position),
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontFamily = MfSans,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "/",
+                        color = MfColors.TextDim,
+                        fontSize = 15.sp,
+                    )
+                    Text(
+                        if (duration > 0) formatClock(duration) else "—",
+                        color = MfColors.TextMuted,
+                        fontSize = 15.sp,
+                        fontFamily = MfSans,
+                    )
+
+                    Spacer(Modifier.width(6.dp))
+
+                    // Trilha
                     Box(
                         Modifier
-                            .fillMaxWidth(pct.toFloat())
+                            .weight(1f)
                             .height(6.dp)
-                            .background(MfColors.Red, RoundedCornerShape(3.dp)),
+                            .background(Color(0x33FFFFFF), RoundedCornerShape(3.dp)),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(pct.toFloat())
+                                .height(6.dp)
+                                .background(MfColors.Red, RoundedCornerShape(3.dp)),
+                        )
+                    }
+
+                    Spacer(Modifier.width(6.dp))
+
+                    Text(
+                        "🔊 ${(volume * 100).toInt()}%",
+                        color = MfColors.TextMuted,
+                        fontSize = 14.sp,
+                        fontFamily = MfSans,
                     )
                 }
 
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.height(8.dp))
 
                 Text(
-                    "🔊 ${(volume * 100).toInt()}%",
-                    color = MfColors.TextMuted,
-                    fontSize = 14.sp,
+                    "OK play/pause · ← → 10s (segure para acelerar) · ↑ ↓ volume",
+                    color = MfColors.TextDim,
+                    fontSize = 12.sp,
                     fontFamily = MfSans,
                 )
             }
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                "OK play/pause · ← → 10s (segure para acelerar) · ↑ ↓ volume",
-                color = MfColors.TextDim,
-                fontSize = 12.sp,
-                fontFamily = MfSans,
-            )
         }
     }
 }

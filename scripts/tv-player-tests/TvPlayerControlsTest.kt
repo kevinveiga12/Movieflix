@@ -283,6 +283,71 @@ private fun testLabels() {
     check("retroceder mostra sinal negativo", s2.stepLabel().startsWith("−"), s2.stepLabel())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. OK de primeira: reenvio quando o player ignora o primeiro comando
+// ─────────────────────────────────────────────────────────────────────────────
+private fun testToggleRetry() {
+    println("\n[10] OK de primeira — reenvio quando o player não obedece")
+    val c = PlayPauseController(debounceMs = 250, confirmMs = 400, maxAttempts = 3)
+    c.onState(false) // entra pausado
+
+    check("1º OK pede comando", c.onKey(0))
+    check("alvo é play", c.pending)
+
+    // O player NÃO reportou nada: passou o tempo de confirmação.
+    check("nada antes de 400 ms", c.retry(300) == null)
+    check("reenvia PLAY explícito em 400 ms", c.retry(400) == true)
+    check("reenvia PLAY de novo em 800 ms", c.retry(800) == true)
+    check("para depois de 3 tentativas", c.retry(1200) == null)
+    check("nada mais pendente", !c.pending)
+
+    // Se o player obedeceu, não reenvia nada.
+    val c2 = PlayPauseController(debounceMs = 250, confirmMs = 400, maxAttempts = 3)
+    c2.onState(false)
+    c2.onKey(0)
+    c2.onState(true) // obedeceu
+    check("sem reenvio quando o player obedeceu", c2.retry(1000) == null)
+    check("estado real atualizado", c2.playing)
+
+    // Reenvio é EXPLÍCITO: pausar de novo não vira play.
+    val c3 = PlayPauseController(debounceMs = 250, confirmMs = 400, maxAttempts = 3)
+    c3.onState(true)
+    c3.onKey(0)
+    check("alvo é pause", c3.retry(400) == false)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. Auto-hide dos controles em 3 s
+// ─────────────────────────────────────────────────────────────────────────────
+private fun testUiAutoHide() {
+    println("\n[11] Controles somem 3 s depois da última tecla")
+    val u = UiVisibility(hideAfterMs = 3_000)
+
+    // Primeiro tick só começa a contar — a barra nasce visível.
+    u.tick(50_000)
+    check("nasce visível", u.visible)
+
+    u.tick(52_000)
+    check("ainda visível em 2 s", u.visible)
+
+    u.tick(53_000)
+    check("some em 3 s", !u.visible)
+
+    // Qualquer tecla traz de volta.
+    u.poke(60_000)
+    check("tecla traz de volta", u.visible)
+    u.tick(62_000)
+    check("continua visível 2 s depois da tecla", u.visible)
+    u.tick(63_000)
+    check("some de novo 3 s depois da tecla", !u.visible)
+
+    // Tecla repetida mantém na tela.
+    u.poke(70_000)
+    u.poke(71_500)
+    u.tick(73_000)
+    check("tecla repetida reinicia a contagem", u.visible)
+}
+
 fun main() {
     println("MovieFlix TV — testes do controle remoto do player")
     println("=".repeat(60))
@@ -295,6 +360,8 @@ fun main() {
     testVolume()
     testPlayPause()
     testLabels()
+    testToggleRetry()
+    testUiAutoHide()
     println("\n" + "=".repeat(60))
     println("$checks verificações, $failures falha(s)")
     if (failures > 0) {

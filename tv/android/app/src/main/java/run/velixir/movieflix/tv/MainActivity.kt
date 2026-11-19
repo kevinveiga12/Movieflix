@@ -93,6 +93,14 @@ sealed interface TvRoute {
 fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, intentUrl: String? = null) {
     var route by remember { mutableStateOf<TvRoute>(TvRoute.Home) }
     val s by vm.state.collectAsState()
+    /**
+     * Tela do título de onde a pessoa tentou assistir sem estar logada.
+     *
+     * Depois do login, ela volta para cá em vez de cair no menu de conta — é o
+     * que faz o fluxo "sem login → login → assistir" não perder o filme que a
+     * pessoa tinha escolhido.
+     */
+    var afterLogin by remember { mutableStateOf<TvRoute?>(null) }
 
     // Rota inicial vinda do intent (captura no CI).
     LaunchedEffect(initialRoute, s.movies.isNotEmpty()) {
@@ -130,10 +138,28 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
             },
     ) {
         when (val r = route) {
-            is TvRoute.Player -> TvPlayerScreen(
-                vm, r.title, r.season, r.episode,
-                onBack = { route = TvRoute.Detail(r.title) },
-            )
+            is TvRoute.Player -> {
+                /*
+                  Sem login não existe player.
+
+                  Antes, tentar assistir sem conta abria a tela do player e só
+                  depois mostrava "Entre na sua conta para assistir", sem levar a
+                  lugar nenhum. Agora cai direto no login, que é exatamente o que o
+                  usuário pediu. Depois de entrar, onDone devolve a pessoa à tela
+                  do título de onde ela veio (não a um menu qualquer).
+                */
+                if (!s.loggedIn) {
+                    LaunchedEffect(r.title.tmdbId) {
+                        afterLogin = TvRoute.Detail(r.title)
+                        route = TvRoute.Login
+                    }
+                } else {
+                    TvPlayerScreen(
+                        vm, r.title, r.season, r.episode,
+                        onBack = { route = TvRoute.Detail(r.title) },
+                    )
+                }
+            }
 
             is TvRoute.EmbedDiag -> Box(Modifier.fillMaxSize()) {
                 TvEmbedPlayer(r.url, onBack = { route = TvRoute.Home })
@@ -188,10 +214,24 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
                         TvRoute.Profiles -> TvProfilesScreen(vm) { route = TvRoute.Login }
                         TvRoute.Settings -> TvSettingsScreen(vm)
                         TvRoute.Admin -> TvAdminScreen(vm)
-                        TvRoute.Login -> TvLoginScreen(vm) { route = TvRoute.Account }
+                        TvRoute.Login -> TvLoginScreen(vm) {
+                            // Volta para o título de onde veio, quando houve
+                            // tentativa de assistir sem sessão.
+                            route = afterLogin ?: TvRoute.Account
+                            afterLogin = null
+                        }
                         is TvRoute.Detail -> TvDetailScreen(
                             vm, r.title,
-                            onPlay = { season, episode -> route = TvRoute.Player(r.title, season, episode) },
+                            onPlay = { season, episode ->
+                                if (s.loggedIn) {
+                                    route = TvRoute.Player(r.title, season, episode)
+                                } else {
+                                    // Sem sessão o botão "Assistir" leva ao login,
+                                    // e não ao player.
+                                    afterLogin = TvRoute.Detail(r.title)
+                                    route = TvRoute.Login
+                                }
+                            },
                             onBack = { route = TvRoute.Home },
                         )
                         else -> {}

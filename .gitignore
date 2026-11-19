@@ -17,3 +17,10 @@ server/data/admin-config.json
 __pycache__/
 *.pyc
 docs/apps-evidencias/
+
+# Android/Gradle build (gerado localmente, nunca versionar)
+tv/android/.gradle/
+tv/android/app/build/
+tv/android/build/
+tv/android/local.properties
+.velixir.json

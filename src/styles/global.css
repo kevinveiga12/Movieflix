@@ -1218,6 +1218,45 @@ h4 {
   pointer-events: auto;
 }
 
+/*
+  Variante do overlay usada no modo EMBED.
+
+  O iframe do provedor desenha a própria barra de controles; qualquer barra
+  nossa por cima do rodapé aparecia como uma SEGUNDA barra sobre a dele (foi o
+  que o usuário viu na TV: duas barras e dois botões de pause). Aqui o overlay
+  deixa de ser uma faixa de tela inteira e vira só um punhado de botões
+  flutuantes no canto de cima, que não disputam espaço com o player.
+*/
+.player-overlay--minimal {
+  background: none;
+  justify-content: flex-start;
+}
+
+.player-overlay--minimal .player-top {
+  background: rgba(0, 0, 0, 0.72);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  padding: 6px 10px;
+  gap: 8px;
+  /* Fica encostado à esquerda, longe dos controles do provedor. */
+  align-self: flex-start;
+  margin: clamp(10px, 1.6vw, 20px);
+  width: auto;
+  max-width: min(92%, 640px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/*
+  No modo embed a faixa de baixo nem existe no DOM, mas garantimos aqui.
+  E o bloco de título também sai: na TV ele só ocupava a largura toda e
+  empurrava os botões, deixando a pílula enorme por cima do vídeo.
+*/
+.player-overlay--minimal .player-bottom,
+.player-overlay--minimal .player-top-info {
+  display: none;
+}
+
 .player-top {
   display: flex;
   align-items: center;

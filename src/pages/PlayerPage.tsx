@@ -48,6 +48,14 @@ const SAVE_INTERVAL = 15_000
  */
 const EMBED_TICK_MS = 1_000
 
+/**
+ * Tempo sem interação até os controles sumirem.
+ *
+ * O usuário pediu 3 segundos: na TV, o controle remoto fica parado a maior
+ * parte do tempo e a barra na tela atrapalha o filme.
+ */
+const UI_HIDE_MS = 3_000
+
 export function PlayerPage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
@@ -86,6 +94,8 @@ export function PlayerPage() {
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
   const [showUi, setShowUi] = useState(true)
+  /** Incrementa a cada interação — reinicia o timer do auto-hide. */
+  const [uiPoke, setUiPoke] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [subsOn, setSubsOn] = useState(false)
@@ -354,14 +364,28 @@ export function PlayerPage() {
     }
   }, [])
 
-  // Auto-hide da UI
+  // Auto-hide da UI — 3 s sem interação, como o usuário pediu na TV.
+  // Qualquer tecla/clique/toque em `pokeUi()` reinicia a contagem.
   useEffect(() => {
     if (!showUi) return
-    const id = setTimeout(() => setShowUi(false), 4000)
+    const id = setTimeout(() => setShowUi(false), UI_HIDE_MS)
     return () => clearTimeout(id)
-  }, [showUi, current, playing])
+  }, [showUi, current, playing, uiPoke])
 
-  // Atalhos de teclado
+  /** Mostra os controles e reinicia o relógio do auto-hide. */
+  function pokeUi() {
+    setShowUi(true)
+    setUiPoke((n) => n + 1)
+  }
+
+  // Atalhos de teclado / controle remoto
+  //
+  // Na TV o botão OK do controle chega ao navegador como `Enter` (e alguns
+  // aparelhos mandam `MediaPlayPause`). Antes só `Espaço` e `k` alternavam, então
+  // o OK não fazia nada e o usuário precisava clicar na tela várias vezes.
+  //
+  // Regra do usuário: NADA de abrir ajustes/qualidade/legendas pelo controle.
+  // Só OK (play/pause), ← → (retroceder/avançar) e ↑ ↓ (volume).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const v = videoRef.current
@@ -369,26 +393,33 @@ export function PlayerPage() {
         navigate(-1)
         return
       }
+      // Qualquer tecla traz os controles de volta.
+      pokeUi()
       if (!v) return
       switch (e.key) {
         case ' ':
         case 'k':
+        case 'Enter':
+        case 'MediaPlayPause':
+        case 'MediaPlay':
+        case 'MediaPause':
           e.preventDefault()
           void togglePlay()
           break
         case 'ArrowRight':
+        case 'MediaFastForward':
           e.preventDefault()
           v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
-          setShowUi(true)
           break
         case 'ArrowLeft':
+        case 'MediaRewind':
           e.preventDefault()
           v.currentTime = Math.max(0, v.currentTime - 10)
-          setShowUi(true)
           break
         case 'ArrowUp':
           e.preventDefault()
           setVolume((x) => Math.min(1, x + 0.1))
+          setMuted(false)
           break
         case 'ArrowDown':
           e.preventDefault()
@@ -487,12 +518,14 @@ export function PlayerPage() {
     <div className="player-page" ref={wrapRef}>
       <div
         className="player-stage"
-        onMouseMove={() => setShowUi(true)}
+        onMouseMove={() => pokeUi()}
+        onTouchStart={() => pokeUi()}
         onClick={() => {
-          if (source?.mode === 'direct') {
-            setShowUi(true)
-            void togglePlay()
-          }
+          // No modo direto o clique/toque do controle é nosso: alterna play.
+          // No modo embed quem manda é o player do provedor (iframe de outro
+          // domínio) — aqui só reexibimos os controles, sem roubar o clique.
+          pokeUi()
+          if (source?.mode === 'direct') void togglePlay()
         }}
       >
         {source?.mode === 'direct' && (
@@ -585,7 +618,17 @@ export function PlayerPage() {
           </div>
         )}
 
-        <div className={`player-overlay ${showUi ? 'visible' : ''}`}>
+        {/*
+          No modo EMBED a sobreposição é MÍNIMA: só um punhado de botões
+          flutuantes no canto. O player do provedor (iframe) traz a barra dele —
+          desenhar a nossa por cima era a origem das duas barras sobrepostas
+          que o usuário viu na TV.
+        */}
+        <div
+          className={`player-overlay ${showUi ? 'visible' : ''} ${
+            source?.mode === 'embed' ? 'player-overlay--minimal' : ''
+          }`}
+        >
           <div className="player-top">
             <button className="player-btn" onClick={() => navigate(-1)} aria-label="Voltar">
               <ArrowLeft size={20} />
@@ -609,10 +652,51 @@ export function PlayerPage() {
                 <SubtitlesIcon size={20} />
               </button>
             )}
+
+            {/*
+              Modo EMBED: as ações da MovieFlix ficam no TOPO.
+
+              Antes elas viviam na barra de baixo, exatamente sobre a barra do
+              provedor — era isso que produzia duas barras e dois botões de
+              pause na tela da TV. O player do provedor já traz progresso,
+              volume e pause; aqui ficam só o que ele NÃO tem (próximo episódio
+              e tela cheia do MovieFlix), e o rodapé deixa de ser desenhado.
+            */}
+            {source?.mode === 'embed' && (
+              <>
+                {next && (
+                  <button
+                    className="player-btn"
+                    onClick={() =>
+                      navigate(
+                        `/assistir/${title?.tmdb_id}?type=tv&season=${next.season}&episode=${next.episode}`,
+                      )
+                    }
+                    aria-label="Próximo episódio"
+                    title="Próximo episódio"
+                  >
+                    <NextEpisodeIcon size={19} />
+                  </button>
+                )}
+                <button
+                  className="player-btn"
+                  onClick={() => void toggleFullscreen()}
+                  aria-label="Tela cheia"
+                  title="Tela cheia"
+                >
+                  <FullscreenIcon size={19} />
+                </button>
+              </>
+            )}
           </div>
 
-          <div className="player-bottom">
-            {source?.mode === 'direct' && (
+          {/*
+            Rodapé SÓ no modo direto (<video> nativo), onde os controles são
+            nossos. No modo embed ele não existe — ver comentário no fim do
+            bloco. É essa condição que remove a segunda barra da tela.
+          */}
+          {source?.mode === 'direct' && (
+            <div className="player-bottom">
               <>
                 <div
                   className="progress-track"
@@ -700,30 +784,8 @@ export function PlayerPage() {
                   </button>
                 </div>
               </>
-            )}
-
-            {source?.mode === 'embed' && (
-              <div className="inline" style={{ justifyContent: 'flex-end' }}>
-                <div className="inline">
-                  {next && (
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      onClick={() =>
-                        navigate(
-                          `/assistir/${title?.tmdb_id}?type=tv&season=${next.season}&episode=${next.episode}`,
-                        )
-                      }
-                    >
-                      <NextEpisodeIcon size={16} /> Próximo episódio
-                    </button>
-                  )}
-                  <button className="btn btn--ghost btn--sm" onClick={toggleFullscreen}>
-                    <FullscreenIcon size={16} /> Tela cheia
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
