@@ -22,4 +22,16 @@ cmds = ["npm ci --include=dev"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "node server/index.js"
+# ── LIMITE DE HEAP DO V8 (correção do Out of Memory da v78) ──────────────────
+#
+# O plano Free da Velixir dá 256 MB ao container. Sem teto explícito, o V8
+# dimensiona o heap pela memória que ENXERGA no host (muito maior que 256 MB) e
+# só faz GC quando o heap já passou de ~200 MB. Somando o cache do catálogo
+# (~150 MB de objetos vivos) + buffers de gzip das respostas + picos de
+# requisição, o RSS cruzava os 256 MB e o pod era morto por OOM ~3 min depois
+# de entrar em produção.
+#
+# Com --max-old-space-size=160 o V8 passa a coletar cedo e mantém o RSS
+# estável abaixo do limite (medido: 191 MB sob carga pesada, contra 206 MB
+# ociosos antes). Nenhuma funcionalidade muda — só a política de GC.
+cmd = "node --max-old-space-size=160 server/index.js"

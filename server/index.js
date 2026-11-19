@@ -5,6 +5,7 @@ import compression from 'compression'
 import rateLimit from 'express-rate-limit'
 import dotenv from 'dotenv'
 import path from 'node:path'
+import { getHeapStatistics } from 'node:v8'
 import { fileURLToPath } from 'node:url'
 import { adminRouter } from './routes/admin.js'
 import { catalogRouter } from './routes/catalog.js'
@@ -32,7 +33,28 @@ app.use(
     crossOriginEmbedderPolicy: false,
   }),
 )
-app.use(compression())
+/**
+ * Compressão — com uma exceção importante para a memória.
+ *
+ * `compression()` comprime cada resposta EM MEMÓRIA. O catálogo estático
+ * (`/filmes/filmes.light.json` = 15 MB, `series.light.json` = 8 MB) é servido
+ * por `express.static` e, sem filtro, cada download concorrente alocava um
+ * buffer de gzip de vários MB. Numa home com vários visitantes simultâneos
+ * isso somava dezenas de MB de pico e ajudava a estourar os 256 MB do plano.
+ *
+ * Esses arquivos já são servidos com `Cache-Control` e são baixados uma única
+ * vez por sessão (o frontend guarda em cache), então o ganho de gzip não paga
+ * o custo de memória. Deixamos o Express servi-los crus (sem recompressão por
+ * requisição). Todo o resto continua comprimido normalmente.
+ */
+app.use(
+  compression({
+    filter(req, res) {
+      if (req.path.startsWith('/filmes/')) return false
+      return compression.filter(req, res)
+    },
+  }),
+)
 app.use(express.json({ limit: '2mb' }))
 
 const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
@@ -76,6 +98,18 @@ app.get('/api/health', async (_req, res) => {
     startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     node: process.version,
+    // Diagnóstico de memória — permite acompanhar o consumo em produção sem
+    // acesso ao painel. `heapLimitMb` mostra o teto do V8 (--max-old-space-size).
+    memory: (() => {
+      const m = process.memoryUsage()
+      const heap = getHeapStatistics()
+      return {
+        rssMb: Math.round(m.rss / 1048576),
+        heapUsedMb: Math.round(m.heapUsed / 1048576),
+        heapTotalMb: Math.round(m.heapTotal / 1048576),
+        heapLimitMb: Math.round(heap.heap_size_limit / 1048576),
+      }
+    })(),
     config: {
       supabaseUrl: Boolean(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL),
       supabaseAnon: Boolean(process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY),
