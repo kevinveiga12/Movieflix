@@ -314,34 +314,36 @@ private fun testToggleRetry() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 11. Auto-hide dos controles em 3 s
+// 11. Auto-hide dos controles em 5 s
 // ─────────────────────────────────────────────────────────────────────────────
 private fun testUiAutoHide() {
-    println("\n[11] Controles somem 3 s depois da última tecla")
-    val u = UiVisibility(hideAfterMs = 3_000)
+    println("\n[11] Controles somem 5 s depois da última tecla")
+    // Usa a constante real do app: se alguém mudar o tempo, o teste acompanha.
+    check("constante UI_HIDE_MS = 5 s", TvPlayerTiming.UI_HIDE_MS == 5_000L, "${TvPlayerTiming.UI_HIDE_MS}")
+    val u = UiVisibility()
 
     // Primeiro tick só começa a contar — a barra nasce visível.
     u.tick(50_000)
     check("nasce visível", u.visible)
 
-    u.tick(52_000)
-    check("ainda visível em 2 s", u.visible)
+    u.tick(54_000)
+    check("ainda visível em 4 s", u.visible)
 
-    u.tick(53_000)
-    check("some em 3 s", !u.visible)
+    u.tick(55_000)
+    check("some em 5 s", !u.visible)
 
     // Qualquer tecla traz de volta.
     u.poke(60_000)
     check("tecla traz de volta", u.visible)
-    u.tick(62_000)
-    check("continua visível 2 s depois da tecla", u.visible)
-    u.tick(63_000)
-    check("some de novo 3 s depois da tecla", !u.visible)
+    u.tick(64_000)
+    check("continua visível 4 s depois da tecla", u.visible)
+    u.tick(65_000)
+    check("some de novo 5 s depois da tecla", !u.visible)
 
     // Tecla repetida mantém na tela.
     u.poke(70_000)
-    u.poke(71_500)
-    u.tick(73_000)
+    u.poke(73_500)
+    u.tick(75_000)
     check("tecla repetida reinicia a contagem", u.visible)
 }
 

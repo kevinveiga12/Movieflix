@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Title } from '../lib/types'
 import { backdropUrl } from '../lib/catalog'
+import { useAuth } from '../context/AuthContext'
 import { PlayIcon, InfoIcon, StarIcon } from './Icons'
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
 
 export function Hero({ items }: Props) {
   const [index, setIndex] = useState(0)
+  const { user } = useAuth()
 
   useEffect(() => {
     if (items.length <= 1) return
@@ -20,6 +22,11 @@ export function Hero({ items }: Props) {
   if (!items.length) return null
   const t = items[Math.min(index, items.length - 1)]
   const rating = t.vote_average ? t.vote_average.toFixed(1) : null
+  // Sem sessão, "Assistir agora" vai DIRETO ao login (com o destino guardado),
+  // sem passar pela tela intermediária do player. Com sessão, vai ao player.
+  const watchHref = `/assistir/${t.tmdb_id}?type=${t.type}`
+  const watchTo = user ? watchHref : '/login'
+  const watchState = user ? undefined : { from: watchHref }
 
   return (
     <section className="hero">
@@ -51,7 +58,7 @@ export function Hero({ items }: Props) {
         <p className="hero-desc">{t.description}</p>
 
         <div className="hero-actions">
-          <Link to={`/assistir/${t.tmdb_id}?type=${t.type}`} className="btn btn--primary btn--lg">
+          <Link to={watchTo} state={watchState} className="btn btn--primary btn--lg">
             <PlayIcon size={19} /> Assistir agora
           </Link>
           <Link to={`/titulo/${t.type}/${t.tmdb_id}`} className="btn btn--ghost btn--lg">

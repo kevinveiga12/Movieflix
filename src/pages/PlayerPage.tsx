@@ -41,10 +41,10 @@ const EMBED_TICK_MS = 1_000
 /**
  * Tempo sem interação até os controles sumirem.
  *
- * O usuário pediu 3 segundos: na TV, o controle remoto fica parado a maior
- * parte do tempo e a barra na tela atrapalha o filme.
+ * O usuário pediu 5 segundos: a barra aparece ao interagir e some depois
+ * disso, deixando só o vídeo. Qualquer tecla/clique/toque a traz de volta.
  */
-const UI_HIDE_MS = 3_000
+const UI_HIDE_MS = 5_000
 
 export function PlayerPage() {
   const { id } = useParams<{ id: string }>()

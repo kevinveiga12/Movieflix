@@ -509,11 +509,28 @@ const MAX_CODE_ATTEMPTS = 5
 
 /** e-mail -> { attempts, lastSentAt } — só para conter abuso; nunca guarda código. */
 const codeThrottle = new Map()
+/**
+ * Teto do mapa de throttle.
+ *
+ * Sem isto, um ataque com e-mails aleatórios faria o Map crescer sem limite e
+ * vazar memória no processo (o plano tem 256 MB). Ao encher, podamos as
+ * entradas expiradas e, se ainda estiver cheio, descartamos a mais antiga.
+ */
+const CODE_THROTTLE_CAP = 500
 
 function throttleFor(email) {
   const now = Date.now()
   let entry = codeThrottle.get(email)
   if (!entry || now - entry.lastSentAt > CODE_TTL_MINUTES * 60_000) {
+    if (codeThrottle.size >= CODE_THROTTLE_CAP) {
+      for (const [k, v] of codeThrottle) {
+        if (now - v.lastSentAt > CODE_TTL_MINUTES * 60_000) codeThrottle.delete(k)
+      }
+      if (codeThrottle.size >= CODE_THROTTLE_CAP) {
+        const oldest = codeThrottle.keys().next().value
+        if (oldest !== undefined) codeThrottle.delete(oldest)
+      }
+    }
     entry = { attempts: 0, lastSentAt: 0 }
     codeThrottle.set(email, entry)
   }

@@ -54,6 +54,7 @@ import run.velixir.movieflix.tv.TvViewModel
 import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.player.PlayPauseController
 import run.velixir.movieflix.tv.player.SeekController
+import run.velixir.movieflix.tv.player.UiVisibility
 import run.velixir.movieflix.tv.ui.theme.MfColors
 
 /**
@@ -197,6 +198,8 @@ private fun TvDirectPlayer(
         )
     }
     val toggle = remember { PlayPauseController() }
+    // Visibilidade da barra: aparece ao interagir, some após 5 s sem tecla.
+    val ui = remember { UiVisibility() }
 
     DisposableEffect(Unit) { onDispose { player.release() } }
 
@@ -233,6 +236,7 @@ private fun TvDirectPlayer(
         while (true) {
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
+            ui.tick(now)
             // OK sem efeito → reenvia play/pause EXPLÍCITO (um toque basta).
             toggle.retry(now)?.let { want ->
                 if (want) player.play() else player.pause()
@@ -289,6 +293,7 @@ private fun TvDirectPlayer(
             .focusable()
             .onKeyEvent { ev ->
                 val native = ev.nativeKeyEvent
+                ui.poke(SystemClock.uptimeMillis())
                 when (ev.type) {
                     KeyEventType.KeyDown -> when (ev.key) {
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
@@ -336,7 +341,7 @@ private fun TvDirectPlayer(
         )
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
-        TvProgressBar(position = positionState.value, duration = durationState.value)
+        TvProgressBar(position = positionState.value, duration = durationState.value, visible = ui.visible)
     }
 }
 
@@ -581,6 +586,8 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         )
     }
     val toggle = remember { PlayPauseController() }
+    // Visibilidade da barra: aparece ao interagir, some após 5 s sem tecla.
+    val ui = remember { UiVisibility() }
 
     fun js(cmd: String, arg: Double? = null) {
         val a = arg?.let { ",$it" } ?: ""
@@ -615,6 +622,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         while (true) {
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
+            ui.tick(now)
             // O player do provedor às vezes ignora o primeiro toggle (iframe
             // ainda montando). Se o estado não mudou, manda play/pause
             // EXPLÍCITO — nunca outro toggle, para não desfazer o que deu certo.
@@ -648,6 +656,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             .focusable()
             .onKeyEvent { ev ->
                 val native = ev.nativeKeyEvent
+                ui.poke(SystemClock.uptimeMillis())
                 when (ev.type) {
                     KeyEventType.KeyDown -> when (ev.key) {
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
@@ -883,7 +892,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         }
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
-        TvProgressBar(position = positionState.value, duration = durationState.value)
+        TvProgressBar(position = positionState.value, duration = durationState.value, visible = ui.visible)
     }
 }
 
@@ -902,27 +911,52 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
  * vazia em vez de inventar uma porcentagem.
  */
 @Composable
-private fun TvProgressBar(position: Double, duration: Double) {
+private fun TvProgressBar(position: Double, duration: Double, visible: Boolean) {
+    // Some por completo quando o usuário fica 5 s sem interagir: só o vídeo fica.
+    if (!visible) return
     val pct = if (duration > 0) (position / duration).coerceIn(0.0, 1.0) else 0.0
 
     Box(
         Modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(Color(0x33FFFFFF)),
+        Column(
+            Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // Tempo atual / duração total — os números vêm do player real.
+            Text(
+                "${formatClock(position)} / ${formatClock(duration)}",
+                color = Color(0xE6FFFFFF),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
             Box(
                 Modifier
-                    .fillMaxWidth(pct.toFloat())
-                    .fillMaxHeight()
-                    .background(MfColors.Red, RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp)),
-            )
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Color(0x33FFFFFF)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(pct.toFloat())
+                        .fillMaxHeight()
+                        .background(MfColors.Red, RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp)),
+                )
+            }
         }
     }
+}
+
+/** "1:23:45" ou "12:34" — tempo atual/duração mostrados na barra. */
+private fun formatClock(seconds: Double): String {
+    if (!seconds.isFinite() || seconds <= 0) return "0:00"
+    val total = seconds.toLong()
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val s = total % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 /** Hosts do provedor que podem navegar dentro do WebView. */

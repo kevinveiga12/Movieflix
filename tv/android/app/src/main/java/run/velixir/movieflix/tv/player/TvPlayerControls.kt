@@ -86,10 +86,10 @@ object TvPlayerTiming {
     /**
      * Tempo sem interação até os controles sumirem da tela.
      *
-     * O usuário pediu 3 segundos: na TV a barra parada na frente do filme
-     * incomoda. Qualquer tecla do controle a traz de volta.
+     * O usuário pediu 5 segundos: a barra aparece ao interagir e some depois
+     * disso, deixando só o vídeo. Qualquer tecla do controle a traz de volta.
      */
-    const val UI_HIDE_MS: Long = 3_000L
+    const val UI_HIDE_MS: Long = 5_000L
 }
 
 /**

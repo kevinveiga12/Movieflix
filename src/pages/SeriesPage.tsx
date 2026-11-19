@@ -21,6 +21,21 @@ export function SeriesPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
+  /**
+   * Destino de "Assistir".
+   *
+   * Sem sessão vai DIRETO ao login, com o destino em `state.from` — o login
+   * devolve a pessoa ao episódio. Antes o link levava ao player, que mostrava
+   * a tela do PlaybackGate e exigia um segundo clique. O proprietário pediu:
+   * redirecionar imediatamente, sem telas intermediárias.
+   */
+  function watchTarget(href: string) {
+    return user ? href : '/login'
+  }
+  function watchState(href: string) {
+    return user ? undefined : { from: href }
+  }
+
   const [ready, setReady] = useState(false)
   const [seasons, setSeasons] = useState<DbSeason[]>([])
   const [loadingEpisodes, setLoadingEpisodes] = useState(true)
@@ -117,7 +132,8 @@ export function SeriesPage() {
             <div className="detail-actions">
               {season?.episodes.length ? (
                 <Link
-                  to={`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${season.episodes[0].episode_number}`}
+                  to={watchTarget(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${season.episodes[0].episode_number}`)}
+                  state={watchState(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${season.episodes[0].episode_number}`)}
                   className="btn btn--primary btn--lg"
                 >
                   <PlayIcon size={19} /> Assistir T{season.season_number} E
@@ -182,7 +198,8 @@ export function SeriesPage() {
               {season.episodes.map((ep) => (
                 <Link
                   key={ep.id}
-                  to={`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${ep.episode_number}`}
+                  to={watchTarget(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${ep.episode_number}`)}
+                  state={watchState(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${ep.episode_number}`)}
                   className="episode"
                 >
                   <span className="episode-num">{ep.episode_number}</span>
