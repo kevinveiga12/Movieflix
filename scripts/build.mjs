@@ -27,11 +27,46 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+
+// `require.resolve` dentro de um .mjs precisa do require do módulo.
+const require = createRequire(import.meta.url)
 
 const BUILD_HEAP_MB = '1024'
 
 // Sobrescreve o NODE_OPTIONS herdado (que pode trazer --max-old-space-size=160).
 const env = { ...process.env, NODE_OPTIONS: `--max-old-space-size=${BUILD_HEAP_MB}` }
+
+/**
+ * Garante que as ferramentas de build existam.
+ *
+ * Se o builder rodou `npm ci` com NODE_ENV=production (ou sem --include=dev),
+ * typescript e vite não foram instalados e o build morreria com
+ * "sh: 1: tsc: not found". Aqui a falta é detectada e as devDependencies são
+ * instaladas antes de seguir — o build nunca falha por causa disso.
+ */
+function ensureDevTools() {
+  const need = ['typescript', 'vite']
+  const missing = need.filter((p) => {
+    try {
+      require.resolve(`${p}/package.json`, { paths: [process.cwd()] })
+      return false
+    } catch {
+      return true
+    }
+  })
+  if (missing.length === 0) return
+  console.log(`\n[build] devDependencies ausentes (${missing.join(', ')}) — instalando`)
+  const r = spawnSync('npm', ['install', '--include=dev', '--no-audit', '--no-fund'], {
+    stdio: 'inherit',
+    env,
+    shell: false,
+  })
+  if (r.status !== 0) {
+    console.error('[build] falha ao instalar as devDependencies')
+    process.exit(r.status ?? 1)
+  }
+}
 
 function run(label, cmd, args) {
   console.log(`\n[build] ${label}`)
@@ -45,6 +80,8 @@ function run(label, cmd, args) {
     process.exit(r.status ?? 1)
   }
 }
+
+ensureDevTools()
 
 // 1. Checagem de tipos (gera os .tsbuildinfo usados pelo vite).
 run('tsc -b', 'npx', ['tsc', '-b'])
