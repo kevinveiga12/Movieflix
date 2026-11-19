@@ -445,28 +445,40 @@ private val BRIDGE_JS: String = """
    * O <video> em si NUNCA é escondido: é ele que toca o filme.
    */
   function hideProviderUi() {
-    if (document.getElementById('__mf_clean')) return;
-    var st = document.createElement('style');
-    st.id = '__mf_clean';
-    st.textContent = [
-      '#ui, .ui, #reportWrap, .report-wrap, #toast, .toast, .scrim-top,',
-      '#episodesView, #episodes, .ep-season-row, .ep-season-select,',
-      '.top-actions, .source-trigger, .icon-btn, .next-btn, .prev-btn,',
-      '.panel, .panel-body-wrap, .panel-list, .title-wrap, .crumb,',
-      '.brand-container, .pro-loader, #playerLoader, .loading-wrapper',
-    ].join(',') + '{display:none !important;visibility:hidden !important;opacity:0 !important;pointer-events:none !important;}' +
-      'video::-webkit-media-controls{display:none !important;}' +
-      'video::-webkit-media-controls-enclosure{display:none !important;}';
-    (document.head || document.documentElement).appendChild(st);
+    // NUNCA deixa uma exceção escapar daqui.
+    //
+    // `hideProviderUi` é chamada de dentro de `attach()`, depois de o <video>
+    // ter sido encontrado. Se ela lançasse (um DOM sem `getElementById`, um
+    // provedor que reescreveu o <head>, etc.), `attach()` abortaria ANTES de
+    // `sync()` e do `return true` — e o app ficaria eternamente achando que não
+    // há vídeo: sem barra, sem pause, sem ±10 s. O teste
+    // `scripts/test-tv-bridge.mjs` pegou exatamente essa regressão.
+    // Cosmético (esconder a UI do provedor) nunca pode derrubar o controle.
+    try {
+      if (!document || typeof document.getElementById !== 'function') return;
+      if (document.getElementById('__mf_clean')) return;
+      var st = document.createElement('style');
+      st.id = '__mf_clean';
+      st.textContent = [
+        '#ui, .ui, #reportWrap, .report-wrap, #toast, .toast, .scrim-top,',
+        '#episodesView, #episodes, .ep-season-row, .ep-season-select,',
+        '.top-actions, .source-trigger, .icon-btn, .next-btn, .prev-btn,',
+        '.panel, .panel-body-wrap, .panel-list, .title-wrap, .crumb,',
+        '.brand-container, .pro-loader, #playerLoader, .loading-wrapper',
+      ].join(',') + '{display:none !important;visibility:hidden !important;opacity:0 !important;pointer-events:none !important;}' +
+        'video::-webkit-media-controls{display:none !important;}' +
+        'video::-webkit-media-controls-enclosure{display:none !important;}';
+      (document.head || document.documentElement).appendChild(st);
 
-    // O selo "embedmovies.org" é um <span> solto no body, sem classe.
-    var spans = document.querySelectorAll('body > span');
-    for (var i = 0; i < spans.length; i++) {
-      var s = spans[i];
-      if (s && /embedmovies|embed/i.test(s.textContent || '')) {
-        s.style.display = 'none';
+      // O selo "embedmovies.org" é um <span> solto no body, sem classe.
+      var spans = document.querySelectorAll('body > span');
+      for (var i = 0; i < spans.length; i++) {
+        var s = spans[i];
+        if (s && /embedmovies|embed/i.test(s.textContent || '')) {
+          s.style.display = 'none';
+        }
       }
-    }
+    } catch (e) {}
   }
 
   function pick() {
