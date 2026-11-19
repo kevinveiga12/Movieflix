@@ -47,6 +47,14 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private val session = SessionStore(app)
     private val api = MovieFlixApi(BuildConfig.API_BASE_URL, session)
 
+    /**
+     * tmdb_id → URL da capa, montado a partir do catálogo.
+     *
+     * Fica em memória porque a tabela `favorites` não guarda `poster_url` e o
+     * `watch_history` pode ter linhas antigas sem ela. Ver [resolvePosters].
+     */
+    private val posterIndex = mutableMapOf<Long, String>()
+
     private val _state = MutableStateFlow(
         TvState(
             loggedIn = session.isLoggedIn,
@@ -167,6 +175,66 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             val f = runCatching { api.favorites() }.getOrDefault(emptyList())
             val h = runCatching { api.history() }.getOrDefault(emptyList())
             update { it.copy(favorites = f, history = h) }
+            // As capas vêm do catálogo, não do banco (ver FavoriteRow).
+            resolvePosters()
+        }
+    }
+
+    /**
+     * Preenche a capa de favoritos e histórico a partir do catálogo.
+     *
+     * Por que isto é necessário: a tabela `favorites` não tem `poster_url` e a
+     * `watch_history` só a tem quando a linha foi gravada por uma versão que já
+     * a enviava — linhas antigas ficam com string vazia. O site resolve a capa
+     * pelo catálogo (`getById`), e é o que fazemos aqui.
+     *
+     * A busca é feita em páginas de 200 (o máximo que `/api/catalog/*` aceita)
+     * até cobrir o `total`, e o resultado é guardado em [posterIndex] para não
+     * repetir a varredura a cada visita à tela.
+     */
+    private suspend fun resolvePosters() {
+        val need = (_state.value.favorites.map { it.tmdbId } +
+            _state.value.history.map { it.tmdbId })
+            .filter { it > 0 && posterIndex[it] == null }
+            .toSet()
+        if (need.isEmpty()) {
+            applyPosters()
+            return
+        }
+
+        runCatching {
+            var offset = 0
+            var total = Int.MAX_VALUE
+            while (offset < total && offset < 2000) {
+                val movies = api.movies(limit = 200, offset = offset)
+                val series = api.series(limit = 200, offset = offset)
+                total = maxOf(movies.total, series.total)
+                for (t in movies.items + series.items) {
+                    if (t.tmdbId > 0 && t.posterUrl.isNotBlank()) {
+                        posterIndex[t.tmdbId] = t.posterUrl
+                    }
+                }
+                if (movies.items.isEmpty() && series.items.isEmpty()) break
+                offset += 200
+                if (need.all { posterIndex[it] != null }) break
+            }
+        }
+
+        applyPosters()
+    }
+
+    private fun applyPosters() {
+        update { st ->
+            st.copy(
+                favorites = st.favorites.map { f ->
+                    if (f.posterUrl.isNotBlank()) f
+                    else f.copy(posterUrl = posterIndex[f.tmdbId] ?: "")
+                },
+                history = st.history.map { h ->
+                    if (h.posterUrl.isNotBlank()) h
+                    else h.copy(posterUrl = posterIndex[h.tmdbId] ?: "")
+                },
+            )
         }
     }
 

@@ -226,6 +226,38 @@ jobs:
             # ── Cada aba do menu lateral, uma captura por tela ───────────
             bash scripts/capture-tv-tabs.sh screenshots
 
+            # ── Player: barrinha, OK (play/pause) e seta direita (avanço) ───────
+            #
+            # O app está deslogado no emulador, então o player normal mostra o
+            # gate de conta. Para exercitar o player de verdade usamos a rota de
+            # diagnóstico `mf_route embed`, que abre o provedor direto no
+            # WebView — é o mesmo componente, com a mesma ponte JS.
+            echo "=== Player: abrindo o embed direto ==="
+            adb shell am force-stop run.velixir.movieflix.tv
+            sleep 2
+            adb shell am start -n run.velixir.movieflix.tv/.MainActivity \
+              -e mf_route embed -e mf_tmdb 1292035
+            sleep 25
+            bash scripts/shot.sh screenshots/tv-player-1-aberto.png "player aberto"
+
+            echo "=== Player: OK (play/pause) ==="
+            adb shell input keyevent KEYCODE_DPAD_CENTER
+            sleep 3
+            bash scripts/shot.sh screenshots/tv-player-2-ok.png "player apos OK"
+
+            echo "=== Player: seta direita (avancar) ==="
+            adb shell input keyevent KEYCODE_DPAD_RIGHT
+            sleep 3
+            bash scripts/shot.sh screenshots/tv-player-3-avancou.png "player apos seta direita"
+
+            echo "=== Player: seta direita segurando (aceleracao) ==="
+            adb shell input keyevent --longpress KEYCODE_DPAD_RIGHT
+            sleep 3
+            bash scripts/shot.sh screenshots/tv-player-4-segurou.png "player apos segurar"
+
+            adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO NO PLAYER" || echo "TV MORTO NO PLAYER"
+            adb logcat -d -b crash | tail -40 || true
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:

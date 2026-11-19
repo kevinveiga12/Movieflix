@@ -2,6 +2,7 @@ package run.velixir.movieflix.tv.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Espelha src/lib/types.ts do site. Os nomes de campo são os mesmos que a API
@@ -181,7 +182,16 @@ data class SubscriptionResponse(
     val plan: Plan? = null,
 )
 
-/** Linha de `favorites` no Supabase (schema real, verificado no site). */
+/**
+ * Linha de `favorites` no Supabase.
+ *
+ * A tabela NÃO tem coluna `poster_url` — o schema real é
+ * `favorites(id, user_id, media_type, title, tmdb_id, created_at)`, o mesmo que
+ * o site lê em `src/lib/userData.ts`. Por isso a capa não pode vir daqui: ela é
+ * resolvida pelo catálogo, com [posterUrl] preenchido em memória depois da
+ * leitura. Antes desta correção o card recebia `posterUrl` vazio e o Coil
+ * desenhava só o fundo cinza do placeholder.
+ */
 @Serializable
 data class FavoriteRow(
     val id: String = "",
@@ -190,6 +200,8 @@ data class FavoriteRow(
     @SerialName("media_type") val mediaType: String = "movie",
     val title: String = "",
     @SerialName("created_at") val createdAt: String = "",
+    /** Preenchido em memória a partir do catálogo — não existe no banco. */
+    @Transient val posterUrl: String = "",
 )
 
 /** Linha de `watch_history` no Supabase. */

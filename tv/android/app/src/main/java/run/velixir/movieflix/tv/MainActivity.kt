@@ -132,7 +132,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) 
             )
 
             TvRoute.EmbedDiag -> Box(Modifier.fillMaxSize()) {
-                TvEmbedPlayer("https://myembed.biz/filme/1292035")
+                TvEmbedPlayer("https://myembed.biz/filme/1292035", onBack = { route = TvRoute.Home })
             }
 
             else -> Row(Modifier.fillMaxSize()) {
