@@ -77,6 +77,22 @@ export function TitleDetailPage() {
         }`
       : null
 
+  /**
+   * Destino de "Assistir".
+   *
+   * Sem sessão vai DIRETO para o login, com o destino guardado em `state.from`
+   * — o login devolve a pessoa ao título. Antes o link levava ao player, que
+   * mostrava a tela do PlaybackGate ("crie sua conta") e exigia um segundo
+   * clique. O proprietário pediu: redirecionar imediatamente, sem telas
+   * intermediárias.
+   */
+  function watchTarget(href: string) {
+    return user ? href : '/login'
+  }
+  function watchState(href: string) {
+    return user ? undefined : { from: href }
+  }
+
   const seasonEpisodes = episodesAvailable
     .filter((e) => Number(e.split('/')[0]) === season)
     .map((e) => Number(e.split('/')[1]))
@@ -120,12 +136,20 @@ export function TitleDetailPage() {
             <div className="detail-actions">
               {playable ? (
                 <>
-                  <Link to={resumeHref ?? watchHref()} className="btn btn--primary btn--lg">
+                  <Link
+                    to={watchTarget(resumeHref ?? watchHref())}
+                    state={watchState(resumeHref ?? watchHref())}
+                    className="btn btn--primary btn--lg"
+                  >
                     <PlayIcon size={19} />
                     {resumeHref ? 'Continuar assistindo' : isSeries ? 'Assistir T1 E1' : 'Assistir'}
                   </Link>
                   {resumeHref && (
-                    <Link to={watchHref()} className="btn btn--ghost btn--lg">
+                    <Link
+                      to={watchTarget(watchHref())}
+                      state={watchState(watchHref())}
+                      className="btn btn--ghost btn--lg"
+                    >
                       <InfoIcon size={19} /> Do início
                     </Link>
                   )}
@@ -188,7 +212,12 @@ export function TitleDetailPage() {
                 seasonEpisodes.map((ep) => (
                   <Link
                     key={ep}
-                    to={`/assistir/${title.tmdb_id}?type=tv&season=${season}&episode=${ep}`}
+                    to={watchTarget(
+                      `/assistir/${title.tmdb_id}?type=tv&season=${season}&episode=${ep}`,
+                    )}
+                    state={watchState(
+                      `/assistir/${title.tmdb_id}?type=tv&season=${season}&episode=${ep}`,
+                    )}
                     className="episode"
                   >
                     <span className="episode-num">{ep}</span>
