@@ -81,6 +81,9 @@ sealed interface TvRoute {
     data object Login : TvRoute
     data class Detail(val title: Title) : TvRoute
     data class Player(val title: Title, val season: Int?, val episode: Int?) : TvRoute
+
+    /** Diagnóstico do embed: abre o provedor direto, sem login (só para o CI). */
+    data object EmbedDiag : TvRoute
 }
 
 @Composable
@@ -95,6 +98,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) 
             "account" -> route = TvRoute.Account
             "admin" -> route = TvRoute.Admin
             "player" -> s.movies.firstOrNull()?.let { route = TvRoute.Player(it, null, null) }
+            "embed" -> route = TvRoute.EmbedDiag
         }
     }
 
@@ -125,6 +129,10 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null) 
                 vm, r.title, r.season, r.episode,
                 onBack = { route = TvRoute.Detail(r.title) },
             )
+
+            TvRoute.EmbedDiag -> Box(Modifier.fillMaxSize()) {
+                TvEmbedPlayer("https://myembed.biz/filme/1292035")
+            }
 
             else -> Row(Modifier.fillMaxSize()) {
                 val currentKey = when (r) {

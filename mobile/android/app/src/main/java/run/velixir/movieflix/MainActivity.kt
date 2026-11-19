@@ -102,6 +102,15 @@ sealed interface Route {
     data object Forgot : Route
     data class Detail(val title: Title) : Route
     data class Player(val title: Title, val season: Int?, val episode: Int?) : Route
+
+    /**
+     * Diagnóstico do embed: abre o provedor direto, sem login.
+     *
+     * Existe só para o CI comprovar que o WebView entrega o player (e não a
+     * página de cloaking). Não aparece em nenhum menu e não libera conteúdo:
+     * é a mesma URL pública que o site incorpora.
+     */
+    data object EmbedDiag : Route
 }
 
 /**
@@ -128,6 +137,7 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) 
             "account" -> route = Route.Account
             "admin" -> route = Route.Admin
             "player" -> s.movies.firstOrNull()?.let { route = Route.Player(it, null, null) }
+            "embed" -> route = Route.EmbedDiag
         }
     }
 
@@ -206,6 +216,9 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) 
                     r.episode,
                     onBack = { route = Route.Detail(r.title) },
                 )
+                Route.EmbedDiag -> Box(Modifier.fillMaxSize()) {
+                    EmbedPlayer("https://myembed.biz/filme/1292035")
+                }
             }
 
             if (s.toast != null) {

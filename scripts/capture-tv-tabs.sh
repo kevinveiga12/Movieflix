@@ -102,3 +102,11 @@ sleep 14
 bash scripts/shot.sh "$OUT/tv-player.png" "tv player" || echo "AVISO: player escuro (video) — nao falha o build"
 
 echo "OK: telas extras da TV capturadas"
+
+# ── Diagnostico do embed ────────────────────────────────────────────────────
+echo "=== Embed (diagnostico) ==="
+adb shell am force-stop run.velixir.movieflix.tv
+sleep 2
+adb shell am start -n run.velixir.movieflix.tv/.MainActivity --es mf_route embed
+sleep 18
+bash scripts/shot.sh "$OUT/tv-embed.png" "tv embed" || echo "AVISO: embed nao confirmado"

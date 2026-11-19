@@ -221,7 +221,7 @@ private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun EmbedPlayer(url: String) {
+internal fun EmbedPlayer(url: String) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var failed by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }

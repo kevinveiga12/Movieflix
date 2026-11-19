@@ -93,3 +93,15 @@ adb exec-out screencap -p > "$OUT/mobile-player.png"
 python3 scripts/check-screenshot.py "$OUT/mobile-player.png" "mobile player" || echo "AVISO: player escuro (video) — nao falha o build"
 
 echo "OK: telas extras do mobile capturadas"
+
+# ── Diagnostico do embed ────────────────────────────────────────────────────
+# Abre o provedor direto (sem login) para comprovar que o WebView entrega o
+# player e nao a pagina de cloaking. A captura e comparada com a assinatura
+# de cor da pagina branca do "Investidor.blog".
+echo "=== Embed (diagnostico) ==="
+adb shell am force-stop run.velixir.movieflix
+sleep 2
+adb shell am start -n run.velixir.movieflix/.MainActivity --es mf_route embed
+sleep 16
+adb exec-out screencap -p > "$OUT/mobile-embed.png"
+python3 scripts/check-embed.py "$OUT/mobile-embed.png" "mobile embed" || echo "AVISO: embed nao confirmado"
