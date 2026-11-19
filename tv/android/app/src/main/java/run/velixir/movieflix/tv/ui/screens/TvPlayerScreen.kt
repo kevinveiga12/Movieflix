@@ -179,7 +179,7 @@ private fun TvDirectPlayer(
             playing = player.isPlaying
             position = (player.currentPosition / 1000.0).coerceAtLeast(0.0)
             duration = (player.duration / 1000.0).coerceAtLeast(0.0)
-            volume = player.volume
+            volume = player.volume.toDouble()
             delay(250)
         }
     }
@@ -231,7 +231,7 @@ private fun TvDirectPlayer(
 
     fun changeVolume(delta: Double) {
         val v = (player.volume + delta).coerceIn(0.0, 1.0)
-        player.volume = v
+        player.volume = v.toFloat()
         hint = "🔊 ${(v * 100).toInt()}%"
     }
 
@@ -533,15 +533,18 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
 
                     // Script em todos os frames, inclusive os de outra origem.
                     //
-                    // `addDocumentStartJavaScript` só existe a partir da API 30.
-                    // Chamar sem guarda derrubaria o app em Android TV 8/9
-                    // (API 26-29), que ainda é comum em TV Box. Abaixo da 30
-                    // caímos para `evaluateJavascript`, que alcança apenas o
-                    // frame principal — funciona quando o provedor monta o
-                    // <video> na própria página, e é o máximo que a API antiga
-                    // permite. A limitação é dita na tela, não escondida.
+                    // `addDocumentStartJavaScript` é do androidx.webkit (não da
+                    // classe WebView da plataforma) e só existe a partir da API
+                    // 30. Abaixo disso caímos para `evaluateJavascript`, que
+                    // alcança apenas o frame principal — funciona quando o
+                    // provedor monta o <video> na própria página, e é o máximo
+                    // que a API antiga permite. A limitação é dita na tela.
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                        addDocumentStartJavaScript(BRIDGE_JS, setOf("*"))
+                        androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
+                            this,
+                            BRIDGE_JS,
+                            setOf("*"),
+                        )
                     } else {
                         legacyBridge = true
                     }

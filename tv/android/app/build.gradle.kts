@@ -89,5 +89,10 @@ dependencies {
 
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // WebViewCompat.addDocumentStartJavaScript — injeta o script da ponte do
+    // player em TODOS os frames, inclusive os de outra origem. É o que permite
+    // controlar o <video> do provedor pelo controle remoto.
+    implementation("androidx.webkit:webkit:1.12.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
