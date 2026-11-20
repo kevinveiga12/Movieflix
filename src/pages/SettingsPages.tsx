@@ -145,7 +145,7 @@ export function SettingsPage() {
  * pelo caminho, ex.: '/apk/movieflix-mobile-1.0.0.apk'.
  */
 const APK_MOBILE_URL: string | null = '/apk/movieflix-mobile-1.0.0.apk'
-const APK_TV_URL: string | null = '/apk/movieflix-tv-1.0.0.apk'
+const APK_TV_URL: string | null = '/apk/movieflix-tv-1.0.3.apk'
 const IOS_URL: string | null = null
 
 type AppEnv = 'web-desktop' | 'web-mobile' | 'app-android' | 'app-ios' | 'app-tv'
