@@ -143,7 +143,24 @@ fun TvPlayerScreen(
             loading = false
             return@LaunchedEffect
         }
-        vm.authorize(title.tmdbId, season, episode) { u, m, msg ->
+        vm.authorize(title.tmdbId, season, episode) { u, m, msg, reason ->
+            /*
+              Falta de login NÃO é erro de reprodução.
+
+              Antes, qualquer negativa (inclusive "sem sessão") caía no ramo
+              `message != null` e desenhava a tela "Entre na sua conta para
+              assistir" com um botão "Voltar" — um beco sem saída. Agora, se o
+              motivo for de autenticação, a tela manda direto ao login; a
+              mensagem só aparece para negativas reais (sem fonte, plano etc.).
+            */
+            if (reason == "unauthenticated" || reason == "no_subscription" ||
+                reason == "trial_expired" || reason == "trial_used" ||
+                reason == "trial_unknown" || reason == "account_disabled"
+            ) {
+                loading = false
+                onLoginRequired()
+                return@authorize
+            }
             url = u
             mode = m
             message = msg

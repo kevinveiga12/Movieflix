@@ -104,18 +104,29 @@ jobs:
           node scripts/test-tv-posters.mjs http://127.0.0.1:3999
           kill %1 || true
 
-      # Chave de assinatura. Gerada uma vez por execucao e publicada como
-      # artefato para o dono do projeto guardar. Sem ela, uma atualizacao
-      # futura nao pode ser instalada por cima da anterior.
-      - name: Gerar chave de assinatura
+      # Chave de assinatura ESTÁVEL.
+      #
+      # Antes, este passo gerava uma chave NOVA a cada execução. Resultado: cada
+      # APK publicado tinha uma assinatura diferente, e o Android recusa
+      # instalar uma atualização por cima de um app assinado com outra chave
+      # ("App not installed"). Era por isso que o APK novo não substituía o
+      # antigo no aparelho.
+      #
+      # Agora a chave vive no repositório (tv/android/movieflix-release.keystore)
+      # e é a MESMA em todo build — a atualização instala por cima normalmente.
+      # Se o secret KEYSTORE_BASE64 existir, ele tem prioridade (permite trocar
+      # a chave sem tocar no código).
+      - name: Preparar chave de assinatura
         run: |
-          keytool -genkeypair -v \
-            -keystore movieflix-release.keystore \
-            -alias movieflix \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass "${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}" \
-            -keypass "${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}" \
-            -dname "CN=MovieFlix, OU=Mobile, O=MovieFlix, L=Sao Paulo, ST=SP, C=BR"
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > movieflix-release.keystore
+            echo "Usando keystore do secret KEYSTORE_BASE64"
+          else
+            cp tv/android/movieflix-release.keystore movieflix-release.keystore
+            echo "Usando keystore versionado em tv/android/movieflix-release.keystore"
+          fi
+          keytool -list -keystore movieflix-release.keystore \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}" | tail -3
 
       - name: Build mobile
         working-directory: mobile/android

@@ -283,17 +283,20 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         tmdbId: Long,
         season: Int?,
         episode: Int?,
-        onResult: (String?, String?, String?) -> Unit,
+        onResult: (String?, String?, String?, String?) -> Unit,
     ) {
         if (!session.isLoggedIn) {
-            onResult(null, null, "Entre na sua conta para assistir.")
+            // Sem sessão: NÃO é erro de reprodução — é falta de login. O 4º
+            // argumento ("unauthenticated") faz a tela mandar ao login em vez
+            // de mostrar a mensagem com "Voltar".
+            onResult(null, null, "Entre na sua conta para assistir.", "unauthenticated")
             return
         }
         viewModelScope.launch {
             try {
                 val r = api.authorizePlayback(tmdbId, season, episode)
-                if (r.allowed && r.source != null) onResult(r.source.url, r.source.mode, null)
-                else onResult(null, null, r.message ?: "Não foi possível liberar este título.")
+                if (r.allowed && r.source != null) onResult(r.source.url, r.source.mode, null, null)
+                else onResult(null, null, r.message ?: "Não foi possível liberar este título.", r.reason)
             } catch (e: Exception) {
                 /*
                   Token expirado/inválido: a sessão guardada no aparelho não vale
@@ -313,8 +316,11 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                             history = emptyList(),
                         )
                     }
+                    // 401 = sessão inválida: manda ao login, não mostra erro.
+                    onResult(null, null, friendly(e), "unauthenticated")
+                    return@launch
                 }
-                onResult(null, null, friendly(e))
+                onResult(null, null, friendly(e), null)
             }
         }
     }
