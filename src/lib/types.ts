@@ -109,6 +109,24 @@ export interface PlaybackAuth {
   } | null
   message?: string
   source?: { url: string; label: string | null; mode: 'direct' | 'embed' }
+  /**
+   * Todas as opções de servidor para este título, já verificadas no servidor.
+   *
+   * `verified`:
+   *   true  → a página do provedor tem player (m3u8/<video>/artplayer)
+   *   false → a página não tem player (cloaking, 404, verificação)
+   *   null  → não foi possível verificar (timeout) — tenta mesmo assim
+   *
+   * A lista vem ordenada: verificadas primeiro. O player começa pela primeira
+   * e troca para a próxima quando o vídeo não começa.
+   */
+  sources?: Array<{
+    id: string
+    label: string
+    url: string
+    mode: 'direct' | 'embed'
+    verified?: boolean | null
+  }>
   plan?: { code: string | null; label: string; expires_at: string | null }
   requiredPlan?: string | null
   subscription?: { plan_code: string | null; status: string; expires_at: string | null } | null

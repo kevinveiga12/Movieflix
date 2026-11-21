@@ -55,6 +55,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var errorView: View
 
+    /**
+     * Estado da tela cheia do vídeo (ver `onShowCustomView`).
+     *
+     * `fullscreenView` é a view que o player entregou; `fullscreenContainer` é
+     * o FrameLayout preto que a cobre a janela inteira; `fullscreenCallback`
+     * é o retorno que o WebView espera para saber que a tela cheia acabou.
+     */
+    private var fullscreenView: View? = null
+    private var fullscreenContainer: FrameLayout? = null
+    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
+
     /** Só a primeira carga leva `?app=android`; as seguintes já têm a marca. */
     private var firstLoad = true
 
@@ -124,6 +135,63 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 progress.progress = newProgress
                 progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
+            }
+
+            /**
+             * ── TELA CHEIA DO VÍDEO ──────────────────────────────────────────
+             *
+             * O player do site chama `requestFullscreen()` no contêiner dele.
+             * Dentro de um WebView isso NÃO vira tela cheia sozinho: o Android
+             * entrega o pedido aqui, em `onShowCustomView`. Sem estes dois
+             * métodos o WebView simplesmente ignora a chamada — era por isso
+             * que, no app, o botão de tela cheia "enchia a tela mas não entrava
+             * no filme": o site mudava o layout, mas o vídeo continuava do
+             * tamanho do WebView, com a barra do app em volta.
+             *
+             * Aqui o `view` que o player entrega é colocado por cima de TUDO,
+             * em um FrameLayout que cobre a janela inteira, e as barras do
+             * sistema são escondidas. Ao sair, tudo volta ao lugar.
+             */
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                if (view == null) return
+                if (fullscreenView != null) {
+                    // Já estamos em tela cheia: devolve o pedido anterior.
+                    callback?.onCustomViewHidden()
+                    return
+                }
+                fullscreenView = view
+                fullscreenCallback = callback
+
+                val container = FrameLayout(this@MainActivity).apply {
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    addView(
+                        view,
+                        FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                        ),
+                    )
+                }
+                fullscreenContainer = container
+                addContentView(
+                    container,
+                    android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    ),
+                )
+
+                // Esconde barras do sistema e mantém a tela acesa.
+                WindowInsetsControllerCompat(window, window.decorView).apply {
+                    hide(WindowInsetsCompat.Type.systemBars())
+                    systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+
+            override fun onHideCustomView() {
+                exitFullscreen()
             }
         }
 
@@ -222,6 +290,18 @@ class MainActivity : AppCompatActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
+                    /**
+                     * Voltar em tela cheia SAI da tela cheia, não do player.
+                     *
+                     * É o comportamento que o cliente espera: o primeiro
+                     * "voltar" devolve o vídeo ao tamanho normal; só o segundo
+                     * sai do filme. Sem esta checagem, o botão voltar fecharia
+                     * o player inteiro com o vídeo ainda em tela cheia.
+                     */
+                    if (fullscreenView != null) {
+                        exitFullscreen()
+                        return
+                    }
                     if (web.canGoBack()) {
                         web.goBack()
                     } else {
@@ -231,6 +311,31 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
+    }
+
+    /**
+     * Desmonta a tela cheia do vídeo e devolve o controle ao WebView.
+     *
+     * Ordem importa: remove a view da janela, avisa o WebView pelo callback
+     * (senão ele fica achando que a tela cheia continua ativa e ignora o
+     * próximo pedido), restaura as barras do sistema e libera a tela acesa.
+     */
+    private fun exitFullscreen() {
+        val container = fullscreenContainer ?: return
+        val callback = fullscreenCallback
+
+        fullscreenView = null
+        fullscreenContainer = null
+        fullscreenCallback = null
+
+        (container.parent as? android.view.ViewGroup)?.removeView(container)
+
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            show(WindowInsetsCompat.Type.systemBars())
+        }
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        callback?.onCustomViewHidden()
     }
 
     override fun onPause() {

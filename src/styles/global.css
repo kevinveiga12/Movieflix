@@ -753,6 +753,43 @@ h4 {
   aspect-ratio: 16 / 9;
 }
 
+/*
+  ── POR QUE ESTE BLOCO EXISTE ────────────────────────────────────────────────
+
+  O card largo do "Continuar assistindo" quebrava no celular: os elementos
+  ficavam um em cima do outro, desalinhados.
+
+  Causa: a media query de 600px (mais abaixo no arquivo) define
+  `.card { width: 118px }` para os pôsteres normais. Como ela vem DEPOIS de
+  `.card--wide`, e as duas têm a mesma especificidade, ela vencia — o card
+  largo virava 118px de largura. Só que o pôster dele é 16/9 e o texto tem
+  duas linhas: em 118px o título estourava a caixa, o `card-sub` era cortado
+  e o bloco de informação transbordava por cima do card seguinte.
+
+  A correção é declarar a largura do card largo DENTRO da media query, com
+  especificidade maior (`.card.card--wide`), para ela não ser sobrescrita.
+  O card largo continua largo no celular — é o que ele precisa ser para
+  mostrar o backdrop 16/9 e o título legível.
+*/
+.card.card--wide {
+  width: clamp(240px, 22vw, 340px);
+}
+
+.card--wide .card-info {
+  padding: 10px 12px 12px;
+}
+
+.card--wide .card-title {
+  font-size: 0.86rem;
+  -webkit-line-clamp: 1;
+  margin-bottom: 3px;
+}
+
+.card--wide .card-sub {
+  font-size: 0.74rem;
+  gap: 5px;
+}
+
 /* ============================ Grid ============================ */
 
 .grid {
@@ -1143,6 +1180,60 @@ h4 {
   color: var(--text-dim);
 }
 
+/*
+  ── HISTÓRICO NO CELULAR ─────────────────────────────────────────────────────
+
+  A linha do histórico é um flex de três partes: capa, informação e ações. No
+  desktop cabe tudo lado a lado. No celular, as três ações ("Continuar de onde
+  parou", "Assistir do início", "Remover") somam mais largura do que a tela —
+  e como o `.episode` não permitia quebra, elas transbordavam por cima do
+  texto e do item seguinte. Era isso que deixava a página "toda quebrada".
+
+  Abaixo de 720px a linha vira uma grade de duas colunas: capa + texto na
+  primeira linha, ações ocupando a largura inteira na segunda. Nada mais
+  sobrepõe nada, e os botões ficam com alvo de toque confortável.
+*/
+@media (max-width: 720px) {
+  .episode {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 12px 14px;
+    padding: 14px;
+  }
+  .episode > img {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .episode-info {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .episode > .inline {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .episode > .inline .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+  .episode-title {
+    font-size: 0.88rem;
+    overflow-wrap: anywhere;
+  }
+  .episode-sub {
+    font-size: 0.75rem;
+  }
+  .episode:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 /* ============================ Player ============================ */
 
 /* Player em PÁGINA INTEIRA.
@@ -1169,6 +1260,57 @@ h4 {
   display: block;
   overflow: hidden;
   min-height: 0;
+}
+
+/*
+  TELA CHEIA REAL.
+
+  O botão do player chama `requestFullscreen()` neste contêiner. Em tela cheia
+  o elemento vira a raiz do viewport, então `inset: 0` + `100%` garantem que o
+  vídeo/iframe preencha a tela inteira — sem faixa preta, sem barra do site.
+
+  O `:fullscreen` cobre o caso nativo; `.is-fullscreen` cobre o modo CSS usado
+  quando a API é recusada (WebView antigo, iOS sem suporte a elemento).
+*/
+.player-stage:fullscreen,
+.player-stage:-webkit-full-screen,
+.player-page.is-fullscreen .player-stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 2000;
+  background: #000;
+}
+
+.player-stage:fullscreen video,
+.player-stage:fullscreen iframe,
+.player-stage:-webkit-full-screen video,
+.player-stage:-webkit-full-screen iframe,
+.player-page.is-fullscreen .player-stage video,
+.player-page.is-fullscreen .player-stage iframe {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/*
+  SENSOR DE TOQUE.
+
+  Camada invisível que só existe com a UI escondida. Devolve os controles ao
+  primeiro toque. `z-index` acima do iframe e abaixo do overlay: quando a UI
+  aparece, o sensor já saiu do DOM e o toque volta a chegar no player.
+*/
+.player-sensor {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .player-stage video,
@@ -1284,6 +1426,38 @@ h4 {
   align-items: center;
   gap: 16px;
   padding: clamp(16px, 2.5vw, 32px);
+}
+
+/*
+  Ações do canto direito: trocar servidor + tela cheia.
+
+  Antes o lado direito do cabeçalho era vazio de propósito (o pedido era
+  remover elementos desnecessários). Agora ele tem exatamente dois controles,
+  os dois pedidos pelo proprietário: a opção de servidor atual (que troca ao
+  toque) e a tela cheia de verdade.
+*/
+.player-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.player-btn--pill {
+  width: auto;
+  min-width: 0;
+  padding: 0 16px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.player-btn-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .player-top-info {
@@ -1717,6 +1891,21 @@ h4 {
   }
   .card {
     width: 118px;
+  }
+  /*
+    O card largo NÃO pode herdar os 118px acima. Ele mostra um backdrop 16/9 e
+    um título de uma linha; em 118px o texto transbordava e os cards se
+    sobrepunham. Aqui ele fica com largura de leitura confortável e o pôster
+    mantém a proporção.
+  */
+  .card.card--wide {
+    width: min(78vw, 300px);
+  }
+  .card--wide .card-poster {
+    aspect-ratio: 16 / 9;
+  }
+  .card--wide .card-title {
+    font-size: 0.82rem;
   }
   .card-info {
     padding: 8px 9px 10px;

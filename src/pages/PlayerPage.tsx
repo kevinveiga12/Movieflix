@@ -1,51 +1,90 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom'
 import Hls from 'hls.js'
 import { loadCatalog, getById } from '../lib/catalog'
-import { nextEpisode, formatTime, type PlaybackSource } from '../lib/player'
+import { nextEpisode, formatTime } from '../lib/player'
 import { authorizePlayback } from '../lib/access'
 import { PlaybackGate } from '../components/PlaybackGate'
 import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useHistory } from '../lib/userData'
-import { PlayIcon, PauseIcon, SkipBack, SkipForward, ArrowLeft } from '../components/Icons'
+import {
+  PlayIcon,
+  PauseIcon,
+  SkipBack,
+  SkipForward,
+  ArrowLeft,
+  FullscreenIcon,
+  XIcon,
+} from '../components/Icons'
 import { VirtualMouse, HoldDetector, clickAtRatio } from '../lib/virtualMouse'
 
 /**
- * Intervalo de gravação do progresso.
+ * ════════════════════════════════════════════════════════════════════════════
+ * PLAYER — três pedidos do proprietário, resolvidos aqui
+ * ════════════════════════════════════════════════════════════════════════════
  *
- * O proprietário pediu 15 segundos. É o intervalo usado nos dois modos.
+ * 1) PLAYER LIMPO
+ *    Ao entrar no filme/série o vídeo ocupa a tela e NADA fica por cima. A
+ *    nossa interface (voltar, título, tela cheia, trocar servidor) só aparece
+ *    quando a pessoa toca na tela, e some sozinha depois de alguns segundos
+ *    parada — ou no toque seguinte.
+ *
+ * 2) TELA CHEIA DE VERDADE
+ *    O botão chama a Fullscreen API no NOSSO contêiner (`.player-stage`), não
+ *    no iframe do provedor. Antes não existia botão nenhum: o que o cliente
+ *    via era o botão do provedor, dentro de um iframe com `sandbox`, e o
+ *    navegador recusava a chamada — a tela "enchia" mas o vídeo continuava
+ *    pequeno e os controles do site seguiam na frente. Agora o contêiner vai
+ *    para tela cheia, o iframe preenche 100% dele, e a nossa UI some.
+ *
+ * 3) TROCA AUTOMÁTICA DE SERVIDOR
+ *    O servidor devolve TODAS as opções (`sources`), já verificadas. O player
+ *    começa pela primeira que sabidamente entrega player. Se em 5 segundos o
+ *    iframe não carregar, troca sozinho para a próxima. E o aviso "o vídeo não
+ *    está rodando" com o botão de trocar servidor está sempre a um toque.
+ *
+ * ── O QUE É POSSÍVEL E O QUE NÃO É (sem inventar) ───────────────────────────
+ *
+ * O vídeo roda em um iframe de OUTRO domínio. A política de origem do
+ * navegador impede ler `currentTime`, `paused` ou o estado do player de dentro
+ * dele. Por isso:
+ *   • não existe barra de progresso nossa no modo embed (a do provedor é a
+ *     única, e é a verdadeira);
+ *   • "o vídeo começou?" não é observável — o que observamos é se a PÁGINA do
+ *     provedor carregou e se ela tem player (verificação feita no servidor);
+ *   • o progresso salvo no modo embed é o TEMPO DECORRIDO com a aba visível,
+ *     declarado como aproximação, nunca uma posição inventada.
+ *
+ * No modo DIRETO (arquivo .mp4/.m3u8 cadastrado pelo admin) tudo isso é real:
+ * posição, duração, buffer e retomada exata vêm do <video>.
  */
+
+/** Intervalo de gravação do progresso. */
 const SAVE_INTERVAL = 15_000
 
-/**
- * Progresso no modo EMBED — o que é tecnicamente possível.
- *
- * O player do provedor roda em iframe de OUTRO domínio. Verificado em
- * 2026-11-18: a página do playerflix.ink não expõe `postMessage`, não lê
- * `window.parent` e não publica `timeupdate`/`currentTime` para quem o
- * incorpora. Sem um desses canais, a posição real do vídeo é INALCANÇÁVEL
- * pela página do MovieFlix — não é falta de esforço, é a política de origem
- * do navegador.
- *
- * O que fazemos então, sem inventar dado: contamos o TEMPO DECORRIDO com a
- * página do player aberta e visível, e gravamos isso como posição. É uma
- * aproximação — se o cliente pausar dentro do iframe, o contador continua
- * andando, porque não temos como saber da pausa. Por isso o modo embed NÃO
- * retoma sozinho: seria pular para um ponto errado.
- *
- * No modo DIRETO (arquivo .mp4/.m3u8 cadastrado pelo admin) a posição é real,
- * lida do <video>, e a retomada funciona exatamente.
- */
-const EMBED_TICK_MS = 1_000
+/** Tempo sem interação até a nossa UI sumir. */
+const UI_HIDE_MS = 4_000
 
 /**
- * Tempo sem interação até os controles sumirem.
+ * Tempo máximo para o iframe do provedor carregar antes de trocar de servidor.
  *
- * O usuário pediu 5 segundos: a barra aparece ao interagir e some depois
- * disso, deixando só o vídeo. Qualquer tecla/clique/toque a traz de volta.
+ * O pedido foi "uns 5 segundos". Contamos a partir da montagem do iframe: se o
+ * evento `load` não chegou nesse prazo, a opção está travada e passamos para a
+ * seguinte automaticamente.
  */
-const UI_HIDE_MS = 5_000
+const SERVER_TIMEOUT_MS = 5_000
+
+/** Tick do contador de tempo decorrido no modo embed. */
+const EMBED_TICK_MS = 1_000
+
+interface SourceOption {
+  id: string
+  label: string
+  url: string
+  mode: 'direct' | 'embed'
+  verified?: boolean | null
+}
 
 export function PlayerPage() {
   const { id } = useParams<{ id: string }>()
@@ -55,51 +94,46 @@ export function PlayerPage() {
   const { user, loading: authLoading } = useAuth()
   const { saveProgress, progressFor } = useHistory()
 
-  // Tipo pedido na URL. `null` = não veio; nesse caso descobrimos pelo
-  // catálogo, para que /assistir/1621 (uma SÉRIE) não seja tratado como filme.
   const askedType = params.get('type') as 'movie' | 'tv' | null
   const season = Number(params.get('season') ?? 1)
   const episode = Number(params.get('episode') ?? 1)
 
   const [ready, setReady] = useState(false)
-  const [source, setSource] = useState<PlaybackSource | null>(null)
+  const [sources, setSources] = useState<SourceOption[]>([])
+  const [sourceIndex, setSourceIndex] = useState(0)
   const [notFound, setNotFound] = useState(false)
-  // Resultado da autorização do SERVIDOR. null = ainda verificando.
   const [auth, setAuth] = useState<PlaybackAuth | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
-  // Incrementar força uma nova checagem (botão "Verificar novamente").
   const [authAttempt, setAuthAttempt] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const lastSave = useRef(0)
-  /** Tempo decorrido no modo embed (segundos) — aproximação declarada. */
   const embedElapsed = useRef(0)
-  /** `?from=start` → ignora o ponto salvo e começa do zero. */
   const fromStart = params.get('from') === 'start'
 
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(0)
   const [buffered, setBuffered] = useState(0)
-  const [showUi, setShowUi] = useState(true)
-  /** Incrementa a cada interação — reinicia o timer do auto-hide. */
-  const [uiPoke, setUiPoke] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  /**
-   * MOUSE VIRTUAL do controle remoto.
-   *
-   * Segurar OK por 2 s liga/desliga; com ele ligado o direcional move o cursor
-   * e o OK clica no ponto — é assim que o controle alcança os controles nativos
-   * do player (play/pause, barra, volume, tela cheia) sem duplicar botões.
-   *
-   * O estado vive num objeto mutável (não em useState) porque o cursor anda a
-   * cada tecla e não queremos uma re-renderização por passo; `mouseTick` é o
-   * contador que avisa o React para redesenhar a posição.
-   */
+  /** Nossa UI (voltar, título, tela cheia, trocar servidor). */
+  const [showUi, setShowUi] = useState(true)
+  const [uiPoke, setUiPoke] = useState(0)
+
+  /** Tela cheia real do contêiner. */
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  /** O iframe do provedor já disparou `load`? */
+  const [frameLoaded, setFrameLoaded] = useState(false)
+  /** O aviso "não está rodando" foi acionado (automático ou pelo cliente). */
+  const [stalled, setStalled] = useState(false)
+  /** Já trocamos de servidor automaticamente nesta sessão? */
+  const autoSwitched = useRef(false)
+
   const mouseRef = useRef<VirtualMouse | null>(null)
   if (!mouseRef.current) mouseRef.current = new VirtualMouse()
   const holdRef = useRef<HoldDetector | null>(null)
@@ -107,18 +141,7 @@ export function PlayerPage() {
   const [mouseOn, setMouseOn] = useState(false)
   const [mouseTick, setMouseTick] = useState(0)
 
-  /**
-   * LOGIN OBRIGATÓRIO — sem sessão, o player não abre.
-   *
-   * O proprietário pediu: "se o usuário não estiver logado e clicar em assistir
-   * qualquer filme ou série, redirecionar imediatamente para a página de login.
-   * Sem telas intermediárias, sem mensagens para voltar, sem etapas adicionais."
-   *
-   * Antes, quem abria /assistir/... sem conta via a tela do PlaybackGate
-   * ("Crie sua conta para assistir") e precisava clicar de novo. Agora o
-   * redirecionamento acontece aqui, antes de qualquer requisição de
-   * autorização, e o login devolve a pessoa ao mesmo título.
-   */
+  // ── Login obrigatório ────────────────────────────────────────────────────
   useEffect(() => {
     if (authLoading || user) return
     navigate('/login', {
@@ -127,15 +150,6 @@ export function PlayerPage() {
     })
   }, [authLoading, user, navigate, location.pathname, location.search])
 
-  /**
-   * Tipo efetivo do título.
-   *
-   * A URL manda quando traz `?type=`, mas quando o parâmetro falta usamos o
-   * tipo REAL do catálogo. Sem isso, abrir `/assistir/1621` (Boardwalk Empire,
-   * uma série de 5 temporadas) pedia autorização como FILME: o servidor não
-   * achava fonte, devolvia `no_source` e o cliente via "sem fonte de
-   * reprodução" — exatamente o sintoma relatado no título 1621.
-   */
   const catalogHit = useMemo(
     () => (ready ? getById(id ?? '') : undefined),
     [ready, id, authAttempt],
@@ -143,8 +157,6 @@ export function PlayerPage() {
   const type: 'movie' | 'tv' =
     askedType === 'movie' || askedType === 'tv' ? askedType : (catalogHit?.type ?? 'movie')
 
-  // Título em exibição. Prefere o catálogo estático (metadados completos) e cai
-  // para o título da resposta autorizada quando o item só existe no banco.
   const title = useMemo<Title | undefined>(() => {
     if (!ready) return undefined
     const found = getById(id ?? '', type)
@@ -177,19 +189,19 @@ export function PlayerPage() {
     loadCatalog().then(() => setReady(true))
   }, [])
 
-  // ── GATE REAL DE REPRODUÇÃO ─────────────────────────────────────────
-  // O navegador não decide nada. Envia o token e o título; o servidor valida
-  // conta, assinatura, validade e plano exigido, e só então devolve a URL.
-  // Sem resposta autorizada, não existe fonte para tocar.
+  // ── Autorização no servidor ──────────────────────────────────────────────
   useEffect(() => {
     if (!ready || !id || !user) return
     let cancelled = false
 
     setAuthChecking(true)
     setAuth(null)
-    setSource(null)
+    setSources([])
+    setSourceIndex(0)
     setError(null)
     setNotFound(false)
+    setStalled(false)
+    autoSwitched.current = false
 
     authorizePlayback({
       tmdbId: id,
@@ -200,12 +212,29 @@ export function PlayerPage() {
       setAuth(result)
       setAuthChecking(false)
 
-      if (result.allowed && result.source) {
-        setSource({
-          mode: result.source.mode,
-          url: result.source.url,
-          label: result.source.label ?? undefined,
-        })
+      if (result.allowed) {
+        /**
+         * Lista de opções. O servidor manda `sources` (todas verificadas e
+         * ordenadas). Se por algum motivo só vier `source`, montamos a lista
+         * com ela — o player nunca fica sem fonte.
+         */
+        const list: SourceOption[] =
+          result.sources && result.sources.length
+            ? result.sources
+            : result.source
+              ? [
+                  {
+                    id: 'catalog',
+                    label: 'Opção 1',
+                    url: result.source.url,
+                    mode: result.source.mode,
+                    verified: null,
+                  },
+                ]
+              : []
+
+        setSources(list)
+        setSourceIndex(0)
         setLoading(true)
       } else {
         setLoading(false)
@@ -218,7 +247,11 @@ export function PlayerPage() {
     }
   }, [ready, id, type, season, episode, authAttempt, user])
 
-  // Inicializa o <video> para fontes diretas
+  const source = sources[sourceIndex] ?? null
+  const isEmbed = source?.mode === 'embed'
+  const hasMultiple = sources.length > 1
+
+  // ── <video> nativo (modo direto) ─────────────────────────────────────────
   useEffect(() => {
     if (!source || source.mode !== 'direct') return
     const video = videoRef.current
@@ -237,7 +270,7 @@ export function PlayerPage() {
         hls.attachMedia(video)
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (data.fatal) {
-            setError('Não foi possível carregar o vídeo. Tente novamente mais tarde.')
+            setError('Não foi possível carregar o vídeo. Tente outro servidor.')
             setLoading(false)
           }
         })
@@ -250,7 +283,6 @@ export function PlayerPage() {
       video.src = source.url
     }
 
-    // Retoma de onde parou — exceto quando o cliente escolheu "Assistir do início".
     const saved = fromStart ? null : progressFor(String(title?.tmdb_id ?? ''))
     if (saved && saved.position_seconds > 5) {
       const onMeta = () => {
@@ -269,10 +301,10 @@ export function PlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source])
 
-  // Salva progresso periodicamente — modo DIRETO (posição real do <video>)
+  // ── Progresso: modo direto ───────────────────────────────────────────────
   useEffect(() => {
     if (!user || !title || source?.mode !== 'direct') return
-    const id = setInterval(() => {
+    const timer = setInterval(() => {
       const v = videoRef.current
       if (!v || v.paused || !v.duration) return
       if (Date.now() - lastSave.current < SAVE_INTERVAL) return
@@ -285,21 +317,10 @@ export function PlayerPage() {
         duration: v.duration,
       })
     }, 5000)
-    return () => clearInterval(id)
+    return () => clearInterval(timer)
   }, [user, title, source, type, season, episode, saveProgress])
 
-  /**
-   * Salva progresso periodicamente — modo EMBED.
-   *
-   * A posição real do vídeo está dentro de um iframe de outro domínio e não é
-   * legível (ver comentário de EMBED_TICK_MS). Contamos o tempo decorrido com a
-   * aba visível e gravamos a cada 15 s. `duration` fica 0 porque não a
-   * conhecemos: o histórico mostra "assistindo" em vez de uma porcentagem
-   * inventada.
-   *
-   * Só grava quando há tempo real decorrido — nunca inventa progresso para
-   * quem abriu a página e saiu.
-   */
+  // ── Progresso: modo embed (tempo decorrido, declarado) ───────────────────
   useEffect(() => {
     if (!user || !title || source?.mode !== 'embed') return
 
@@ -322,7 +343,6 @@ export function PlayerPage() {
     return () => {
       clearInterval(tick)
       clearInterval(save)
-      // Grava o que já foi assistido ao sair da página.
       if (embedElapsed.current >= 5) {
         void saveProgress({
           title,
@@ -335,7 +355,7 @@ export function PlayerPage() {
     }
   }, [user, title, source, type, season, episode, saveProgress])
 
-  // Salva ao sair
+  // ── Salva ao sair ────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       const v = videoRef.current
@@ -352,38 +372,16 @@ export function PlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, type, season, episode])
 
-  /**
-   * Mantém o usuário dentro do MovieFlix quando o provedor tenta assumir a
-   * frente.
-   *
-   * Por que isto existe: liberamos `allow-popups` no iframe porque sem essa
-   * permissão o provedor recusa a reprodução. Com ela, o provedor pode abrir
-   * uma aba. O que ele NÃO pode é tirar o cliente daqui — e é isto que garante:
-   *
-   *   - `window.blur`  → a janela perdeu o foco para algo que o provedor abriu.
-   *   - `window.focus()` no mesmo tick → o MovieFlix volta a ficar na frente.
-   *
-   * Verificado em navegador real: o `blur` dispara e o `focus()` devolve a
-   * janela. Como isso roda no mesmo instante, o cliente não chega a ver a outra
-   * página — no pior caso vê um piscar. Não é o sandbox que fecha a aba (isso é
-   * impossível para uma janela aberta por script de terceiros), é a nossa janela
-   * voltando para a frente imediatamente.
-   *
-   * Não escondemos nada do usuário nem fingimos sucesso: se o vídeo não tocar,
-   * o player mostra o erro dele como sempre.
-   */
+  // ── Mantém o cliente dentro do MovieFlix ─────────────────────────────────
   useEffect(() => {
     function reclaim() {
-      // `focus()` é barato e idempotente; chamar sempre evita depender de
-      // heurística sobre quem roubou o foco.
       try {
         window.focus()
       } catch {
-        /* alguns navegadores recusam sem gesto do usuário — sem problema */
+        /* alguns navegadores recusam sem gesto do usuário */
       }
     }
     window.addEventListener('blur', reclaim)
-    // Cobrir também a troca de aba pelo próprio navegador durante o player.
     document.addEventListener('visibilitychange', reclaim)
     return () => {
       window.removeEventListener('blur', reclaim)
@@ -391,36 +389,122 @@ export function PlayerPage() {
     }
   }, [])
 
-  // Auto-hide da UI — 3 s sem interação, como o usuário pediu na TV.
-  // Qualquer tecla/clique/toque em `pokeUi()` reinicia a contagem.
+  // ── Auto-hide da UI ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!showUi) return
-    const id = setTimeout(() => setShowUi(false), UI_HIDE_MS)
-    return () => clearTimeout(id)
+    const timer = setTimeout(() => setShowUi(false), UI_HIDE_MS)
+    return () => clearTimeout(timer)
   }, [showUi, current, playing, uiPoke])
 
-  /** Mostra os controles e reinicia o relógio do auto-hide. */
-  function pokeUi() {
+  const pokeUi = useCallback(() => {
     setShowUi(true)
     setUiPoke((n) => n + 1)
-  }
+  }, [])
 
-  // Atalhos de teclado / controle remoto
-  //
-  // Na TV o botão OK do controle chega ao navegador como `Enter` (e alguns
-  // aparelhos mandam `MediaPlayPause`).
-  //
-  // Regra do proprietário — SÓ estes comandos existem:
-  //   OK            → pausar / continuar
-  //   →             → avançar 10 s
-  //   ←             → voltar 10 s
-  //   Voltar/Escape → sair do player
-  // Nada de volume, legendas, tela cheia, ajustes ou troca de servidor.
-  //
-  // MOUSE VIRTUAL: segurar OK por 2 s liga/desliga. Com ele ligado, o direcional
-  // move o cursor e o OK clica no ponto — os controles nativos do player
-  // (play/pause, barra, volume, tela cheia) passam a ser alcançáveis pelo
-  // controle, sem duplicar botões. Desligado, tudo funciona como antes.
+  // ── Tela cheia real ──────────────────────────────────────────────────────
+  useEffect(() => {
+    function onChange() {
+      const el = document.fullscreenElement as Element | null
+      setIsFullscreen(Boolean(el && stageRef.current && el === stageRef.current))
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    document.addEventListener('webkitfullscreenchange', onChange as EventListener)
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      document.removeEventListener('webkitfullscreenchange', onChange as EventListener)
+    }
+  }, [])
+
+  /**
+   * Entra/sai da tela cheia no NOSSO contêiner.
+   *
+   * `requestFullscreen` precisa de gesto do usuário — é chamado direto do
+   * clique, sem await antes. Se o navegador recusar (WebView antigo, iOS sem
+   * suporte a elemento), caímos num modo "pseudo-tela-cheia" por CSS: o
+   * contêiner já é `position: fixed; inset: 0`, então basta esconder a UI e
+   * marcar o estado — o vídeo continua preenchendo a tela.
+   */
+  const toggleFullscreen = useCallback(async () => {
+    const el = stageRef.current
+    if (!el) return
+
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null
+      webkitExitFullscreen?: () => Promise<void> | void
+    }
+    const elAny = el as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void
+    }
+
+    const active = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null
+
+    try {
+      if (active) {
+        if (document.exitFullscreen) await document.exitFullscreen()
+        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen()
+        setIsFullscreen(false)
+      } else {
+        if (elAny.requestFullscreen) await elAny.requestFullscreen()
+        else if (elAny.webkitRequestFullscreen) await elAny.webkitRequestFullscreen()
+        setIsFullscreen(true)
+      }
+    } catch {
+      // API indisponível ou recusada: alterna o modo CSS.
+      setIsFullscreen((v) => !v)
+    }
+    setShowUi(false)
+  }, [])
+
+  // ── Troca de servidor ────────────────────────────────────────────────────
+  const switchServer = useCallback(
+    (auto = false) => {
+      if (sources.length < 2) return
+      setSourceIndex((i) => (i + 1) % sources.length)
+      setFrameLoaded(false)
+      setStalled(false)
+      setError(null)
+      setLoading(true)
+      setShowUi(true)
+      setUiPoke((n) => n + 1)
+      if (auto) autoSwitched.current = true
+    },
+    [sources.length],
+  )
+
+  /**
+   * Vigia de 5 segundos.
+   *
+   * Duas situações trocam o servidor sozinhas:
+   *   a) a opção atual já foi verificada como SEM player no servidor
+   *      (`verified === false`) — não há por que esperar;
+   *   b) o iframe não disparou `load` em 5 s — a página está travada.
+   *
+   * Se o iframe carregou, NÃO trocamos por conta própria: o provedor pode
+   * exigir um toque em "Assistir" antes de tocar, e trocar nesse momento
+   * arrancaria o vídeo de quem estava prestes a assistir. Nesse caso o aviso
+   * com o botão de trocar fica disponível.
+   */
+  useEffect(() => {
+    if (!isEmbed || !source) return
+    if (source.verified === false && hasMultiple && !autoSwitched.current) {
+      switchServer(true)
+      return
+    }
+
+    const timer = setTimeout(() => {
+      if (frameLoaded) return
+      if (hasMultiple && !autoSwitched.current) {
+        switchServer(true)
+      } else {
+        setStalled(true)
+        setLoading(false)
+      }
+    }, SERVER_TIMEOUT_MS)
+
+    return () => clearTimeout(timer)
+  }, [isEmbed, source, frameLoaded, hasMultiple, switchServer])
+
+  // ── Atalhos de teclado / controle remoto ─────────────────────────────────
   useEffect(() => {
     const mouse = mouseRef.current!
     const hold = holdRef.current!
@@ -435,17 +519,15 @@ export function PlayerPage() {
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        navigate(-1)
+        // Em tela cheia, Escape sai da tela cheia (o navegador já faz isso);
+        // fora dela, sai do player.
+        if (!document.fullscreenElement) navigate(-1)
         return
       }
-      // Qualquer tecla traz os controles de volta.
       pokeUi()
 
       if (isOk(e.key)) {
         e.preventDefault()
-        // SEMPRE começa a contar o "segurar 2 s" — com o mouse ligado ou não.
-        // É o que permite desligar o mouse segurando OK de novo. O auto-repeat
-        // do controle não reinicia a contagem.
         if (!e.repeat) hold.onDown(performance.now())
         return
       }
@@ -485,8 +567,6 @@ export function PlayerPage() {
 
     function onKeyUp(e: KeyboardEvent) {
       if (!isOk(e.key)) return
-      // Toque curto (sem segurar 2 s): com o mouse ligado é clique na posição
-      // do cursor; desligado é play/pause normal.
       if (hold.onUp() === 'short') {
         if (mouse.active) {
           clickAtRatio(document, window, mouse.ratioX(), mouse.ratioY())
@@ -497,7 +577,6 @@ export function PlayerPage() {
       }
     }
 
-    // Relógio do "segurar OK": liga/desliga o mouse no instante dos 2 s.
     const timer = window.setInterval(() => {
       if (hold.tick(performance.now()) === 'hold') {
         mouse.toggle()
@@ -516,8 +595,6 @@ export function PlayerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Tamanho da tela para o cursor: centraliza na primeira medição e mantém o
-  // cursor dentro da área visível quando a janela muda.
   useEffect(() => {
     const mouse = mouseRef.current!
     const sync = () => mouse.setBounds(window.innerWidth, window.innerHeight)
@@ -550,8 +627,6 @@ export function PlayerPage() {
   const pct = duration ? (current / duration) * 100 : 0
   const bufPct = duration ? (buffered / duration) * 100 : 0
 
-  // Sem sessão: o redirecionamento ao login já foi disparado acima. Não
-  // desenhamos nada além do spinner para não piscar tela intermediária.
   if (authLoading || !user) {
     return (
       <div className="player-page">
@@ -560,7 +635,6 @@ export function PlayerPage() {
     )
   }
 
-  // Verificando autorização — ainda não há decisão para mostrar.
   if (authChecking) {
     return (
       <div className="player-page">
@@ -569,7 +643,6 @@ export function PlayerPage() {
     )
   }
 
-  // Negado: mostra o motivo e a saída (criar conta, assinar, ver planos).
   if (auth && !auth.allowed) {
     return (
       <PlaybackGate
@@ -598,19 +671,25 @@ export function PlayerPage() {
   }
 
   return (
-    <div className="player-page" ref={wrapRef}>
-      <div
-        className="player-stage"
-        onMouseMove={() => pokeUi()}
-        onTouchStart={() => pokeUi()}
-        onClick={() => {
-          // No modo direto o clique/toque do controle é nosso: alterna play.
-          // No modo embed quem manda é o player do provedor (iframe de outro
-          // domínio) — aqui só reexibimos os controles, sem roubar o clique.
-          pokeUi()
-          if (source?.mode === 'direct') void togglePlay()
-        }}
-      >
+    <div className={`player-page ${isFullscreen ? 'is-fullscreen' : ''}`}>
+      <div className="player-stage" ref={stageRef}>
+        {/*
+          SENSOR DE TOQUE.
+
+          Só existe quando a nossa UI está ESCONDIDA. É ele que devolve os
+          controles ao primeiro toque. Com a UI visível ele não existe, então o
+          toque no meio da tela vai direto para o player do provedor (play,
+          pause, barra) — é o que mantém o iframe utilizável.
+        */}
+        {!showUi && (
+          <button
+            type="button"
+            className="player-sensor"
+            aria-label="Mostrar controles"
+            onClick={() => pokeUi()}
+          />
+        )}
+
         {source?.mode === 'direct' && (
           <video
             ref={videoRef}
@@ -633,7 +712,9 @@ export function PlayerPage() {
             }}
             onEnded={() => {
               if (next) {
-                navigate(`/assistir/${title?.tmdb_id}?type=tv&season=${next.season}&episode=${next.episode}`)
+                navigate(
+                  `/assistir/${title?.tmdb_id}?type=tv&season=${next.season}&episode=${next.episode}`,
+                )
               }
             }}
             onError={() => {
@@ -645,34 +726,37 @@ export function PlayerPage() {
 
         {source?.mode === 'embed' && (
           /*
-            Player em página inteira, sem aviso e sem rodapé.
+            O iframe do provedor.
 
-            SANDBOX — o que está liberado e o que não está:
+            `key` = URL: trocar de servidor REMONTA o iframe em vez de só
+            mudar o `src`. Sem isso o navegador mantém o documento antigo e a
+            troca não tem efeito visível.
 
+            SANDBOX — o que está liberado:
               allow-scripts        o player precisa rodar
-              allow-same-origin    o player precisa acessar o próprio storage
+              allow-same-origin    o player precisa do próprio storage
               allow-presentation   tela cheia / cast
               allow-forms          login do provedor, quando houver
 
-            `allow-popups` NÃO está liberado. Era ele que deixava o anúncio do
-            provedor abrir aba nova (Shopee, lojas) no primeiro toque — o toque
-            destinado ao play virava clique de anúncio. Sem essa permissão o
-            navegador bloqueia a abertura e o toque continua sendo do player.
+            `allow-popups` NÃO está liberado: era ele que deixava o anúncio do
+            provedor abrir aba nova no primeiro toque.
+            `allow-top-navigation` também não: o iframe não troca a nossa página.
 
-            `allow-top-navigation` também está ausente: o iframe não consegue
-            trocar a página do MovieFlix.
-
-            `referrerPolicy="origin"` é obrigatório: o provedor EmbedMovies só
-            entrega o player quando recebe o Referer do site que o incorporou.
-            Sem ele devolve uma página de cloaking em vez do vídeo.
+            `referrerPolicy="origin"` é obrigatório — o provedor só entrega o
+            player quando recebe o Referer do site que o incorporou.
           */
           <iframe
+            key={source.url}
             src={source.url}
             title={title?.title ?? 'Player'}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
             referrerPolicy="origin"
             sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
+            onLoad={() => {
+              setFrameLoaded(true)
+              setLoading(false)
+            }}
           />
         )}
 
@@ -682,15 +766,57 @@ export function PlayerPage() {
           </div>
         )}
 
+        {/*
+          AVISO "NÃO ESTÁ RODANDO".
+
+          Aparece quando o iframe não carregou em 5 s e não há outra opção para
+          trocar sozinho, ou quando o cliente pede. Sempre com o botão de trocar
+          servidor — nunca um beco sem saída.
+        */}
+        {stalled && (
+          <div className="player-error">
+            <div className="player-error-card">
+              <h3>O vídeo não está rodando</h3>
+              <p>
+                {hasMultiple
+                  ? 'Este servidor não respondeu. Troque para outra opção — o filme continua do mesmo ponto.'
+                  : 'Este servidor não respondeu agora. Tente novamente em instantes.'}
+              </p>
+              <div className="inline" style={{ justifyContent: 'center' }}>
+                {hasMultiple && (
+                  <button className="btn btn--primary" onClick={() => switchServer()}>
+                    Trocar servidor
+                  </button>
+                )}
+                <button
+                  className="btn btn--outline"
+                  onClick={() => {
+                    setStalled(false)
+                    setFrameLoaded(false)
+                    setUiPoke((n) => n + 1)
+                  }}
+                >
+                  Tentar de novo
+                </button>
+                <button className="btn btn--ghost" onClick={() => navigate(-1)}>
+                  Voltar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="player-error">
             <div className="player-error-card">
               <h3>Não foi possível reproduzir</h3>
               <p>{error}</p>
               <div className="inline" style={{ justifyContent: 'center' }}>
-                <button className="btn btn--primary" onClick={() => window.location.reload()}>
-                  Tentar novamente
-                </button>
+                {hasMultiple && (
+                  <button className="btn btn--primary" onClick={() => switchServer()}>
+                    Trocar servidor
+                  </button>
+                )}
                 <button className="btn btn--outline" onClick={() => navigate(-1)}>
                   Voltar
                 </button>
@@ -700,14 +826,16 @@ export function PlayerPage() {
         )}
 
         {/*
-          No modo EMBED a sobreposição é MÍNIMA: só um punhado de botões
-          flutuantes no canto. O player do provedor (iframe) traz a barra dele —
-          desenhar a nossa por cima era a origem das duas barras sobrepostas
-          que o usuário viu na TV.
+          NOSSA UI — some sozinha.
+
+          No modo embed ela é mínima de propósito: o player do provedor já
+          desenha a barra dele, e uma barra nossa por cima virava duas barras
+          sobrepostas. Aqui ficam só: voltar, título, tela cheia e trocar
+          servidor.
         */}
         <div
           className={`player-overlay ${showUi ? 'visible' : ''} ${
-            source?.mode === 'embed' ? 'player-overlay--minimal' : ''
+            isEmbed ? 'player-overlay--minimal' : ''
           }`}
         >
           <div className="player-top">
@@ -722,93 +850,86 @@ export function PlayerPage() {
                 {title?.dublado_ptbr ? ' · Dublado (pt-BR)' : ''}
               </div>
             </div>
-            {/*
-              Lado direito do cabeçalho VAZIO, de propósito.
 
-              O proprietário pediu para remover os elementos desnecessários do
-              lado direito: nada de legendas, tela cheia, próximo episódio,
-              ajustes, volume ou troca de servidor. O título pode ficar.
-            */}
+            <div className="player-top-actions">
+              {hasMultiple && (
+                <button
+                  className="player-btn player-btn--pill"
+                  onClick={() => switchServer()}
+                  aria-label="Trocar servidor"
+                  title={`Servidor: ${source?.label ?? ''} — toque para trocar`}
+                >
+                  <span className="player-btn-label">{source?.label ?? 'Servidor'}</span>
+                </button>
+              )}
+              <button
+                className="player-btn"
+                onClick={() => void toggleFullscreen()}
+                aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+                title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+              >
+                {isFullscreen ? <XIcon size={20} /> : <FullscreenIcon size={20} />}
+              </button>
+            </div>
           </div>
 
-          {/*
-            Rodapé SÓ no modo direto (<video> nativo), onde os controles são
-            nossos. No modo embed ele não existe — ver comentário no fim do
-            bloco. É essa condição que remove a segunda barra da tela.
-          */}
           {source?.mode === 'direct' && (
             <div className="player-bottom">
-              <>
-                <div
-                  className="progress-track"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    seekTo((e.clientX - rect.left) / rect.width)
-                  }}
-                  role="slider"
-                  aria-label="Progresso"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(pct)}
-                  tabIndex={0}
+              <div
+                className="progress-track"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  seekTo((e.clientX - rect.left) / rect.width)
+                }}
+                role="slider"
+                aria-label="Progresso"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(pct)}
+                tabIndex={0}
+              >
+                <div className="progress-buffer" style={{ width: `${bufPct}%` }} />
+                <div className="progress-fill" style={{ width: `${pct}%` }} />
+                <div className="progress-knob" style={{ left: `${pct}%` }} />
+              </div>
+
+              <div className="player-controls" style={{ marginTop: 14 }}>
+                <button
+                  className="player-btn player-btn--main"
+                  onClick={togglePlay}
+                  aria-label={playing ? 'Pausar' : 'Reproduzir'}
                 >
-                  <div className="progress-buffer" style={{ width: `${bufPct}%` }} />
-                  <div className="progress-fill" style={{ width: `${pct}%` }} />
-                  <div className="progress-knob" style={{ left: `${pct}%` }} />
-                </div>
+                  {playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
+                </button>
+                <button
+                  className="player-btn"
+                  onClick={() => {
+                    const v = videoRef.current
+                    if (v) v.currentTime = Math.max(0, v.currentTime - 10)
+                  }}
+                  aria-label="Voltar 10 segundos"
+                >
+                  <SkipBack size={19} />
+                </button>
+                <button
+                  className="player-btn"
+                  onClick={() => {
+                    const v = videoRef.current
+                    if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
+                  }}
+                  aria-label="Avançar 10 segundos"
+                >
+                  <SkipForward size={19} />
+                </button>
 
-                {/*
-                  Controles permitidos — e SÓ estes:
-                    OK (play/pause), ← 10 s, → 10 s, e o tempo atual/duração.
-                  Sem volume, sem legendas, sem tela cheia, sem próximo
-                  episódio, sem ajustes, sem troca de servidor.
-                */}
-                <div className="player-controls" style={{ marginTop: 14 }}>
-                  <button
-                    className="player-btn player-btn--main"
-                    onClick={togglePlay}
-                    aria-label={playing ? 'Pausar' : 'Reproduzir'}
-                  >
-                    {playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
-                  </button>
-                  <button
-                    className="player-btn"
-                    onClick={() => {
-                      const v = videoRef.current
-                      if (v) v.currentTime = Math.max(0, v.currentTime - 10)
-                    }}
-                    aria-label="Voltar 10 segundos"
-                  >
-                    <SkipBack size={19} />
-                  </button>
-                  <button
-                    className="player-btn"
-                    onClick={() => {
-                      const v = videoRef.current
-                      if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
-                    }}
-                    aria-label="Avançar 10 segundos"
-                  >
-                    <SkipForward size={19} />
-                  </button>
-
-                  <span className="player-time">
-                    {formatTime(current)} / {formatTime(duration)}
-                  </span>
-                </div>
-              </>
+                <span className="player-time">
+                  {formatTime(current)} / {formatTime(duration)}
+                </span>
+              </div>
             </div>
           )}
         </div>
 
-        {/*
-          CURSOR DO MOUSE VIRTUAL.
-
-          Só aparece com o mouse ligado (segurar OK por 2 s). É puramente
-          visual: `pointer-events: none` garante que ele não intercepta o clique
-          que ele mesmo dispara. `mouseTick` é lido para o React redesenhar a
-          posição a cada passo do direcional.
-        */}
         {mouseOn && (
           <div
             className="tv-cursor"

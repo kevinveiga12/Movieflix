@@ -14,6 +14,7 @@ import {
 import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-server.js'
 import { applyTrialMetadata } from '../lib/trial-claims.js'
 import { redeemTrialCode, TRIAL_CODE_MAX_ATTEMPTS } from '../lib/trial-codes.js'
+import { resolveSources } from '../lib/providers.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -136,15 +137,46 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
 
     recordDenial({ tmdbId, reason: 'allowed', userId: auth.user.id })
 
+    /**
+     * MODO DIRETO vs EMBED.
+     *
+     * Se o admin cadastrou um ARQUIVO (.mp4/.m3u8), ele é a única fonte: o
+     * <video> nativo toca e não existe "outro servidor" para trocar.
+     *
+     * Se é embed, devolvemos TODAS as opções de servidor verificadas
+     * (`sources`), não só a primeira. É isso que permite o player trocar
+     * sozinho quando a opção 1 não entrega vídeo — antes o cliente recebia uma
+     * única URL e, se ela falhasse, ficava sem saída.
+     */
+    const isDirect = /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i.test(sourceUrl)
+
+    let sources
+    if (isDirect) {
+      sources = [{ id: 'direct', label: 'Arquivo', url: sourceUrl, mode: 'direct', verified: true }]
+    } else {
+      const resolved = await resolveSources({
+        tmdbId,
+        season: title.type === 'tv' || season != null ? season : null,
+        episode: title.type === 'tv' || season != null ? episode : null,
+        catalogUrl: sourceUrl,
+      })
+      sources = resolved.map((s) => ({ ...s, mode: 'embed' }))
+      // Se a resolução não devolveu nada (tmdbId estranho), mantém a URL do
+      // catálogo para não deixar o cliente sem fonte nenhuma.
+      if (!sources.length) {
+        sources = [{ id: 'catalog', label: 'Opção 1', url: sourceUrl, mode: 'embed', verified: null }]
+      }
+    }
+
     res.json({
       allowed: true,
       title: { tmdb_id: title.tmdb_id, title: title.title, quality: title.quality },
       source: {
-        url: sourceUrl,
+        url: sources[0].url,
         label: sourceLabel,
-        // Só é arquivo reproduzível se for extensão de mídia.
-        mode: /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i.test(sourceUrl) ? 'direct' : 'embed',
+        mode: isDirect ? 'direct' : 'embed',
       },
+      sources,
       plan: {
         code: auth.access?.plan?.code ?? null,
         label: auth.access?.reason === 'plan' ? 'Plano ativo' : 'Mês grátis',
