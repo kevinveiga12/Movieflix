@@ -66,24 +66,30 @@ check('os ids são únicos', () => {
   assert.equal(new Set(ids).size, ids.length, `ids repetidos: ${ids.join(', ')}`)
 })
 
-check('watchplay não anuncia episódio (não tem catálogo de séries)', () => {
-  const wp = PROVIDERS.find((p) => p.id === 'watchplay')
-  assert.ok(wp, 'watchplay ausente')
-  assert.equal(wp.episode, null, 'watchplay não deve montar URL de episódio')
+check('o StreamBetter não está mais entre os provedores', () => {
+  assert.equal(
+    PROVIDERS.find((p) => p.id === 'streambetter'),
+    undefined,
+    'streambetter ainda está registrado',
+  )
+})
+
+check('o player azul (myembed) é o primeiro provedor', () => {
+  assert.equal(PROVIDERS[0].id, 'myembed', `primeiro é ${PROVIDERS[0].id}`)
 })
 
 console.log('\n[2] Montagem de URL')
 
 check('filme usa o padrão de cada provedor', () => {
-  const wp = PROVIDERS.find((p) => p.id === 'watchplay')
-  assert.equal(wp.movie('550'), '/movie/550')
-  const sb = PROVIDERS.find((p) => p.id === 'streambetter')
-  assert.equal(sb.movie('550'), '/filme/550?lang=pt-BR')
+  const me = PROVIDERS.find((p) => p.id === 'myembed')
+  assert.equal(me.movie('550'), '/filme/550')
+  const pf = PROVIDERS.find((p) => p.id === 'playerflix')
+  assert.equal(pf.movie('550'), '/filme/550')
 })
 
 check('série usa temporada e episódio', () => {
-  const sb = PROVIDERS.find((p) => p.id === 'streambetter')
-  assert.equal(sb.episode('1399', 2, 5), '/serie/1399/2/5?lang=pt-BR')
+  const me = PROVIDERS.find((p) => p.id === 'myembed')
+  assert.equal(me.episode('1399', 2, 5), '/serie/1399/2/5')
 })
 
 console.log('\n[3] Resolução (com verificação de rede dublada)')
@@ -147,8 +153,8 @@ await checkAsync('série monta URL de episódio e não inclui provedor sem séri
     assert.ok(!s.url.includes('/movie/'), `URL de filme numa série: ${s.url}`)
   }
   assert.ok(
-    !list.some((s) => s.id === 'watchplay'),
-    'watchplay não tem catálogo de séries e não deveria aparecer',
+    !list.some((s) => s.id === 'streambetter'),
+    'streambetter foi removido e não deveria aparecer',
   )
 })
 

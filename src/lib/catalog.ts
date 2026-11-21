@@ -8,6 +8,37 @@ import type { Title, MediaType } from './types'
  * cota da API do TMDB a cada visita. O painel administrativo pode regenerar.
  */
 
+/**
+ * Provedor ÚNICO de reprodução: o player azul (EmbedMovies / myembed.biz).
+ *
+ * O catálogo publicado foi gerado quando o provedor era o StreamBetter e traz
+ * `video_url` apontando para `streambetter.shop` em todos os 18.080 filmes.
+ * O servidor já reescreve isso na leitura (server/lib/static-catalog.js), mas o
+ * NAVEGADOR lê este JSON direto de /filmes/*.json — sem a mesma reescrita, a
+ * URL do StreamBetter continuava chegando ao cliente (e era ela que aparecia
+ * em "com fonte" e em qualquer caminho que usasse `video_url`).
+ *
+ * A normalização aqui garante que o StreamBetter não exista em nenhum ponto do
+ * app: qualquer host de embed que não seja o player azul vira o player azul.
+ */
+export const EMBED_PROVIDER = 'https://myembed.biz'
+
+const EMBED_HOST = /^https?:\/\/([^/]+)/i
+
+/** Reescreve uma URL de embed de outro provedor para o player azul. */
+function normalizeVideoUrl(raw: string | null | undefined, tmdbId: number): string {
+  const url = String(raw ?? '').trim()
+  if (!url) return ''
+  // Arquivo direto (MP4/HLS) cadastrado pelo admin: preservado como está.
+  if (/\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i.test(url)) return url
+  const m = EMBED_HOST.exec(url)
+  if (!m) return url
+  const host = m[1].toLowerCase()
+  if (host === 'myembed.biz' || host.endsWith('.myembed.biz')) return url
+  // Qualquer outro provedor de embed (streambetter.shop, etc.) → player azul.
+  return tmdbId > 0 ? `${EMBED_PROVIDER}/filme/${tmdbId}` : ''
+}
+
 let moviesCache: Title[] | null = null
 let seriesCache: Title[] | null = null
 let loading: Promise<void> | null = null
@@ -52,7 +83,7 @@ function normalizeTitle(raw: Title): Title {
     description: raw.description ?? '',
     poster_url: raw.poster_url ?? '',
     backdrop_url: raw.backdrop_url ?? '',
-    video_url: raw.video_url ?? '',
+    video_url: normalizeVideoUrl(raw.video_url, Number(raw.tmdb_id ?? raw.id ?? 0)),
     episodes_available: Array.isArray(raw.episodes_available) ? raw.episodes_available : [],
   }
 }

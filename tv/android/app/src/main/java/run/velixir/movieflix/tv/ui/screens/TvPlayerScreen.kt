@@ -595,18 +595,44 @@ private val BRIDGE_JS: String = """
         (document.head || document.documentElement).appendChild(st);
       }
 
-      // O selo "embedmovies.org" é um <span> solto no body, sem classe.
-      var spans = document.querySelectorAll('body > span');
-      for (var i = 0; i < spans.length; i++) {
-        var s = spans[i];
-        if (s && /embedmovies|embed/i.test(s.textContent || '')) {
-          s.style.display = 'none';
+      // LIMPEZA GENERICA.
+      // A lista de classes por provedor quebrava a cada troca de provedor
+      // (ArtPlayer -> embedplay.one): os botoes voltavam a aparecer porque os
+      // nomes de classe eram outros. Aqui nao dependemos de nome nenhum:
+      // escondemos todo elemento que nao seja o <video> nem um ancestral dele.
+      // Sobra o video, e so ele.
+      var v = pick();
+      if (!v) return;
+      var keep = [];
+      var n = v;
+      while (n && n !== document.body) { keep.push(n); n = n.parentNode; }
+      var kids = document.body.children;
+      for (var i = 0; i < kids.length; i++) {
+        var el = kids[i];
+        if (!el || el.tagName === 'VIDEO') continue;
+        if (keep.indexOf(el) !== -1) continue;
+        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') continue;
+        if (!el.classList.contains('__mf_hidden')) el.classList.add('__mf_hidden');
+      }
+      // Dentro da cadeia que contem o video, esconde os irmaos que nao levam
+      // ao video (barras, paineis, titulos, botoes) - o video fica sozinho.
+      for (var k = 0; k < keep.length; k++) {
+        var node = keep[k];
+        var sibs = node.parentNode ? node.parentNode.children : null;
+        if (!sibs) continue;
+        for (var j = 0; j < sibs.length; j++) {
+          var s = sibs[j];
+          if (!s || s === node) continue;
+          if (s.tagName === 'SCRIPT' || s.tagName === 'STYLE' || s.tagName === 'LINK') continue;
+          if (s.tagName === 'VIDEO') continue;
+          if (keep.indexOf(s) !== -1) continue;
+          if (!s.classList.contains('__mf_hidden')) s.classList.add('__mf_hidden');
         }
       }
 
       // NAO chamar blur() aqui. O laco de 500 ms chamava blur no
       // activeElement a cada volta; o provedor devolvia o foco e os dois
-      // brigavam — era isso que fazia o OK precisar de varias pressoes e o
+      // brigavam - era isso que fazia o OK precisar de varias pressoes e o
       // anel amarelo piscar. O foco agora fica no Box do Compose (o WebView
       // nao e focavel), entao nao ha o que roubar.
     } catch (e) {}
@@ -836,6 +862,45 @@ private class PlayerBridge(private val onMessage: (String) -> Unit) {
     fun post(json: String) = onMessage(json)
 }
 
+/**
+ * Esconde as barras do sistema (status/navegação) — tela cheia imersiva.
+ *
+ * Sem isto, mesmo com a view do player em cima de tudo, a barra de status do
+ * Android continuava desenhada e o vídeo não ocupava a tela inteira.
+ */
+private fun hideSystemBars(activity: android.app.Activity) {
+    runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val c = activity.window.insetsController ?: return@runCatching
+            c.hide(android.view.WindowInsets.Type.systemBars())
+            c.systemBarsBehavior =
+                android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            @Suppress("DEPRECATION")
+            activity.window.decorView.systemUiVisibility = (
+                android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                )
+        }
+    }
+}
+
+/** Devolve as barras do sistema ao sair da tela cheia. */
+private fun showSystemBars(activity: android.app.Activity) {
+    runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            activity.window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+        } else {
+            @Suppress("DEPRECATION")
+            activity.window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
@@ -852,6 +917,19 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     var waitedLong by remember { mutableStateOf(false) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
     var legacyBridge by remember { mutableStateOf(false) }
+
+    /**
+     * Tela cheia do player do provedor.
+     *
+     * `onShowCustomView` entrega a view do player; guardamos aqui para poder
+     * removê-la do decorView ao sair. `isFullscreen` esconde a NOSSA barra de
+     * progresso: em tela cheia fica só o vídeo, como o proprietário pediu.
+     */
+    var fullscreenView by remember { mutableStateOf<android.view.View?>(null) }
+    var fullscreenCallback by remember {
+        mutableStateOf<WebChromeClient.CustomViewCallback?>(null)
+    }
+    var isFullscreen by remember { mutableStateOf(false) }
 
     // O Box do Compose é o ÚNICO elemento focável da tela. É ele que recebe o
     // D-pad — o WebView não é focável, então o foco nunca entra no DOM do
@@ -1004,7 +1082,28 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                             true
                         }
                         Key.Back -> {
-                            onBack(); true
+                            // Em tela cheia, Voltar sai da tela cheia primeiro
+                            // (é o que o usuário espera); só depois sai do player.
+                            if (isFullscreen) {
+                                webView?.evaluateJavascript(
+                                    "document.exitFullscreen && document.exitFullscreen();" +
+                                        "document.webkitExitFullscreen && document.webkitExitFullscreen();",
+                                    null,
+                                )
+                                val act = (webView?.context as? android.app.Activity)
+                                if (act != null) {
+                                    val decor = act.window.decorView as android.view.ViewGroup
+                                    fullscreenView?.let { decor.removeView(it) }
+                                    fullscreenView = null
+                                    fullscreenCallback?.onCustomViewHidden()
+                                    fullscreenCallback = null
+                                    isFullscreen = false
+                                    showSystemBars(act)
+                                }
+                            } else {
+                                onBack()
+                            }
+                            true
                         }
                         else -> false
                     }
@@ -1108,6 +1207,61 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                             isUserGesture: Boolean,
                             resultMsg: android.os.Message?,
                         ): Boolean = false
+
+                        /**
+                         * TELA CHEIA DE VERDADE.
+                         *
+                         * Causa raiz do bug relatado ("clico em tela cheia,
+                         * aparece uma borda azul, mas os botoes nao somem"):
+                         * o player do provedor pede tela cheia pelo caminho
+                         * padrao do navegador — `element.requestFullscreen()`
+                         * ou `video.webkitEnterFullscreen()`. No WebView do
+                         * Android esse pedido NAO e atendido sozinho: ele chega
+                         * aqui, em `onShowCustomView`. Sem esta implementacao o
+                         * pedido era simplesmente descartado — nada mudava na
+                         * tela, e o unico efeito visivel era o anel de foco do
+                         * D-pad em volta do botao. Nao era "tela cheia com
+                         * borda": era tela cheia que nunca acontecia.
+                         *
+                         * Aqui o pedido e atendido: a view do player vai para
+                         * uma camada em cima de TUDO (decorView), as barras do
+                         * sistema somem e a nossa barra de progresso tambem —
+                         * fica so o video. Ao sair, tudo volta como estava.
+                         */
+                        override fun onShowCustomView(
+                            view: android.view.View?,
+                            callback: CustomViewCallback?,
+                        ) {
+                            if (view == null) return
+                            val activity = (context as? android.app.Activity) ?: return
+                            val decor = activity.window.decorView as android.view.ViewGroup
+                            if (fullscreenView != null) {
+                                callback?.onCustomViewHidden()
+                                return
+                            }
+                            fullscreenView = view
+                            fullscreenCallback = callback
+                            decor.addView(
+                                view,
+                                android.view.ViewGroup.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                ),
+                            )
+                            isFullscreen = true
+                            hideSystemBars(activity)
+                        }
+
+                        override fun onHideCustomView() {
+                            val activity = (context as? android.app.Activity) ?: return
+                            val decor = activity.window.decorView as android.view.ViewGroup
+                            fullscreenView?.let { decor.removeView(it) }
+                            fullscreenView = null
+                            fullscreenCallback?.onCustomViewHidden()
+                            fullscreenCallback = null
+                            isFullscreen = false
+                            showSystemBars(activity)
+                        }
                     }
 
                     webViewClient = object : WebViewClient() {
@@ -1240,10 +1394,20 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         }
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
-        TvProgressBar(position = positionState.value, duration = durationState.value, visible = ui.visible)
+        // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
+        // Em tela cheia ela some: fica só o vídeo, como o proprietário pediu.
+        if (!isFullscreen) {
+            TvProgressBar(
+                position = positionState.value,
+                duration = durationState.value,
+                visible = ui.visible,
+            )
+        }
 
         // Cursor do mouse virtual (só aparece com o mouse ligado).
-        VirtualCursor(mouse, mouseVersion)
+        if (!isFullscreen) {
+            VirtualCursor(mouse, mouseVersion)
+        }
     }
 }
 
@@ -1333,6 +1497,7 @@ private fun formatClock(seconds: Double): String {
 private fun isProviderHost(host: String): Boolean =
     host.contains("myembed") ||
         host.contains("playerflix") ||
-        host.contains("streambetter") ||
+        host.contains("embedplay") ||
+        host.contains("embedmovies") ||
         host.contains("cloudflare") ||
         host.contains("challenges.")

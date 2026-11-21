@@ -826,18 +826,21 @@ export function PlayerPage() {
         )}
 
         {/*
-          NOSSA UI — some sozinha.
+        {/*
+          MODO EMBED — NENHUM overlay nosso.
 
-          No modo embed ela é mínima de propósito: o player do provedor já
-          desenha a barra dele, e uma barra nossa por cima virava duas barras
-          sobrepostas. Aqui ficam só: voltar, título, tela cheia e trocar
-          servidor.
+          O player azul (iframe de outra origem) desenha a própria interface,
+          incluindo o botão de tela cheia. Qualquer elemento nosso por cima
+          disputa o clique: era isso que fazia o botão de tela cheia do
+          provedor só receber foco (a borda azul) e não executar a ação — o
+          clique morria na nossa camada, que cobre a tela inteira.
+
+          Sem overlay, o clique chega ao iframe e a tela cheia do provedor
+          funciona. A saída continua disponível por Escape e pelo botão
+          Voltar do navegador/aparelho.
         */}
-        <div
-          className={`player-overlay ${showUi ? 'visible' : ''} ${
-            isEmbed ? 'player-overlay--minimal' : ''
-          }`}
-        >
+        {!isEmbed && (
+        <div className={`player-overlay ${showUi ? 'visible' : ''}`}>
           <div className="player-top">
             <button className="player-btn" onClick={() => navigate(-1)} aria-label="Voltar">
               <ArrowLeft size={20} />
@@ -929,16 +932,6 @@ export function PlayerPage() {
             </div>
           )}
         </div>
-
-        {mouseOn && (
-          <div
-            className="tv-cursor"
-            data-tick={mouseTick}
-            style={{
-              left: `${mouseRef.current!.ratioX() * 100}%`,
-              top: `${mouseRef.current!.ratioY() * 100}%`,
-            }}
-          />
         )}
       </div>
     </div>

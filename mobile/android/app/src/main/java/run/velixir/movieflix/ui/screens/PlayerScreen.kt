@@ -225,6 +225,11 @@ internal fun EmbedPlayer(url: String) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var failed by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }
+    // Tela cheia do player do provedor (ver onShowCustomView).
+    var fullscreenView by remember { mutableStateOf<android.view.View?>(null) }
+    var fullscreenCallback by remember {
+        mutableStateOf<WebChromeClient.CustomViewCallback?>(null)
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -266,33 +271,71 @@ internal fun EmbedPlayer(url: String) {
                             isUserGesture: Boolean,
                             resultMsg: android.os.Message?,
                         ): Boolean = false
-                    }
 
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                        ): Boolean {
-                            // Só o próprio provedor navega dentro do WebView.
-                            // Qualquer outro destino é bloqueado — nada abre fora.
-                            val host = request?.url?.host ?: return true
-                            return !isProviderHost(host)
-                        }
-
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            ready = true
-                        }
-
-                        override fun onReceivedError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            error: android.webkit.WebResourceError?,
+                        /**
+                         * TELA CHEIA DE VERDADE.
+                         *
+                         * O player do provedor pede tela cheia por
+                         * `requestFullscreen()`/`webkitEnterFullscreen()`. No
+                         * WebView do Android esse pedido chega em
+                         * `onShowCustomView` — e sem esta implementação ele era
+                         * descartado: nada acontecia na tela, só o anel de foco
+                         * do botão. Aqui o pedido é atendido de fato.
+                         */
+                        override fun onShowCustomView(
+                            view: android.view.View?,
+                            callback: CustomViewCallback?,
                         ) {
-                            super.onReceivedError(view, request, error)
-                            // Só a navegação principal interessa: erro em um
-                            // recurso secundário não derruba o player.
-                            if (request?.isForMainFrame == true) failed = true
+                            if (view == null) return
+                            val activity = (context as? android.app.Activity) ?: return
+                            val decor = activity.window.decorView as android.view.ViewGroup
+                            if (fullscreenView != null) {
+                                callback?.onCustomViewHidden()
+                                return
+                            }
+                            fullscreenView = view
+                            fullscreenCallback = callback
+                            decor.addView(
+                                view,
+                                android.view.ViewGroup.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                ),
+                            )
+                            runCatching {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                    activity.window.insetsController?.hide(
+                                        android.view.WindowInsets.Type.systemBars(),
+                                    )
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    activity.window.decorView.systemUiVisibility = (
+                                        android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                                            or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                            or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                        )
+                                }
+                            }
+                        }
+
+                        override fun onHideCustomView() {
+                            val activity = (context as? android.app.Activity) ?: return
+                            val decor = activity.window.decorView as android.view.ViewGroup
+                            fullscreenView?.let { decor.removeView(it) }
+                            fullscreenView = null
+                            fullscreenCallback?.onCustomViewHidden()
+                            fullscreenCallback = null
+                            runCatching {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                    activity.window.insetsController?.show(
+                                        android.view.WindowInsets.Type.systemBars(),
+                                    )
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    activity.window.decorView.systemUiVisibility =
+                                        android.view.View.SYSTEM_UI_FLAG_VISIBLE
+                                }
+                            }
                         }
                     }
 
@@ -341,6 +384,7 @@ internal fun EmbedPlayer(url: String) {
 private fun isProviderHost(host: String): Boolean =
     host.contains("myembed") ||
         host.contains("playerflix") ||
-        host.contains("streambetter") ||
+        host.contains("embedplay") ||
+        host.contains("embedmovies") ||
         host.contains("cloudflare") ||
         host.contains("challenges.")

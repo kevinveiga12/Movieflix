@@ -77,30 +77,15 @@ const CHALLENGE_MARKERS = [
  */
 export const PROVIDERS = [
   {
-    id: 'watchplay',
-    label: 'Opção 1',
-    base: 'https://v2.watchplay.shop',
-    movie: (id) => `/movie/${id}`,
-    // Este provedor não tem catálogo de séries: /tv/... cai no login dele.
-    episode: null,
-  },
-  {
-    id: 'streambetter',
-    label: 'Opção 2',
-    base: 'https://streambetter.shop',
-    movie: (id) => `/filme/${id}?lang=pt-BR`,
-    episode: (id, s, e) => `/serie/${id}/${s}/${e}?lang=pt-BR`,
-  },
-  {
     id: 'myembed',
-    label: 'Opção 3',
+    label: 'Servidor principal',
     base: 'https://myembed.biz',
     movie: (id) => `/filme/${id}`,
     episode: (id, s, e) => `/serie/${id}/${s}/${e}`,
   },
   {
     id: 'playerflix',
-    label: 'Opção 4',
+    label: 'Opção 2',
     base: 'https://playerflix.ink',
     movie: (id) => `/filme/${id}`,
     episode: (id, s, e) => `/serie/${id}/${s}/${e}`,
