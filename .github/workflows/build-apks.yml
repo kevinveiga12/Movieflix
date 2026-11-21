@@ -18,6 +18,7 @@ on:
     branches: [main]
     paths:
       - 'mobile/android/**'
+      - 'mobile/shell/**'
       - 'tv/android/**'
       - 'scripts/verify-apk.py'
       - 'scripts/check-screenshot.py'
@@ -128,8 +129,12 @@ jobs:
           keytool -list -keystore movieflix-release.keystore \
             -storepass "${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}" | tail -3
 
+      # O app mobile agora e a CASCA (WebView) em mobile/shell/android: ela
+      # carrega o site publicado, entao qualquer mudanca no site aparece no app
+      # sem gerar versao nova. O app nativo antigo (mobile/android) continua no
+      # repositorio, mas nao e mais o que se distribui.
       - name: Build mobile
-        working-directory: mobile/android
+        working-directory: mobile/shell/android
         env:
           MF_KEYSTORE: ${{ github.workspace }}/movieflix-release.keystore
           MF_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'movieflix2026' }}
@@ -149,7 +154,7 @@ jobs:
       - name: Coletar APKs
         run: |
           mkdir -p out
-          find mobile/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/movieflix-mobile-release.apk \;
+          find mobile/shell/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/movieflix-mobile-release.apk \;
           find tv/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/movieflix-tv-release.apk \;
           ls -lh out/
 
@@ -157,8 +162,29 @@ jobs:
       # Compose, o app abre em tela preta — este passo falha antes de publicar.
       - name: Verificar conteudo dos APKs
         run: |
-          python3 scripts/verify-apk.py out/movieflix-mobile-release.apk
+          python3 scripts/verify-shell-apk.py out/movieflix-mobile-release.apk
           python3 scripts/verify-apk.py out/movieflix-tv-release.apk
+
+      # Publica o APK Android no proprio site (public/apk/movieflix-android.apk)
+      # e faz commit. Assim o botao "Baixar para Android" de /baixar-app sempre
+      # aponta para o build mais recente, sem passo manual.
+      - name: Publicar APK Android no site
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cp out/movieflix-mobile-release.apk public/apk/movieflix-android.apk
+          # O APK da TV NAO vai para public/: ele e privado e so sai pela rota
+          # de admin. Fica em storage/apps/, que nao e servido estaticamente.
+          mkdir -p storage/apps
+          cp out/movieflix-tv-release.apk storage/apps/movieflix-tv.apk
+          git config user.name "MovieFlix Build"
+          git config user.email "build@movieflix.local"
+          git add public/apk/movieflix-android.apk storage/apps/movieflix-tv.apk
+          if git diff --cached --quiet; then
+            echo "APKs sem mudanca — nada a commitar"
+          else
+            git commit -m "chore(apk): publica os APKs Android e TV $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
 
       # ── Emulador: prova visual de que o app abre ───────────────────────────
       - name: Habilitar KVM

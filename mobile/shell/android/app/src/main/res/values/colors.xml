@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mf_bg">#0A0A0F</color>
+    <color name="mf_bg_elev">#121218</color>
+    <color name="mf_red">#E50914</color>
+    <color name="mf_text">#F5F5F7</color>
+    <color name="mf_text_dim">#9A9AA5</color>
+</resources>

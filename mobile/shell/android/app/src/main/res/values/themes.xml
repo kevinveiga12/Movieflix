@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Tema base: sem barra de ação, fundo escuro do MovieFlix. -->
+    <style name="Theme.MovieFlix" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/mf_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <!-- Splash nativo: o logo aparece enquanto a primeira página carrega. -->
+    <style name="Theme.MovieFlix.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/mf_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.MovieFlix</item>
+    </style>
+</resources>

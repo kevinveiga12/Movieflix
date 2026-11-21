@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { DownloadIcon, CheckIcon, InfoIcon } from '../components/Icons'
+import { detectAppEnv, rememberAppEnv } from '../lib/appEnv'
 
 export function SettingsPage() {
   const { user, updatePassword, signOut } = useAuth()
@@ -114,9 +115,7 @@ export function SettingsPage() {
 
       <div className="panel">
         <div className="panel-title">Aplicativos</div>
-        <p className="panel-sub">
-          Instale o MovieFlix no celular, na TV ou use direto no navegador.
-        </p>
+        <p className="panel-sub">Instale o MovieFlix no Android ou no iPhone e use como um app.</p>
         <Link to="/baixar-app" className="btn btn--outline">
           <DownloadIcon size={17} /> Ver aplicativos
         </Link>
@@ -133,81 +132,73 @@ export function SettingsPage() {
   )
 }
 
-/**
- * Links de distribuição dos aplicativos.
+/* ────────────────────────────────────────────────────────────────────────────
+ * PÁGINA DE APLICATIVOS
  *
- * Ficam `null` enquanto o instalador não existir de verdade. A página então
- * mostra "Em desenvolvimento" em vez de um botão que não baixa nada — um
- * botão falso é pior do que a ausência dele.
+ * Dois apps, e só dois: Android e iPhone. O aplicativo de TV saiu desta página
+ * de propósito — ele está em manutenção e a distribuição dele agora é feita
+ * apenas dentro do painel de administrador (`/admin` → aba Aplicativos). Não
+ * existe link, texto ou menção ao app de TV em nenhum lugar público do site.
  *
- * Para publicar: gere o APK (veja mobile/android/BUILD.md e
- * tv/android/BUILD.md), coloque o arquivo em `public/apk/` e troque o `null`
- * pelo caminho, ex.: '/apk/movieflix-mobile-1.0.0.apk'.
- */
-const APK_MOBILE_URL: string | null = '/apk/movieflix-mobile-1.0.0.apk'
-const APK_TV_URL: string | null = '/apk/movieflix-tv-1.0.3.apk'
-const IOS_URL: string | null = null
+ * Ambos os apps são cascas que carregam o site publicado. Isso é o que garante
+ * a regra "espelho": qualquer mudança no site aparece no app na próxima
+ * abertura, sem gerar versão nova. Para o usuário não parecer um site, o app
+ * abre sem barra de navegador, sem menu de contexto, em tela cheia, e o próprio
+ * site troca de layout quando detecta `?app=` (ver src/lib/appEnv.ts).
+ * ──────────────────────────────────────────────────────────────────────────── */
 
-type AppEnv = 'web-desktop' | 'web-mobile' | 'app-android' | 'app-ios' | 'app-tv'
-
-/**
- * Identifica o ambiente de quem está abrindo a página.
- *
- * Não confia só no User-Agent: os aplicativos se identificam de forma
- * explícita, e essa marca tem prioridade.
- *
- *  1. `?app=android|ios|tv` na URL — o app abre a página com esse parâmetro.
- *  2. Sufixo no User-Agent — `MovieFlixApp/1.0` (mobile) e
- *     `MovieFlixTV/1.0` (TV), que os WebViews dos apps enviam.
- *  3. `sessionStorage` — guarda a identificação enquanto a aba estiver
- *     aberta, para o caso de o usuário navegar para outra página e voltar.
- *     É de propósito `sessionStorage` e não `localStorage`: com
- *     `localStorage` um navegador que abrisse a página uma vez com
- *     `?app=tv` ficaria preso no modo TV para sempre.
- *  4. Por último, o User-Agent do navegador, só para separar desktop de mobile.
- */
-function detectAppEnv(): AppEnv {
-  if (typeof window === 'undefined') return 'web-desktop'
-
-  const param = new URLSearchParams(window.location.search).get('app')
-  if (param === 'android') return 'app-android'
-  if (param === 'ios') return 'app-ios'
-  if (param === 'tv') return 'app-tv'
-
-  const ua = navigator.userAgent || ''
-  if (/MovieFlixTV\//i.test(ua)) return 'app-tv'
-  if (/MovieFlixApp\//i.test(ua)) {
-    return /iPhone|iPad|iPod/i.test(ua) ? 'app-ios' : 'app-android'
+interface AppInfo {
+  android: {
+    available: boolean
+    version: string
+    minAndroid: string
+    sizeBytes: number
+    url: string
   }
-
-  try {
-    const stored = window.sessionStorage.getItem('mf_app_env')
-    if (stored === 'app-android' || stored === 'app-ios' || stored === 'app-tv') {
-      return stored
-    }
-  } catch {
-    /* sessionStorage bloqueado — segue para o User-Agent */
-  }
-
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ? 'web-mobile' : 'web-desktop'
+  ios: { available: boolean; minIos: string; install: string }
 }
 
+/** Fallback: se /api/apps não responder, o botão do Android continua válido. */
+const FALLBACK: AppInfo = {
+  android: {
+    available: true,
+    version: '1.0.4',
+    minAndroid: '8.0',
+    sizeBytes: 0,
+    url: '/apk/movieflix-android.apk',
+  },
+  ios: { available: true, minIos: '16.0', install: 'pwa' },
+}
+
+const mb = (bytes: number) =>
+  bytes > 0 ? `${(bytes / 1048576).toFixed(1).replace('.', ',')} MB` : null
+
 export function DownloadPage() {
-  const env = detectAppEnv()
+  const [env] = useState(() => {
+    const detected = detectAppEnv()
+    rememberAppEnv(detected)
+    return detected
+  })
+  const [info, setInfo] = useState<AppInfo>(FALLBACK)
+  const [iosSteps, setIosSteps] = useState(false)
 
-  // Guarda a identificação para as próximas visitas dentro do app.
-  if (typeof window !== 'undefined' && env.startsWith('app-')) {
-    try {
-      window.sessionStorage.setItem('mf_app_env', env)
-    } catch {
-      /* sem sessionStorage: a detecção por UA continua funcionando */
+  useEffect(() => {
+    let alive = true
+    fetch('/api/apps', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: AppInfo | null) => {
+        if (alive && d?.android) setInfo(d)
+      })
+      .catch(() => {
+        /* mantém o fallback: o link direto do APK é estável */
+      })
+    return () => {
+      alive = false
     }
-  }
+  }, [])
 
-  // Cada ambiente vê só o que faz sentido para ele: quem já está no app
-  // mobile não precisa baixar o app mobile.
-  const showMobile = env !== 'app-android' && env !== 'app-ios'
-  const showTv = env !== 'app-tv'
+  // Quem já está dentro do app não precisa baixar o app de novo.
+  const inApp = env === 'app-android' || env === 'app-ios'
 
   return (
     <div className="page" style={{ paddingTop: 32, maxWidth: 900 }}>
@@ -215,102 +206,109 @@ export function DownloadPage() {
         Baixar o MovieFlix
       </h1>
       <p className="muted" style={{ marginBottom: 28, fontSize: '0.92rem' }}>
-        Escolha a plataforma. O site também funciona direto no navegador, sem instalar nada.
+        O mesmo MovieFlix do site, em um aplicativo de verdade — tela cheia, sem barra de
+        navegador.
       </p>
 
-      <div className="panel">
-        <div className="panel-title">🌐 Continuar no site</div>
-        <p className="panel-sub">
-          O MovieFlix funciona no navegador do computador, do celular e da TV, sem instalar nada.
-          É um PWA: no Chrome ou Safari você pode “Adicionar à tela de início” e usar como um app.
-        </p>
-        <div className="alert alert--info" style={{ marginBottom: 0 }}>
-          <InfoIcon size={18} />
-          <span>
-            No Chrome (Android/desktop): menu ⋮ → “Instalar app”. No Safari (iOS): Compartilhar →
-            “Adicionar à Tela de Início”.
-          </span>
-        </div>
-      </div>
-
-      {showMobile && (
-        <div className="panel">
-          <div className="row-between">
-            <div>
-              <div className="panel-title">📱 MovieFlix Mobile</div>
-              <p className="panel-sub" style={{ marginBottom: 6 }}>
-                Aplicativo para celular, com login, catálogo, favoritos e histórico
-                sincronizados com sua conta.
-              </p>
-              <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
-                Android 8.0 ou superior · iPhone com iOS 16 ou superior.
-              </p>
+      {!inApp && (
+        <>
+          <div className="panel">
+            <div className="row-between">
+              <div>
+                <div className="panel-title">📱 MovieFlix para Android</div>
+                <p className="panel-sub" style={{ marginBottom: 6 }}>
+                  Aplicativo completo, com login, catálogo, favoritos, histórico e player.
+                  Tudo o que aparece no site aparece no app.
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+                  Android {info.android.minAndroid} ou superior · versão {info.android.version}
+                  {mb(info.android.sizeBytes) ? ` · ${mb(info.android.sizeBytes)}` : ''}
+                </p>
+              </div>
+              <span className="badge badge--outline">
+                {info.android.available ? 'Disponível' : 'Publicando'}
+              </span>
             </div>
-            <span className="badge badge--outline">
-              {APK_MOBILE_URL || IOS_URL ? 'Disponível' : 'Em desenvolvimento'}
-            </span>
-          </div>
 
-          {APK_MOBILE_URL ? (
             <div className="inline" style={{ marginTop: 14 }}>
-              <a className="btn btn--primary" href={APK_MOBILE_URL} download>
+              <a
+                className="btn btn--primary"
+                href={info.android.url}
+                download="movieflix-android.apk"
+                type="application/vnd.android.package-archive"
+              >
                 <DownloadIcon size={17} /> Baixar para Android
               </a>
-              {IOS_URL && (
-                <a className="btn btn--outline" href={IOS_URL} target="_blank" rel="noreferrer">
-                  Instalar no iPhone
-                </a>
-              )}
             </div>
-          ) : (
-            <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
-              <InfoIcon size={18} />
-              <span>
-                O instalador ainda não foi publicado. O código do aplicativo está pronto
-                e o processo de geração está documentado — enquanto isso, use o MovieFlix
-                no navegador do celular, com todas as funções disponíveis.
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {showTv && (
-        <div className="panel">
-          <div className="row-between">
-            <div>
-              <div className="panel-title">📺 MovieFlix TV</div>
-              <p className="panel-sub" style={{ marginBottom: 6 }}>
-                Versão para Android TV, Google TV e TV Box, com navegação pelo
-                controle remoto.
-              </p>
-              <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
-                Requer Android TV 8.0 ou superior.
-              </p>
-            </div>
-            <span className="badge badge--outline">
-              {APK_TV_URL ? 'Disponível' : 'Em desenvolvimento'}
-            </span>
+            <p className="muted" style={{ marginBottom: 0, marginTop: 10, fontSize: '0.78rem' }}>
+              Ao abrir o arquivo, o Android pede para permitir a instalação desta fonte. É o
+              MovieFlix — o aplicativo não está na Play Store.
+            </p>
           </div>
 
-          {APK_TV_URL ? (
-            <div className="inline" style={{ marginTop: 14 }}>
-              <a className="btn btn--primary" href={APK_TV_URL} download>
-                <DownloadIcon size={17} /> Baixar para TV
-              </a>
+          <div className="panel">
+            <div className="row-between">
+              <div>
+                <div className="panel-title">🍎 MovieFlix para iPhone</div>
+                <p className="panel-sub" style={{ marginBottom: 6 }}>
+                  Instalação pela tela de início do Safari, em tela cheia — sem barra de endereço
+                  e sem abrir no navegador depois de instalado.
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+                  iOS {info.ios.minIos} ou superior (Safari)
+                </p>
+              </div>
+              <span className="badge badge--outline">Disponível</span>
             </div>
-          ) : (
-            <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
-              <InfoIcon size={18} />
-              <span>
-                O instalador para TV ainda não foi publicado. O código está pronto e o
-                processo de geração está documentado — nas smart TVs, abra o navegador e
-                acesse o site do MovieFlix.
+
+            <div className="inline" style={{ marginTop: 14 }}>
+              <button className="btn btn--primary" onClick={() => setIosSteps((v) => !v)}>
+                Instalar no iPhone
+              </button>
+              <span className="muted" style={{ fontSize: '0.82rem' }}>
+                3 toques, sem computador
               </span>
             </div>
-          )}
+
+            {iosSteps && (
+              <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
+                <InfoIcon size={18} />
+                <span>
+                  Abra o MovieFlix no <strong>Safari</strong> do iPhone → toque em{' '}
+                  <strong>Compartilhar</strong> (o quadrado com a seta) →{' '}
+                  <strong>Adicionar à Tela de Início</strong> → <strong>Adicionar</strong>. O ícone
+                  do MovieFlix fica na tela do iPhone e abre em tela cheia, sem endereço e sem
+                  barra do Safari.
+                </span>
+              </div>
+            )}
+
+            <p className="muted" style={{ marginBottom: 0, marginTop: 12, fontSize: '0.78rem' }}>
+              A Apple só distribui apps fora da App Store via conta de desenvolvedor paga. Por
+              isso o iPhone usa a instalação pelo Safari: é a mesma página, o mesmo conteúdo e a
+              mesma sensação de app, sem depender da loja.
+            </p>
+          </div>
+        </>
+      )}
+
+      {inApp && (
+        <div className="panel">
+          <div className="panel-title">Você já está no aplicativo</div>
+          <p className="panel-sub" style={{ marginBottom: 0 }}>
+            Este é o MovieFlix instalado. Não precisa baixar nada de novo — o aplicativo abre
+            sempre a versão mais recente do site.
+          </p>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-title">🌐 Continuar no navegador</div>
+        <p className="panel-sub" style={{ marginBottom: 0 }}>
+          O MovieFlix também funciona direto no navegador do computador, do celular e da TV,
+          sem instalar nada.
+        </p>
+      </div>
     </div>
   )
 }

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { loadCatalog, getAll } from '../lib/catalog'
-import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon, KeyIcon } from '../components/Icons'
+import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon, KeyIcon, DownloadIcon, InfoIcon } from '../components/Icons'
 import type { Title } from '../lib/types'
 
-type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability'
+type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability' | 'apps'
 
 interface Stats {
   users: number
@@ -189,6 +189,7 @@ export function AdminPage() {
             ['users', 'Usuários'],
             ['plans', 'Planos'],
             ['availability', 'Disponibilidade'],
+            ['apps', 'Aplicativos'],
           ] as const
         ).map(([k, label]) => (
           <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
@@ -297,6 +298,8 @@ export function AdminPage() {
 
       {tab === 'availability' && <AvailabilityTab api={api} />}
 
+      {tab === 'apps' && <AppsTab token={token} />}
+
       {tab === 'plans' && (
         <PlansTab
           api={api}
@@ -336,6 +339,134 @@ export function AdminPage() {
  * servidor filtra o catálogo por esse arquivo. Esta aba só mostra o resultado —
  * não existe API pública de catálogo em massa para consultar em tempo real.
  */
+/* ────────────────────────────────────────────────────────────────────────────
+ * ABA APLICATIVOS — distribuição privada do app de TV
+ *
+ * O aplicativo de TV está em manutenção e saiu do site público. O APK continua
+ * existindo, mas só é entregue por aqui: a rota `/api/admin/apps/tv/download`
+ * exige o Bearer token de um administrador (validado no Supabase, com
+ * `profiles.is_admin`). O arquivo fica em `storage/apps/`, fora de `public/`,
+ * então não há URL estática que o entregue a mais ninguém.
+ *
+ * O download é feito por `fetch` com o cabeçalho Authorization e vira um blob —
+ * um `<a href>` simples não carregaria o token e receberia 401.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+interface TvAppInfo {
+  name: string
+  version: string
+  available: boolean
+  sizeBytes: number
+  updatedAt: string | null
+  downloadUrl: string
+}
+
+function AppsTab({ token }: { token?: string }) {
+  const [tv, setTv] = useState<TvAppInfo | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    fetch('/api/admin/apps/tv', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error ?? `Erro ${r.status}`)
+        setTv(d as TvAppInfo)
+      })
+      .catch((e) => setError((e as Error).message))
+  }, [token])
+
+  async function downloadTv() {
+    if (!token) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/apps/tv/download', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error ?? `Erro ${res.status}`)
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `movieflix-tv-${tv?.version ?? '1.0.3'}.apk`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const size = tv?.sizeBytes ? `${(tv.sizeBytes / 1048576).toFixed(1).replace('.', ',')} MB` : null
+
+  return (
+    <>
+      <div className="alert alert--info">
+        <InfoIcon size={18} />
+        <span>
+          Esta aba é a única forma de baixar o aplicativo de TV. Ele não aparece no site público
+          e o arquivo não tem endereço estático — cada download passa pela verificação de
+          administrador.
+        </span>
+      </div>
+
+      {error && <div className="alert alert--error">{error}</div>}
+
+      <div className="panel">
+        <div className="row-between">
+          <div>
+            <div className="panel-title">📺 MovieFlix TV</div>
+            <p className="panel-sub" style={{ marginBottom: 6 }}>
+              Versão para Android TV, Google TV e TV Box. Distribuição restrita ao administrador
+              enquanto o aplicativo está em manutenção.
+            </p>
+            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+              {tv
+                ? `Versão ${tv.version}${size ? ` · ${size}` : ''}${
+                    tv.updatedAt ? ` · atualizado em ${new Date(tv.updatedAt).toLocaleString('pt-BR')}` : ''
+                  }`
+                : 'Carregando informações do arquivo…'}
+            </p>
+          </div>
+          <span className={`badge ${tv?.available ? 'badge--outline' : 'badge--red'}`}>
+            {tv ? (tv.available ? 'Disponível' : 'Arquivo ausente') : '—'}
+          </span>
+        </div>
+
+        <div className="inline" style={{ marginTop: 14 }}>
+          <button
+            className="btn btn--primary"
+            onClick={() => void downloadTv()}
+            disabled={busy || !tv?.available}
+          >
+            <DownloadIcon size={17} /> {busy ? 'Preparando…' : 'Baixar APK da TV'}
+          </button>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-title">Aplicativos públicos</div>
+        <p className="panel-sub" style={{ marginBottom: 0 }}>
+          Android e iPhone são distribuídos na página <code>/baixar-app</code>. Os dois carregam o
+          site publicado, então qualquer alteração feita no site aparece neles na próxima
+          abertura — sem gerar versão nova.
+        </p>
+      </div>
+    </>
+  )
+}
+
 function AvailabilityTab({ api }: { api: (p: string, i?: RequestInit) => Promise<any> }) {
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)

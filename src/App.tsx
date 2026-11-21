@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import { detectAppEnv, rememberAppEnv, isAppEnv } from './lib/appEnv'
 import { Navbar } from './components/Navbar'
 import { Footer } from './components/Footer'
 import { AuthProvider } from './context/AuthContext'
@@ -36,6 +37,29 @@ function PageFallback() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
+  // Dentro do app instalado não existe navbar nem rodapé de site: o app tem a
+  // própria navegação (barra inferior nativa) e o conteúdo ocupa a tela toda.
+  // É o que impede o usuário de perceber que é um site dentro de um app.
+  const [appMode] = useState(() => {
+    const env = detectAppEnv()
+    rememberAppEnv(env)
+    return isAppEnv(env)
+  })
+
+  if (appMode) {
+    // O Navbar é renderizado, mas o CSS de modo aplicativo esconde o cabeçalho
+    // (`.nav`) e mantém a barra inferior (`.mobile-nav`) — que passa a ser a
+    // navegação do app, como a tab bar de um aplicativo nativo.
+    return (
+      <>
+        <Navbar />
+        <main className="app-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {children}
+        </main>
+      </>
+    )
+  }
+
   return (
     <>
       <Navbar />
@@ -83,7 +107,8 @@ export default function App() {
                   <Route path="/planos" element={<PlansPage />} />
                   <Route path="/baixar-app" element={<DownloadPage />} />
                   <Route path="/admin" element={<AdminPage />} />
-                  <Route path="/tv" element={<Navigate to="/baixar-app" replace />} />
+                  {/* O app de TV não é mais distribuído pelo site público. */}
+                  <Route path="/tv" element={<Navigate to="/" replace />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>

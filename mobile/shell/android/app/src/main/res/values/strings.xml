@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MovieFlix</string>
+    <string name="offline_title">Sem conexão</string>
+    <string name="offline_body">Verifique sua internet e tente de novo.</string>
+    <string name="offline_retry">Tentar novamente</string>
+</resources>

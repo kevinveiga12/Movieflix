@@ -29,6 +29,38 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Marca o ambiente ANTES do React montar.
+
+      Sem isto, o app instalado mostraria por um instante o cabeçalho e o rodapé
+      do site antes de o CSS de modo aplicativo entrar — um "flash" que denuncia
+      que é um site. Aqui a marca é posta no <html> de forma síncrona, então a
+      primeira pintura já é a de aplicativo.
+
+      A regra é a mesma de src/lib/appEnv.ts: `?app=` na URL, depois a marca no
+      User-Agent (`MovieFlixApp/`), depois o sessionStorage.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var p = new URLSearchParams(location.search).get('app')
+          var env = p === 'android' ? 'app-android' : p === 'ios' ? 'app-ios' : null
+          if (!env && /MovieFlixApp\//i.test(navigator.userAgent)) {
+            env = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'app-ios' : 'app-android'
+          }
+          if (!env) {
+            var s = sessionStorage.getItem('mf_app_env')
+            if (s === 'app-android' || s === 'app-ios') env = s
+          }
+          if (env) {
+            document.documentElement.setAttribute('data-mf-env', env)
+            sessionStorage.setItem('mf_app_env', env)
+          }
+        } catch (e) {
+          /* sem sessionStorage: a detecção do React assume */
+        }
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

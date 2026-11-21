@@ -1797,3 +1797,85 @@ h4 {
     scroll-behavior: auto !important;
   }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * MODO APLICATIVO
+ *
+ * O site é carregado dentro do app Android/iOS. Nesse modo ele precisa parecer
+ * um aplicativo nativo: sem navbar de site, sem rodapé, sem barra de navegação
+ * inferior do site (o app tem a própria), sem seleção de texto acidental e com
+ * as áreas seguras do aparelho respeitadas (notch, barra de gestos).
+ *
+ * A marca é posta em <html data-mf-env="app-android|app-ios"> por
+ * src/lib/appEnv.ts. Fora do app nada disto se aplica.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+html[data-mf-env='app-android'],
+html[data-mf-env='app-ios'] {
+  /* O app já desenha a barra de status; o site não precisa de margem extra. */
+  --mf-app-safe-top: env(safe-area-inset-top, 0px);
+  --mf-app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html[data-mf-env='app-android'] body,
+html[data-mf-env='app-ios'] body {
+  padding-bottom: 0 !important;
+  /* Sem "puxar para atualizar" nem elástico: é app, não página. */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Texto que a pessoa precisa copiar (senha, e-mail) continua selecionável. */
+html[data-mf-env='app-android'] input,
+html[data-mf-env='app-android'] textarea,
+html[data-mf-env='app-ios'] input,
+html[data-mf-env='app-ios'] textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* O conteúdo começa abaixo do notch e termina acima da barra de gestos. */
+html[data-mf-env='app-android'] .app-shell,
+html[data-mf-env='app-ios'] .app-shell {
+  padding-top: var(--mf-app-safe-top);
+  padding-bottom: var(--mf-app-safe-bottom);
+  min-height: 100dvh;
+}
+
+/* Nenhum resquício de site: o cabeçalho com logo/menu e o rodapé somem.
+ *
+ * A barra inferior FICA: ela é a navegação do aplicativo e, sem cabeçalho,
+ * passa a ser a única — exatamente como a tab bar de um app nativo. Escondê-la
+ * deixaria o usuário sem como trocar de seção. */
+html[data-mf-env='app-android'] .nav,
+html[data-mf-env='app-android'] .footer,
+html[data-mf-env='app-ios'] .nav,
+html[data-mf-env='app-ios'] .footer {
+  display: none !important;
+}
+
+/* A tab bar do app aparece em qualquer largura (tablet, paisagem) e respeita a
+ * barra de gestos do aparelho. */
+html[data-mf-env='app-android'] .mobile-nav,
+html[data-mf-env='app-ios'] .mobile-nav {
+  display: flex !important;
+  height: calc(58px + var(--mf-app-safe-bottom));
+  padding-bottom: var(--mf-app-safe-bottom);
+  background: rgba(10, 10, 15, 0.98);
+}
+
+html[data-mf-env='app-android'] body,
+html[data-mf-env='app-ios'] body {
+  padding-bottom: calc(58px + var(--mf-app-safe-bottom)) !important;
+}
+
+/* O player ocupa a tela inteira, inclusive as áreas seguras. */
+html[data-mf-env='app-android'] .player-page,
+html[data-mf-env='app-ios'] .player-page {
+  padding-top: 0;
+  padding-bottom: 0;
+}
