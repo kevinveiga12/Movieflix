@@ -226,8 +226,9 @@ jobs:
             adb install -r out/movieflix-mobile-release.apk
 
             echo "=== Abrindo o app mobile ==="
-            adb shell am start -n run.velixir.movieflix/.MainActivity
-            sleep 15
+            # A classe fica no pacote .shell (namespace da casca).
+            adb shell am start -n run.velixir.movieflix/run.velixir.movieflix.shell.MainActivity
+            sleep 20
             adb exec-out screencap -p > screenshots/mobile-home.png
 
             echo "=== Processo vivo? ==="
@@ -242,7 +243,7 @@ jobs:
             # Cada aba da barra inferior, uma captura por tela.
             # O loop vive num .sh porque a action roda cada linha do script
             # num `sh -c` separado e um `for` inline chega sem o `done`.
-            bash scripts/capture-mobile-tabs.sh screenshots
+            bash scripts/capture-shell-tabs.sh screenshots
 
             echo "=== Instalando APK TV ==="
             adb install -r out/movieflix-tv-release.apk
