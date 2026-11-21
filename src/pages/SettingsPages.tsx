@@ -305,7 +305,7 @@ export function DownloadPage() {
       <div className="panel">
         <div className="panel-title">🌐 Continuar no navegador</div>
         <p className="panel-sub" style={{ marginBottom: 0 }}>
-          O MovieFlix também funciona direto no navegador do computador, do celular e da TV,
+          O MovieFlix também funciona direto no navegador do computador e do celular,
           sem instalar nada.
         </p>
       </div>
