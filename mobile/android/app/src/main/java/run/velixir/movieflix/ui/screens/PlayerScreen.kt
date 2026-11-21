@@ -68,6 +68,69 @@ fun PlayerScreen(
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
 
+    /**
+     * TELA CHEIA PELO NOSSO LADO.
+     *
+     * O botão de tela cheia do provedor chama `requestFullscreen()` de dentro
+     * de um iframe aninhado (myembed.biz → playerflix.ink → frame do vídeo).
+     * O navegador recusa esse pedido em silêncio quando algum elo da cadeia
+     * não delega `fullscreen` — e o `allow` dos iframes internos é do provedor,
+     * não nosso. Resultado: `onShowCustomView` nunca é chamado e nada acontece
+     * na tela.
+     *
+     * Por isso a tela cheia é nossa: escondemos a interface do app, tiramos as
+     * barras do sistema e deixamos o WebView ocupando a tela inteira.
+     */
+    var immersive by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // Barras do sistema somem enquanto `immersive` estiver ligado.
+    DisposableEffect(immersive) {
+        val activity = context as? android.app.Activity
+        if (activity != null) {
+            val window = activity.window
+            if (immersive) {
+                runCatching {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
+                        window.insetsController?.systemBarsBehavior =
+                            android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    } else {
+                        @Suppress("DEPRECATION")
+                        window.decorView.systemUiVisibility = (
+                            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            )
+                    }
+                }
+            } else {
+                runCatching {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        window.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+                    } else {
+                        @Suppress("DEPRECATION")
+                        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+                    }
+                }
+            }
+        }
+        onDispose {
+            val activity = context as? android.app.Activity ?: return@onDispose
+            runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    activity.window.insetsController?.show(
+                        android.view.WindowInsets.Type.systemBars(),
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    activity.window.decorView.systemUiVisibility =
+                        android.view.View.SYSTEM_UI_FLAG_VISIBLE
+                }
+            }
+        }
+    }
+
     LaunchedEffect(title.tmdbId, season, episode) {
         vm.authorize(title.tmdbId, season, episode) { u, m, msg ->
             url = u
@@ -120,17 +183,24 @@ fun PlayerScreen(
                 vm = vm,
             )
 
-            url != null -> EmbedPlayer(url = url!!)
+            url != null -> EmbedPlayer(
+                url = url!!,
+                immersive = immersive,
+                onToggleImmersive = { immersive = !immersive },
+            )
         }
 
-        Text(
-            "‹ Voltar",
-            color = Color.White,
-            fontSize = 14.sp,
-            modifier = Modifier
-                .padding(16.dp)
-                .clickableNoRipple(onBack),
-        )
+        // O botão "Voltar" é interface NOSSA: em tela cheia ele sai da tela.
+        if (!immersive) {
+            Text(
+                "‹ Voltar",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .clickableNoRipple(onBack),
+            )
+        }
     }
 }
 
@@ -221,7 +291,11 @@ private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-internal fun EmbedPlayer(url: String) {
+internal fun EmbedPlayer(
+    url: String,
+    immersive: Boolean = false,
+    onToggleImmersive: () -> Unit = {},
+) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var failed by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }
@@ -273,14 +347,13 @@ internal fun EmbedPlayer(url: String) {
                         ): Boolean = false
 
                         /**
-                         * TELA CHEIA DE VERDADE.
+                         * TELA CHEIA DO PROVEDOR (quando ele consegue).
                          *
-                         * O player do provedor pede tela cheia por
-                         * `requestFullscreen()`/`webkitEnterFullscreen()`. No
-                         * WebView do Android esse pedido chega em
-                         * `onShowCustomView` — e sem esta implementação ele era
-                         * descartado: nada acontecia na tela, só o anel de foco
-                         * do botão. Aqui o pedido é atendido de fato.
+                         * Continua implementado porque, se o provedor entregar
+                         * o pedido, é o caminho mais fiel. Mas NÃO dependemos
+                         * dele: ver `immersive` em PlayerScreen — o botão de
+                         * tela cheia do provedor é recusado em silêncio quando
+                         * um elo da cadeia de iframes não delega `fullscreen`.
                          */
                         override fun onShowCustomView(
                             view: android.view.View?,
@@ -302,20 +375,7 @@ internal fun EmbedPlayer(url: String) {
                                     android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 ),
                             )
-                            runCatching {
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                                    activity.window.insetsController?.hide(
-                                        android.view.WindowInsets.Type.systemBars(),
-                                    )
-                                } else {
-                                    @Suppress("DEPRECATION")
-                                    activity.window.decorView.systemUiVisibility = (
-                                        android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-                                            or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                                            or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                                        )
-                                }
-                            }
+                            onToggleImmersive()
                         }
 
                         override fun onHideCustomView() {
@@ -325,17 +385,7 @@ internal fun EmbedPlayer(url: String) {
                             fullscreenView = null
                             fullscreenCallback?.onCustomViewHidden()
                             fullscreenCallback = null
-                            runCatching {
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                                    activity.window.insetsController?.show(
-                                        android.view.WindowInsets.Type.systemBars(),
-                                    )
-                                } else {
-                                    @Suppress("DEPRECATION")
-                                    activity.window.decorView.systemUiVisibility =
-                                        android.view.View.SYSTEM_UI_FLAG_VISIBLE
-                                }
-                            }
+                            onToggleImmersive()
                         }
                     }
 
@@ -376,6 +426,32 @@ internal fun EmbedPlayer(url: String) {
                     fontSize = 13.sp,
                 )
             }
+        }
+
+        /*
+          BOTÃO DE TELA CHEIA — NOSSO.
+
+          O botão do provedor não funciona: o `requestFullscreen()` dele é
+          recusado em silêncio dentro da cadeia de iframes, e o único efeito
+          visível era o anel de foco. Este botão é nosso, sempre alcançável, e
+          aciona a tela cheia pelo nosso lado (esconde a interface do app e as
+          barras do sistema, deixando só o vídeo).
+
+          Em tela cheia ele vira o botão de SAIR, no mesmo canto — um toque
+          entra, um toque sai.
+        */
+        if (ready && !failed) {
+            Text(
+                if (immersive) "✕" else "⛶",
+                color = Color.White,
+                fontSize = 20.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .background(Color(0x66000000), androidx.compose.foundation.shape.CircleShape)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clickableNoRipple(onToggleImmersive),
+            )
         }
     }
 }

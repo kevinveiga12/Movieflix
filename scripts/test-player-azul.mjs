@@ -170,29 +170,37 @@ const dom = await page.evaluate(() => {
   const stage = document.querySelector('.player-stage')
   const iframe = document.querySelector('.player-stage iframe')
   const overlay = document.querySelector('.player-overlay')
+  const bar = document.querySelector('.player-overlay .player-bottom')
+  const fsBtn = document.querySelector('.player-overlay .player-bottom .player-btn--main')
+  const time = document.querySelector('.player-overlay .player-bottom .player-time')
   const rect = iframe?.getBoundingClientRect()
-  const probe = rect ? document.elementFromPoint(rect.right - 30, rect.top + 30) : null
+  const probe = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null
   return {
     path: location.pathname,
     hasStage: Boolean(stage),
     hasIframe: Boolean(iframe),
     hasOverlay: Boolean(overlay),
-    overlayOpacity: overlay ? getComputedStyle(overlay).opacity : null,
+    hasBar: Boolean(bar),
+    hasFsButton: Boolean(fsBtn),
+    timeText: time?.textContent?.trim() ?? null,
     iframeAllow: iframe?.getAttribute('allow') ?? null,
     iframeAllowFullscreen: iframe?.hasAttribute('allowfullscreen') ?? false,
     iframeSrc: iframe?.getAttribute('src') ?? null,
-    topElementAtFullscreenButton: probe ? `${probe.tagName}.${probe.className}` : null,
+    centerElement: probe ? `${probe.tagName}.${probe.className}` : null,
   }
 })
 
 console.log('DOM medido:', JSON.stringify(dom, null, 1))
 
 check('player montou (iframe presente)', dom.hasIframe, dom.iframeSrc ?? 'sem iframe')
-check('iframe é o player azul', /myembed\.biz/.test(dom.iframeSrc ?? ''), dom.iframeSrc ?? '')
+check('iframe e o player azul', /myembed\.biz/.test(dom.iframeSrc ?? ''), dom.iframeSrc ?? '')
+check('existe UMA barra nossa no rodape', dom.hasBar, dom.hasBar ? 'presente' : 'ausente')
+check('a barra tem o botao de tela cheia', dom.hasFsButton, dom.hasFsButton ? 'presente' : 'ausente')
+check('a barra mostra o tempo', Boolean(dom.timeText), dom.timeText ?? 'vazio')
 check(
-  'NENHUM overlay nosso sobre o player',
-  !dom.hasOverlay,
-  dom.hasOverlay ? `overlay presente (opacity=${dom.overlayOpacity})` : 'ausente',
+  'o meio da tela continua sendo o iframe (video clicavel)',
+  (dom.centerElement ?? '').startsWith('IFRAME'),
+  `elemento no centro: ${dom.centerElement}`,
 )
 check(
   'iframe permite tela cheia',
@@ -200,31 +208,68 @@ check(
   `allow="${dom.iframeAllow}" allowfullscreen=${dom.iframeAllowFullscreen}`,
 )
 check(
-  'clique no botão de tela cheia chega ao iframe (não é engolido)',
-  (dom.topElementAtFullscreenButton ?? '').startsWith('IFRAME'),
-  `elemento no ponto: ${dom.topElementAtFullscreenButton}`,
-)
-check(
   'nenhum recurso do StreamBetter carregado',
   ![...requestedHosts].some((h) => /streambetter/i.test(h)),
   [...requestedHosts].filter((h) => /streambetter/i.test(h)).join(',') || 'nenhum',
 )
 
-// ── Tela cheia de verdade, dentro do iframe ───────────────────────────────
-const frame = page.frames().find((f) => f.url().includes('myembed.biz'))
-if (frame) {
-  const before = await page.evaluate(() => Boolean(document.fullscreenElement))
-  await frame.click('#fs').catch(() => {})
-  await page.waitForTimeout(900)
-  const after = await page.evaluate(() => Boolean(document.fullscreenElement))
-  check(
-    'pedido de tela cheia do player é atendido',
-    after === true,
-    `fullscreenElement antes=${before} depois=${after}`,
-  )
-} else {
-  console.log('INFO  iframe do provedor não encontrado para o teste de tela cheia')
-}
+// -- TELA CHEIA PELO NOSSO LADO -------------------------------------------
+const before = await page.evaluate(() => ({
+  fs: Boolean(document.fullscreenElement),
+  overlay: getComputedStyle(document.querySelector('.player-overlay')).display,
+}))
+
+await page.click('.player-overlay .player-bottom .player-btn--main')
+await page.waitForTimeout(900)
+
+const during = await page.evaluate(() => {
+  const ov = document.querySelector('.player-overlay')
+  const stage = document.querySelector('.player-stage')
+  const r = stage.getBoundingClientRect()
+  return {
+    fs: Boolean(document.fullscreenElement),
+    overlayDisplay: ov ? getComputedStyle(ov).display : null,
+    stageW: Math.round(r.width),
+    stageH: Math.round(r.height),
+    vw: window.innerWidth,
+    vh: window.innerHeight,
+  }
+})
+
+check(
+  'tela cheia entrou (fullscreenElement definido)',
+  during.fs === true,
+  `antes=${before.fs} depois=${during.fs}`,
+)
+check(
+  'em tela cheia a interface some (overlay display:none)',
+  during.overlayDisplay === 'none',
+  `display=${during.overlayDisplay}`,
+)
+check(
+  'em tela cheia o video ocupa a tela inteira',
+  during.stageW >= during.vw - 2 && during.stageH >= during.vh - 2,
+  `stage=${during.stageW}x${during.stageH} viewport=${during.vw}x${during.vh}`,
+)
+
+// -- SAIR DA TELA CHEIA ----------------------------------------------------
+await page.keyboard.press('Escape')
+await page.waitForTimeout(900)
+
+const after = await page.evaluate(() => {
+  const ov = document.querySelector('.player-overlay')
+  return {
+    fs: Boolean(document.fullscreenElement),
+    overlayDisplay: ov ? getComputedStyle(ov).display : null,
+  }
+})
+
+check('saiu da tela cheia', after.fs === false, `fullscreenElement=${after.fs}`)
+check(
+  'a interface volta ao normal',
+  after.overlayDisplay !== 'none',
+  `display=${after.overlayDisplay}`,
+)
 
 await browser.close()
 console.log(`\n${failures === 0 ? 'TODOS OS TESTES PASSARAM' : `${failures} FALHA(S)`}`)

@@ -64,7 +64,7 @@ import { VirtualMouse, HoldDetector, clickAtRatio } from '../lib/virtualMouse'
 const SAVE_INTERVAL = 15_000
 
 /** Tempo sem interação até a nossa UI sumir. */
-const UI_HIDE_MS = 4_000
+const UI_HIDE_MS = 5_000
 
 /**
  * Tempo máximo para o iframe do provedor carregar antes de trocar de servidor.
@@ -126,6 +126,15 @@ export function PlayerPage() {
 
   /** Tela cheia real do contêiner. */
   const [isFullscreen, setIsFullscreen] = useState(false)
+
+  /**
+   * Tempo decorrido no modo embed, em estado (não só em ref).
+   *
+   * O iframe do provedor é de outra origem: não dá para ler `currentTime` nem
+   * `duration` dele. O que dá para fazer é contar o tempo visível e mostrar
+   * isso na nossa barra — é o único número honesto que temos nesse modo.
+   */
+  const [embedTime, setEmbedTime] = useState(0)
 
   /** O iframe do provedor já disparou `load`? */
   const [frameLoaded, setFrameLoaded] = useState(false)
@@ -325,8 +334,12 @@ export function PlayerPage() {
     if (!user || !title || source?.mode !== 'embed') return
 
     embedElapsed.current = 0
+    setEmbedTime(0)
     const tick = setInterval(() => {
-      if (document.visibilityState === 'visible') embedElapsed.current += EMBED_TICK_MS / 1000
+      if (document.visibilityState === 'visible') {
+        embedElapsed.current += EMBED_TICK_MS / 1000
+        setEmbedTime(embedElapsed.current)
+      }
     }, EMBED_TICK_MS)
 
     const save = setInterval(() => {
@@ -454,6 +467,26 @@ export function PlayerPage() {
     }
     setShowUi(false)
   }, [])
+
+  /**
+   * SAÍDA DA TELA CHEIA PELA TECLA.
+   *
+   * Em tela cheia a nossa barra fica escondida (é o requisito: só o vídeo), o
+   * que deixa o botão X inalcançável. O navegador já oferece Escape nativo, mas
+   * nem todo WebView entrega o evento — então tratamos aqui também, e o estado
+   * é sincronizado pelo `fullscreenchange`.
+   */
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      const doc = document as Document & { webkitFullscreenElement?: Element | null }
+      if (!document.fullscreenElement && !doc.webkitFullscreenElement) return
+      e.preventDefault()
+      void toggleFullscreen()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggleFullscreen])
 
   // ── Troca de servidor ────────────────────────────────────────────────────
   const switchServer = useCallback(
@@ -681,10 +714,27 @@ export function PlayerPage() {
           toque no meio da tela vai direto para o player do provedor (play,
           pause, barra) — é o que mantém o iframe utilizável.
         */}
-        {!showUi && (
+        {!showUi && !isEmbed && (
           <button
             type="button"
             className="player-sensor"
+            aria-label="Mostrar controles"
+            onClick={() => pokeUi()}
+          />
+        )}
+
+        {/*
+          SENSOR DO MODO EMBED — só uma faixa no rodapé.
+
+          No embed o toque no meio da tela precisa chegar ao iframe (é assim que
+          o cliente dá play/pause no player do provedor). Por isso o sensor aqui
+          não cobre a tela: é uma faixa fina no rodapé, que devolve a nossa barra
+          sem roubar o clique do vídeo.
+        */}
+        {!showUi && isEmbed && (
+          <button
+            type="button"
+            className="player-sensor player-sensor--strip"
             aria-label="Mostrar controles"
             onClick={() => pokeUi()}
           />
@@ -839,8 +889,8 @@ export function PlayerPage() {
           funciona. A saída continua disponível por Escape e pelo botão
           Voltar do navegador/aparelho.
         */}
-        {!isEmbed && (
         <div className={`player-overlay ${showUi ? 'visible' : ''}`}>
+          {!isEmbed && (
           <div className="player-top">
             <button className="player-btn" onClick={() => navigate(-1)} aria-label="Voltar">
               <ArrowLeft size={20} />
@@ -875,6 +925,40 @@ export function PlayerPage() {
               </button>
             </div>
           </div>
+          )}
+
+          {/*
+            BARRA DO MODO EMBED.
+
+            O iframe do provedor é de outra origem: não dá para ler
+            `currentTime`/`duration` dele, nem acionar o pause dele por código.
+            O que dá para fazer — e é o que o cliente pediu — é ter UMA barra
+            nossa, com o tempo decorrido, e a tela cheia acionada pelo NOSSO
+            lado (o botão do provedor é recusado em silêncio quando algum elo
+            da cadeia de iframes não delega `fullscreen`).
+          */}
+          {isEmbed && (
+            <div className="player-bottom">
+              <div className="progress-track progress-track--indeterminate" aria-hidden="true">
+                <div className="progress-fill" style={{ width: '100%', opacity: 0.25 }} />
+              </div>
+
+              <div className="player-controls" style={{ marginTop: 14 }}>
+                <button
+                  className="player-btn player-btn--main"
+                  onClick={() => void toggleFullscreen()}
+                  aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+                  title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+                >
+                  {isFullscreen ? <XIcon size={22} /> : <FullscreenIcon size={22} />}
+                </button>
+
+                <span className="player-time">
+                  {formatTime(embedTime)} / --:--
+                </span>
+              </div>
+            </div>
+          )}
 
           {source?.mode === 'direct' && (
             <div className="player-bottom">
@@ -932,7 +1016,6 @@ export function PlayerPage() {
             </div>
           )}
         </div>
-        )}
       </div>
     </div>
   )

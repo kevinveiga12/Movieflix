@@ -1296,6 +1296,41 @@ h4 {
 }
 
 /*
+  EM TELA CHEIA, SÓ O VÍDEO.
+
+  O overlay (nossa barra e nossos botões) fica DENTRO de `.player-stage`, então
+  ele continuaria visível em tela cheia — era exatamente o "entrou em tela
+  cheia mas os botões não somem". Aqui ele é removido da pintura nos dois
+  caminhos: `:fullscreen` nativo e `.is-fullscreen` (modo CSS de reserva).
+*/
+.player-stage:fullscreen .player-overlay,
+.player-stage:-webkit-full-screen .player-overlay,
+.player-page.is-fullscreen .player-overlay {
+  display: none !important;
+}
+
+/* O sensor de toque também sai: em tela cheia o toque vai direto ao vídeo. */
+.player-stage:fullscreen .player-sensor,
+.player-stage:-webkit-full-screen .player-sensor,
+.player-page.is-fullscreen .player-sensor {
+  display: none !important;
+}
+
+/*
+  Barra do modo EMBED.
+
+  O iframe do provedor é de outra origem: não há `currentTime`/`duration` para
+  ler. A barra mostra o tempo decorrido e uma trilha neutra — nunca um número
+  inventado de duração.
+*/
+.progress-track--indeterminate {
+  cursor: default;
+}
+.progress-track--indeterminate .progress-fill {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/*
   SENSOR DE TOQUE.
 
   Camada invisível que só existe com a UI escondida. Devolve os controles ao
@@ -1311,6 +1346,18 @@ h4 {
   padding: 0;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+/*
+  Sensor do modo EMBED: faixa fina no rodapé.
+
+  No embed o meio da tela pertence ao iframe do provedor — um sensor de tela
+  inteira engoliria o play/pause dele. A faixa devolve a nossa barra sem
+  disputar o vídeo.
+*/
+.player-sensor--strip {
+  inset: auto 0 0 0;
+  height: 64px;
 }
 
 .player-stage video,
