@@ -164,7 +164,12 @@ await page.addInitScript(() => {
 })
 
 await page.goto(`${BASE}/assistir/1292035?type=movie`, { waitUntil: 'domcontentloaded' })
-await page.waitForTimeout(3500)
+// Espera ATIVA pelo player: em producao a rede e mais lenta que no preview
+// local, e um sleep fixo fazia o teste medir a tela antes do iframe montar.
+await page
+  .waitForSelector('.player-stage iframe', { timeout: 20000 })
+  .catch(() => console.log('INFO  iframe nao apareceu em 20s'))
+await page.waitForTimeout(1200)
 
 const dom = await page.evaluate(() => {
   const stage = document.querySelector('.player-stage')
