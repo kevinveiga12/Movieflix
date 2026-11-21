@@ -206,6 +206,10 @@ jobs:
           ls -l /dev/kvm || echo "sem /dev/kvm"
 
       - name: Rodar emulador e capturar telas
+        # A prova visual e desejavel, mas o produto do workflow sao os APKs.
+        # O emulador do runner as vezes morre no meio (GPU/`screencap` devolve
+        # "error: closed"), e isso NAO pode impedir o upload dos APKs.
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -229,7 +233,7 @@ jobs:
             # A classe fica no pacote .shell (namespace da casca).
             adb shell am start -n run.velixir.movieflix/run.velixir.movieflix.shell.MainActivity
             sleep 20
-            adb exec-out screencap -p > screenshots/mobile-home.png
+            bash scripts/screencap.sh screenshots/mobile-home.png
 
             echo "=== Processo vivo? ==="
             adb shell pidof run.velixir.movieflix && echo "MOBILE VIVO" || echo "MOBILE MORTO"
@@ -249,7 +253,7 @@ jobs:
             adb install -r out/movieflix-tv-release.apk
             adb shell am start -n run.velixir.movieflix.tv/.MainActivity
             sleep 15
-            adb exec-out screencap -p > screenshots/tv-home.png
+            bash scripts/screencap.sh screenshots/tv-home.png
 
             adb shell pidof run.velixir.movieflix.tv && echo "TV VIVO" || echo "TV MORTO"
             adb logcat -d -b crash | tail -40 || true
@@ -261,7 +265,7 @@ jobs:
             sleep 1
             adb shell input keyevent KEYCODE_DPAD_RIGHT
             sleep 1
-            adb exec-out screencap -p > screenshots/tv-focus.png
+            bash scripts/screencap.sh screenshots/tv-focus.png
             echo "OK: D-pad respondeu"
 
       # ── Emulador de TV: prova visual em paisagem, com D-pad ────────────────

@@ -26,7 +26,7 @@ TAB_Y=$((H - 60))
 tab_x() { echo $(( (W * (2 * $1 + 1)) / 12 )); }
 
 shot() {
-  adb exec-out screencap -p > "$OUT/$1.png"
+  bash scripts/screencap.sh "$OUT/$1.png"
   echo "capturado: $OUT/$1.png"
 }
 
