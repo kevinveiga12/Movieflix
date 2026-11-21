@@ -144,14 +144,46 @@ function makeWindow(video) {
       return true
     },
   }
+  // O provedor desenha a barra dele em elementos que a ponte precisa esconder.
+  const artControls = { style: {}, nodeType: 1 }
+  const videoAncestors = []
+  if (video) video.parentNode = { nodeType: 1, parentNode: { nodeType: 1, parentNode: null } }
+
+  // `document` de mentira com o minimo que a ponte usa de verdade: criar/achar/
+  // remover o <style> de limpeza e esconder os elementos do provedor.
+  const styleEls = []
+  const doc = {
+    _els: [artControls],
+    querySelectorAll: (sel) => {
+      if (sel === 'video') return video ? [video] : []
+      if (sel === '#__mf_clean') return styleEls
+      if (sel === '*') return [artControls]
+      return []
+    },
+    getElementById: (id) => (id === '__mf_clean' ? styleEls[styleEls.length - 1] || null : null),
+    createElement: () => {
+      const el = { id: '', textContent: '', style: {}, nodeType: 1, parentNode: null }
+      return el
+    },
+    head: {
+      appendChild: (el) => {
+        styleEls.push(el)
+        el.parentNode = {
+          removeChild: (x) => {
+            const i = styleEls.indexOf(x)
+            if (i >= 0) styleEls.splice(i, 1)
+          },
+        }
+        return el
+      },
+    },
+    documentElement: { appendChild: () => {} },
+    elementFromPoint: () => fakeEl,
+    body: fakeEl,
+  }
   const win = {
     MfPlayer: { post: (s) => posted.push(JSON.parse(s)) },
-    document: {
-      querySelectorAll: (sel) =>
-        sel === 'video' && video ? [video] : [],
-      elementFromPoint: () => fakeEl,
-      body: fakeEl,
-    },
+    document: doc,
     innerWidth: 1920,
     innerHeight: 1080,
     setInterval: () => 0, // não queremos timers reais no teste
@@ -162,11 +194,12 @@ function makeWindow(video) {
   win.window = win
   // Frame principal: parent === window. É o único que fala com o app.
   win.parent = win
-  return { win, posted, clicks }
+  void videoAncestors
+  return { win, posted, clicks, doc }
 }
 
 function runBridge(video) {
-  const { win, posted, clicks } = makeWindow(video)
+  const { win, posted, clicks, doc } = makeWindow(video)
   // A ponte usa `window`, `document` e `MouseEvent` globais.
   const MouseEventStub = function (type, opts) {
     this.type = type
@@ -181,7 +214,7 @@ function runBridge(video) {
     bridge,
   )
   fn(win, win.document, win.setInterval, win.clearInterval, MouseEventStub)
-  return { win, posted, clicks }
+  return { win, posted, clicks, doc }
 }
 
 // ── 4. Estado inicial: vídeo pausado → ponte tenta tocar ────────────────────
@@ -294,6 +327,38 @@ console.log('\n[8] Mouse virtual: clickAt/clickAtY clicam no ponto do cursor')
   const before = clicks.length
   win.__mfCmd('clickAt', 0.2)
   check('estado limpo após o clique', clicks.length === before, `clicks=${clicks.length}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TELA CHEIA (pelo nosso lado, sem depender do provedor)
+// ─────────────────────────────────────────────────────────────────────────────
+// O botão do provedor chama `requestFullscreen()`, que o WebView do Android
+// recusa em silêncio dentro de iframe de outra origem. A tela cheia é feita
+// aqui: o `<video>` cobre a janela inteira e nenhuma UI do provedor sobra.
+{
+  const v = makeVideo({ paused: false, currentTime: 10 })
+  const { win, clicks, doc } = runBridge(v)
+
+  win.__mfCmd('fullscreen', 1)
+  const css = doc.getElementById('__mf_clean') ? doc.getElementById('__mf_clean').textContent : ''
+  check('fullscreen liga o CSS de tela cheia', css.includes('100vw') && css.includes('100vh'), css.slice(0, 80))
+  check('fullscreen fixa o vídeo na janela', css.includes('position:fixed !important'), '')
+  check('fullscreen usa object-fit contain (sem distorcer)', css.includes('object-fit:contain'), '')
+  check('fullscreen põe o vídeo por cima da UI do provedor', css.includes('z-index:2147483646'), '')
+  check('fullscreen mantém o <video> visível', css.includes('video{display:block'), '')
+
+  win.__mfCmd('fullscreen', 0)
+  const css2 = doc.getElementById('__mf_clean') ? doc.getElementById('__mf_clean').textContent : ''
+  check('sair da tela cheia remove o CSS de tela cheia', !css2.includes('100vw'), '')
+  check('sair da tela cheia mantém a limpeza da UI do provedor', css2.includes('.art-controls'), '')
+
+  // Um comando, uma ação: repetir o comando não duplica o estado.
+  win.__mfCmd('fullscreen', 1)
+  win.__mfCmd('fullscreen', 1)
+  const on = doc.getElementById('__mf_clean').textContent.includes('100vw')
+  check('fullscreen é idempotente (sem evento duplicado)', on, '')
+  check('fullscreen não cria um segundo elemento de estilo',
+    doc.querySelectorAll('#__mf_clean').length === 1, `n=${doc.querySelectorAll('#__mf_clean').length}`)
 }
 
 console.log('\n' + '='.repeat(60))

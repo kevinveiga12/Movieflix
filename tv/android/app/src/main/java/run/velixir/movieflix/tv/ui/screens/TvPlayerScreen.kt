@@ -2,8 +2,6 @@ package run.velixir.movieflix.tv.ui.screens
 
 import android.annotation.SuppressLint
 import android.os.SystemClock
-import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -12,7 +10,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,10 +39,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -64,7 +56,6 @@ import run.velixir.movieflix.tv.player.HoldDetector
 import run.velixir.movieflix.tv.player.PlayPauseController
 import run.velixir.movieflix.tv.player.SeekController
 import run.velixir.movieflix.tv.player.UiVisibility
-import run.velixir.movieflix.tv.player.VirtualMouseState
 import run.velixir.movieflix.tv.ui.theme.MfColors
 
 /**
@@ -77,8 +68,21 @@ import run.velixir.movieflix.tv.ui.theme.MfColors
  *      textos, títulos, painéis, bordas, molduras ou anel de foco;
  *   c) OK pausa; OK de novo despausa; e assim sempre;
  *   d) ← e → retrocedem/avançam de verdade;
- *   e) Voltar sai do player;
- *   f) o foco NUNCA sai do player nem revela elementos escondidos.
+ *   e) Voltar sai do player (e, em tela cheia, sai da tela cheia primeiro);
+ *   f) o foco NUNCA sai do player nem revela elementos escondidos;
+ *   g) segurar OK entra/sai da TELA CHEIA (só o vídeo, sem barra e sem UI).
+ *
+ * ── TELA CHEIA: por que o botão do provedor não serve ──────────────────────
+ *
+ * O botão de tela cheia do player azul chama `requestFullscreen()`. O WebView do
+ * Android RECUSA esse pedido em silêncio quando ele vem de um iframe de outra
+ * origem — a cadeia myembed.biz → playerflix.ink → frame do vídeo nunca tem
+ * todos os elos com `allow="fullscreen"`. Por isso o clique não fazia nada.
+ *
+ * A solução não depende do provedor: a ponte põe o `<video>` cobrindo a janela
+ * inteira (`window.__mfCmd('fullscreen', 1)`) e nós escondemos a barra e as
+ * barras do sistema. A UI do provedor já está escondida sempre — então, em tela
+ * cheia, sobra literalmente só o vídeo.
  *
  * ── Causa raiz da borda amarela e do OK "não funcionar" ──────────────────────
  *
@@ -96,9 +100,8 @@ import run.velixir.movieflix.tv.ui.theme.MfColors
  *      (`FOCUS_BLOCK_DESCENDANTS`) — ele nunca mais recebe o D-pad;
  *   2. o D-pad é tratado no Box do Compose que envolve o WebView, que é o
  *      único elemento focável da tela;
- *   3. a ponte JS apaga qualquer `outline`/anel de foco e faz `blur()` no
- *      elemento ativo da página do provedor, para que nem um `focus()` vindo
- *      do próprio provedor desenhe borda;
+ *   3. a ponte JS apaga qualquer `outline`/anel de foco, para que nem um
+ *      `focus()` vindo do próprio provedor desenhe borda;
  *   4. a UI do provedor é escondida SEMPRE (não só quando o `<video>` é
  *      encontrado), então não sobra nada para o foco revelar.
  *
@@ -253,13 +256,9 @@ private fun TvDirectPlayer(
     val toggle = remember { PlayPauseController() }
     // Visibilidade da barra: aparece ao interagir, some após 5 s sem tecla.
     val ui = remember { UiVisibility() }
-    // Mouse virtual: segurar OK 2 s liga/desliga; direcional move; OK clica.
-    val mouse = remember { VirtualMouseState() }
+    // Segurar OK alterna a TELA CHEIA (só o vídeo, sem barra e sem UI).
     val hold = remember { HoldDetector(HOLD_TO_ACTIVATE_MS) }
-    var screenW by remember { mutableStateOf(0f) }
-    var screenH by remember { mutableStateOf(0f) }
-    // Versão do cursor: muda a cada tick para o Compose redesenhar a posição.
-    var mouseVersion by remember { mutableStateOf(0) }
+    var isFullscreen by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) { onDispose { player.release() } }
 
@@ -297,11 +296,14 @@ private fun TvDirectPlayer(
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             ui.tick(now)
-            // Segurar OK liga/desliga o mouse virtual.
+            // Segurar OK alterna a TELA CHEIA: só o vídeo, sem barra.
             if (hold.tick(now) == HoldDetector.PressResult.Hold) {
-                mouse.toggle()
-                mouseVersion++
                 ui.poke(now)
+                isFullscreen = !isFullscreen
+                val act = (context as? android.app.Activity)
+                if (act != null) {
+                    if (isFullscreen) hideSystemBars(act) else showSystemBars(act)
+                }
             }
             // OK sem efeito → reenvia play/pause EXPLÍCITO (um toque basta).
             toggle.retry(now)?.let { want ->
@@ -352,43 +354,9 @@ private fun TvDirectPlayer(
         seek.onKeyUp(SystemClock.uptimeMillis())
     }
 
-    /** Move o cursor e força o redesenho (o estado do mouse não é observável). */
-    fun moveMouse(dx: Int, dy: Int) {
-        mouse.move(dx, dy)
-        mouseVersion++
-    }
-
-    /**
-     * Clique do mouse virtual no modo direto.
-     *
-     * O único player é o nosso: o clique no vídeo alterna play/pause e, quando o
-     * cursor está sobre a faixa inferior (onde fica a barra), salta para a
-     * posição correspondente. Não existe segundo conjunto de controles.
-     */
-    fun clickAtCursor() {
-        val dur = durationState.value
-        val barTop = screenH - 90f
-        if (dur > 0 && mouse.y >= barTop) {
-            player.seekTo((mouse.ratioX() * dur * 1000).toLong().coerceAtLeast(0L))
-            return
-        }
-        if (player.isPlaying) {
-            userPaused = true
-            player.pause()
-        } else {
-            userPaused = false
-            player.play()
-        }
-    }
-
     Box(
         Modifier
             .fillMaxSize()
-            .onSizeChanged {
-                screenW = it.width.toFloat()
-                screenH = it.height.toFloat()
-                mouse.setBounds(screenW, screenH)
-            }
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { ev ->
@@ -399,52 +367,52 @@ private fun TvDirectPlayer(
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
                         Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
                         -> {
-                            // SEMPRE começa a contar o "segurar 2 s" — com o
-                            // mouse ligado ou não. É o que permite desligar o
-                            // mouse segurando OK de novo. O auto-repeat do
-                            // controle não reinicia a contagem.
+                            // SEMPRE começa a contar o "segurar 1,2 s". É o que
+                            // permite alternar a tela cheia segurando OK. O
+                            // auto-repeat do controle não reinicia a contagem.
                             if (native.repeatCount == 0) {
                                 hold.onDown(SystemClock.uptimeMillis())
                             }
                             true
                         }
                         Key.DirectionLeft, Key.MediaRewind -> {
-                            if (mouse.active) moveMouse(-1, 0) else doSeekDown(-1, native.repeatCount)
+                            doSeekDown(-1, native.repeatCount)
                             true
                         }
                         Key.DirectionRight, Key.MediaFastForward -> {
-                            if (mouse.active) moveMouse(1, 0) else doSeekDown(1, native.repeatCount)
+                            doSeekDown(1, native.repeatCount)
                             true
                         }
-                        // ↑ ↓: movem o cursor com o mouse ligado; sem ele são
-                        // consumidas para o foco não escapar do player.
-                        Key.DirectionUp -> {
-                            if (mouse.active) moveMouse(0, -1)
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            if (mouse.active) moveMouse(0, 1)
-                            true
-                        }
+                        // ↑ ↓ não fazem nada: o player é só o vídeo e a barra.
+                        // São consumidas para o foco não escapar do player.
+                        Key.DirectionUp, Key.DirectionDown -> true
                         else -> false
                     }
                     KeyEventType.KeyUp -> when (ev.key) {
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
                         Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
                         -> {
-                            // Toque curto (sem segurar 2 s): com o mouse ligado
-                            // é clique na posição do cursor; desligado é
-                            // play/pause normal.
+                            // Toque curto (sem segurar 1,2 s): play/pause.
                             if (hold.onUp() == HoldDetector.PressResult.Short) {
-                                if (mouse.active) clickAtCursor() else doToggle(0)
+                                doToggle(0)
                             }
                             true
                         }
                         Key.DirectionLeft, Key.DirectionRight,
                         Key.MediaRewind, Key.MediaFastForward,
                         -> {
-                            if (!mouse.active) doSeekUp()
+                            doSeekUp()
                             true
+                        }
+                        Key.Back -> {
+                            // Em tela cheia, Voltar sai da tela cheia primeiro.
+                            if (isFullscreen) {
+                                isFullscreen = false
+                                (context as? android.app.Activity)?.let { showSystemBars(it) }
+                                true
+                            } else {
+                                false
+                            }
                         }
                         else -> false
                     }
@@ -470,10 +438,14 @@ private fun TvDirectPlayer(
         )
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
-        TvProgressBar(position = positionState.value, duration = durationState.value, visible = ui.visible)
-
-        // Cursor do mouse virtual (só aparece com o mouse ligado).
-        VirtualCursor(mouse, mouseVersion)
+        // Em tela cheia ela some: fica só o vídeo.
+        if (!isFullscreen) {
+            TvProgressBar(
+                position = positionState.value,
+                duration = durationState.value,
+                visible = ui.visible,
+            )
+        }
     }
 }
 
@@ -489,12 +461,11 @@ private fun TvDirectPlayer(
 private const val SITE_ORIGIN = "https://movieflix.velixir.run/"
 
 /**
- * Quanto tempo o OK precisa ficar pressionado para ligar/desligar o mouse
- * virtual.
+ * Quanto tempo o OK precisa ficar pressionado para alternar a TELA CHEIA.
  *
- * O proprietário pediu "1 ou 2 segundos". 1,2 s fica dentro dessa faixa e é
- * curto o bastante para o gesto parecer natural, sem disparar por engano num
- * toque normal (que dura ~100 ms).
+ * 1,2 s é curto o bastante para o gesto parecer natural, e longo o bastante
+ * para não disparar num toque normal (que dura ~100 ms) — assim o OK continua
+ * sendo, de um toque só, pausar/despausar.
  */
 private const val HOLD_TO_ACTIVATE_MS = 1_200L
 
@@ -521,7 +492,7 @@ private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
   var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0,
-            clickX: null, clickY: null, mouseMode: false,
+            clickX: null, clickY: null, mouseMode: false, fs: false,
             isTop: (window.parent === window) };
   window.__mf = S;
 
@@ -542,14 +513,17 @@ private val BRIDGE_JS: String = """
   function hideProviderUi() {
     try {
       if (!document || typeof document.getElementById !== 'function') return;
-      // Mouse virtual LIGADO: o cursor precisa dos controles do provedor
-      // visíveis para poder clicar neles. Removemos o CSS de limpeza e
-      // deixamos o player mostrar a própria barra.
-      if (S.mouseMode) {
-        var old = document.getElementById('__mf_clean');
-        if (old && old.parentNode) old.parentNode.removeChild(old);
-        return;
-      }
+      /*
+        A UI do provedor fica escondida SEMPRE \u2014 inclusive com o mouse virtual
+        ligado. Antes, o mouse ligado devolvia a barra do provedor para "ter o
+        que clicar": era isso que enchia a tela de botoes duplicados (play,
+        volume, tela cheia do provedor) por cima da NOSSA barra \u2014 exatamente o
+        defeito das fotos do proprietario. O mouse virtual continua funcionando
+        (move o cursor e clica), mas nao ha mais UI do provedor para aparecer: o
+        unico controle e o nosso.
+      */
+      var legacy = document.getElementById('__mf_clean');
+      if (legacy && legacy.parentNode) legacy.parentNode.removeChild(legacy);
       // Garantia continua: se o provedor recriar o <video> com controls=true,
       // os controles nativos voltam. Reaplicar a cada volta do laco.
       try {
@@ -591,7 +565,25 @@ private val BRIDGE_JS: String = """
           '*:focus-visible{outline:none !important;box-shadow:none !important;}' +
           '*::-moz-focus-inner{border:0 !important;}' +
           'video::-webkit-media-controls{display:none !important;}' +
-          'video::-webkit-media-controls-enclosure{display:none !important;}';
+          'video::-webkit-media-controls-enclosure{display:none !important;}' +
+          /*
+            TELA CHEIA PELO NOSSO LADO.
+
+            O botao de tela cheia do provedor pede `requestFullscreen()`, que o
+            WebView do Android recusa em silencio dentro de iframe de outra
+            origem (so o Chromium aceita, e so com a cadeia inteira de iframes
+            permitindo). Por isso o clique nunca entrava em tela cheia.
+
+            Aqui nao dependemos dele: `window.__mfCmd('fullscreen', 1)` poe o
+            `<video>` cobrindo a janela inteira, em cima de qualquer UI que o
+            provedor ainda desenhe. Nada de controles: so o video.
+          */
+          (S.fs
+            ? 'video{position:fixed !important;top:0 !important;left:0 !important;' +
+              'width:100vw !important;height:100vh !important;max-width:none !important;' +
+              'max-height:none !important;z-index:2147483646 !important;' +
+              'object-fit:contain !important;background:#000 !important;}'
+            : '');
         (document.head || document.documentElement).appendChild(st);
       }
 
@@ -710,6 +702,26 @@ private val BRIDGE_JS: String = """
       else if (cmd === 'clickAtY') {
         S.clickY = Number(arg);
         if (S.clickX != null) doClick();
+      }
+      /*
+        TELA CHEIA PELO NOSSO LADO \u2014 nao depende do provedor.
+
+        `S.fs` liga/desliga o CSS que faz o `<video>` cobrir a janela inteira,
+        em cima de qualquer UI do provedor. Reconstruimos o estilo na hora para
+        a troca valer no mesmo toque, sem esperar o laco de 1 s.
+
+        E o unico caminho de tela cheia que funciona de verdade aqui: o
+        `requestFullscreen()` do botao do provedor e recusado em silencio pelo
+        WebView do Android dentro de iframe de outra origem.
+      */
+      else if (cmd === 'fullscreen') {
+        S.fs = !!Number(arg);
+        var prev = document.getElementById('__mf_clean');
+        if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+        hideProviderUi();
+        sync();
+        post(snapshot());
+        return true;
       }
       sync();
       post(snapshot());
@@ -951,15 +963,9 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     val toggle = remember { PlayPauseController() }
     // Visibilidade da barra: aparece ao interagir, some após 5 s sem tecla.
     val ui = remember { UiVisibility() }
-    // Mouse virtual: segurar OK 2 s liga/desliga; direcional move; OK clica.
-    val mouse = remember { VirtualMouseState() }
+    // Segurar OK alterna a tela cheia (não existe mais mouse virtual no embed:
+    // ele servia para clicar na UI do provedor, que agora fica sempre escondida).
     val hold = remember { HoldDetector(HOLD_TO_ACTIVATE_MS) }
-    var screenW by remember { mutableStateOf(0f) }
-    var screenH by remember { mutableStateOf(0f) }
-    // Versão do cursor: muda a cada tick para o Compose redesenhar a posição.
-    // (Faltava aqui — era o erro de compilação que impedia o APK da TV de ser
-    // gerado, e por isso o mouse virtual nunca chegava ao aparelho.)
-    var mouseVersion by remember { mutableStateOf(0) }
 
     fun js(cmd: String, arg: Double? = null) {
         val a = arg?.let { ",$it" } ?: ""
@@ -983,10 +989,24 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         seek.onKeyUp(SystemClock.uptimeMillis())
     }
 
-    /** Move o cursor e força o redesenho (o estado do mouse não é observável). */
-    fun moveMouse(dx: Int, dy: Int) {
-        mouse.move(dx, dy)
-        mouseVersion++
+    /**
+     * Entra e sai da TELA CHEIA pelo nosso lado.
+     *
+     * A ponte põe o `<video>` cobrindo a janela inteira (comando `fullscreen`) e
+     * nós escondemos a barra de progresso e o cursor, além das barras do
+     * sistema. Ao sair, tudo volta exatamente como estava.
+     *
+     * É o único caminho de tela cheia que funciona no WebView do Android: o
+     * `requestFullscreen()` do botão do provedor é recusado em silêncio dentro de
+     * iframe de outra origem.
+     */
+    fun setFullscreen(on: Boolean) {
+        isFullscreen = on
+        js("fullscreen", if (on) 1.0 else 0.0)
+        val act = (webView?.context as? android.app.Activity)
+        if (act != null) {
+            if (on) hideSystemBars(act) else showSystemBars(act)
+        }
     }
 
     // Foco inicial e re-foco depois que a página carrega (o WebView pode pedir
@@ -1001,14 +1021,16 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
             val now = SystemClock.uptimeMillis()
             seek.tick(now)
             ui.tick(now)
-            // Segurar OK liga/desliga o mouse virtual.
+            // Segurar OK alterna TELA CHEIA.
+            //
+            // O botão de tela cheia do provedor não funciona no WebView do
+            // Android (o `requestFullscreen()` dentro de iframe de outra origem
+            // é recusado em silêncio). Então a tela cheia é NOSSA: a ponte põe o
+            // `<video>` cobrindo a janela e esconde a nossa barra. Um gesto só,
+            // reversível pelo mesmo gesto ou pelo Voltar.
             if (hold.tick(now) == HoldDetector.PressResult.Hold) {
-                mouse.toggle()
-                mouseVersion++
                 ui.poke(now)
-                // Com o mouse ligado o provedor precisa mostrar os controles
-                // dele, senão não há o que clicar. Desligado, volta a esconder.
-                js("mouseMode", if (mouse.active) 1.0 else 0.0)
+                setFullscreen(!isFullscreen)
             }
             // O player do provedor às vezes ignora o primeiro toggle (iframe
             // ainda montando). Se o estado não mudou, manda play/pause
@@ -1039,11 +1061,6 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .onSizeChanged {
-                screenW = it.width.toFloat()
-                screenH = it.height.toFloat()
-                mouse.setBounds(screenW, screenH)
-            }
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { ev ->
@@ -1054,52 +1071,30 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar,
                         Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause,
                         -> {
-                            // SEMPRE começa a contar o "segurar 2 s" — com o
-                            // mouse ligado ou não. É o que permite desligar o
-                            // mouse segurando OK de novo. O auto-repeat do
-                            // controle não reinicia a contagem.
+                            // SEMPRE começa a contar o "segurar 1,2 s". É o que
+                            // permite alternar a tela cheia segurando OK. O
+                            // auto-repeat do controle não reinicia a contagem.
                             if (native.repeatCount == 0) {
                                 hold.onDown(SystemClock.uptimeMillis())
                             }
                             true
                         }
                         Key.DirectionLeft, Key.MediaRewind -> {
-                            if (mouse.active) moveMouse(-1, 0) else doSeekDown(-1, native.repeatCount)
+                            doSeekDown(-1, native.repeatCount)
                             true
                         }
                         Key.DirectionRight, Key.MediaFastForward -> {
-                            if (mouse.active) moveMouse(1, 0) else doSeekDown(1, native.repeatCount)
+                            doSeekDown(1, native.repeatCount)
                             true
                         }
-                        // ↑ ↓: movem o cursor com o mouse ligado; sem ele são
-                        // consumidas para o foco não escapar do player.
-                        Key.DirectionUp -> {
-                            if (mouse.active) moveMouse(0, -1)
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            if (mouse.active) moveMouse(0, 1)
-                            true
-                        }
+                        // ↑ ↓ não fazem nada: o player é só o vídeo e a barra.
+                        // São consumidas para o foco não escapar do player.
+                        Key.DirectionUp, Key.DirectionDown -> true
                         Key.Back -> {
                             // Em tela cheia, Voltar sai da tela cheia primeiro
                             // (é o que o usuário espera); só depois sai do player.
                             if (isFullscreen) {
-                                webView?.evaluateJavascript(
-                                    "document.exitFullscreen && document.exitFullscreen();" +
-                                        "document.webkitExitFullscreen && document.webkitExitFullscreen();",
-                                    null,
-                                )
-                                val act = (webView?.context as? android.app.Activity)
-                                if (act != null) {
-                                    val decor = act.window.decorView as android.view.ViewGroup
-                                    fullscreenView?.let { decor.removeView(it) }
-                                    fullscreenView = null
-                                    fullscreenCallback?.onCustomViewHidden()
-                                    fullscreenCallback = null
-                                    isFullscreen = false
-                                    showSystemBars(act)
-                                }
+                                setFullscreen(false)
                             } else {
                                 onBack()
                             }
@@ -1115,19 +1110,14 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                             // é clique na posição do cursor; desligado é
                             // play/pause normal.
                             if (hold.onUp() == HoldDetector.PressResult.Short) {
-                                if (mouse.active) {
-                                    js("clickAt", mouse.ratioX().toDouble())
-                                    js("clickAtY", mouse.ratioY().toDouble())
-                                } else {
-                                    doToggle(0)
-                                }
+                                doToggle(0)
                             }
                             true
                         }
                         Key.DirectionLeft, Key.DirectionRight,
                         Key.MediaRewind, Key.MediaFastForward,
                         -> {
-                            if (!mouse.active) doSeekUp()
+                            doSeekUp()
                             true
                         }
                         else -> false
@@ -1296,52 +1286,22 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                     // O Referer é o que faz o provedor entregar o player.
                     loadUrl(url, mapOf("Referer" to SITE_ORIGIN))
 
-                    // Rede de segurança: se algum aparelho ainda entregar teclas
-                    // ao WebView, consumimos tudo aqui também (nunca devolvemos
-                    // false para o D-pad, senão o DOM voltaria a navegar).
-                    setOnKeyListener { _, keyCode, event ->
-                        when (event.action) {
-                            KeyEvent.ACTION_DOWN -> when (keyCode) {
-                                KeyEvent.KEYCODE_DPAD_CENTER,
-                                KeyEvent.KEYCODE_ENTER,
-                                KeyEvent.KEYCODE_NUMPAD_ENTER,
-                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                                KeyEvent.KEYCODE_MEDIA_PLAY,
-                                KeyEvent.KEYCODE_MEDIA_PAUSE,
-                                -> {
-                                    doToggle(event.repeatCount); true
-                                }
-                                KeyEvent.KEYCODE_DPAD_RIGHT,
-                                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-                                -> {
-                                    doSeekDown(1, event.repeatCount); true
-                                }
-                                KeyEvent.KEYCODE_DPAD_LEFT,
-                                KeyEvent.KEYCODE_MEDIA_REWIND,
-                                -> {
-                                    doSeekDown(-1, event.repeatCount); true
-                                }
-                                KeyEvent.KEYCODE_DPAD_UP,
-                                KeyEvent.KEYCODE_DPAD_DOWN,
-                                -> true
-                                KeyEvent.KEYCODE_BACK -> {
-                                    onBack(); true
-                                }
-                                else -> false
-                            }
-                            KeyEvent.ACTION_UP -> when (keyCode) {
-                                KeyEvent.KEYCODE_DPAD_RIGHT,
-                                KeyEvent.KEYCODE_DPAD_LEFT,
-                                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-                                KeyEvent.KEYCODE_MEDIA_REWIND,
-                                -> {
-                                    doSeekUp(); true
-                                }
-                                else -> false
-                            }
-                            else -> false
-                        }
-                    }
+                    /*
+                      NÃO registramos `setOnKeyListener` aqui.
+
+                      Havia um segundo tratamento de teclas neste WebView, além
+                      do Box do Compose — e os DOIS disparavam o comando no mesmo
+                      toque. O resultado era o defeito que o proprietário
+                      descreveu: um OK mandava dois toggles (pausa e despausa no
+                      mesmo toque) e as setas pediam dois seeks.
+
+                      Como o WebView não é focável (`isFocusable = false` +
+                      `FOCUS_BLOCK_DESCENDANTS`), ele nunca recebe o D-pad: o
+                      único handler é o do Box. Um toque, um comando.
+
+                      O `Key.Back` também sai daqui: quem trata Voltar (e a saída
+                      da tela cheia) é o handler do Box.
+                    */
 
                     webView = this
                 }
@@ -1394,7 +1354,6 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         }
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
-        // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.
         // Em tela cheia ela some: fica só o vídeo, como o proprietário pediu.
         if (!isFullscreen) {
             TvProgressBar(
@@ -1403,37 +1362,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                 visible = ui.visible,
             )
         }
-
-        // Cursor do mouse virtual (só aparece com o mouse ligado).
-        if (!isFullscreen) {
-            VirtualCursor(mouse, mouseVersion)
-        }
     }
-}
-
-// ────────────────────────────── cursor do mouse virtual ──────────────────────────────
-
-/**
- * Cursor do mouse virtual.
- *
- * Só é desenhado quando o mouse está ligado (segurar OK por 2 s). É um círculo
- * branco com borda escura, do tamanho de um ponteiro de TV, posicionado na
- * coordenada atual do [VirtualMouseState]. Não intercepta toque nem foco: é
- * puramente visual — quem trata as teclas é o Box do player.
- */
-@Composable
-private fun VirtualCursor(mouse: VirtualMouseState, version: Int) {
-    // `version` é lido de propósito: o estado do mouse é uma classe comum, então
-    // é ele que faz o Compose recompor quando o cursor anda.
-    @Suppress("UNUSED_EXPRESSION") version
-    if (!mouse.active) return
-    Box(
-        Modifier
-            .offset { IntOffset(mouse.x.toInt(), mouse.y.toInt()) }
-            .size(22.dp)
-            .background(Color(0xCCFFFFFF), CircleShape)
-            .border(2.dp, Color(0x99000000), CircleShape),
-    )
 }
 
 // ────────────────────────────── barra ──────────────────────────────
@@ -1441,10 +1370,12 @@ private fun VirtualCursor(mouse: VirtualMouseState, version: Int) {
 /**
  * A barra de progresso — e SÓ ela.
  *
- * Sem ícone de play/pause, sem tempo escrito, sem dica de teclas, sem título,
- * sem painel, sem moldura. É o que o proprietário pediu: "somente a barra de
- * progresso". Fica colada na borda inferior, fina e discreta, para não cobrir
- * o filme.
+ * Sem ícone de play/pause, sem botões, sem dica de teclas, sem título, sem
+ * painel, sem moldura. É o que o proprietário pediu: "somente o vídeo e uma
+ * única barra de progresso inferior".
+ *
+ * O tempo atual e a duração total aparecem acima da barra, à direita, em texto
+ * discreto — é a única informação escrita na tela, e some junto com a barra.
  *
  * Os números vêm do `<video>` real (ou do ExoPlayer, no modo direto) — não de
  * um contador estimado. Quando a duração ainda não é conhecida, a barra fica
@@ -1464,8 +1395,16 @@ private fun TvProgressBar(position: Double, duration: Double, visible: Boolean) 
             Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Nada de texto sobre o vídeo: só a barra. O proprietário pediu
-            // "só o vídeo e a barra de progresso" — o relógio era um overlay.
+            // "tempo atual / duração total" — a única escrita na tela.
+            Text(
+                text = "${formatClock(position)} / ${formatClock(duration)}",
+                color = Color(0xE6FFFFFF),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .padding(end = 24.dp, bottom = 8.dp),
+            )
             Box(
                 Modifier
                     .fillMaxWidth()
