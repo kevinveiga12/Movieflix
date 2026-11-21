@@ -34,7 +34,7 @@ const FAKE_SUPABASE = 'https://fake-supabase.test'
 const EMBED_URL = 'https://myembed.biz/filme/1292035'
 
 const browser = await chromium.launch({ args: ['--no-sandbox'] })
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true })
 const page = await ctx.newPage()
 
 const requestedHosts = new Set()
