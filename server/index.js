@@ -4,6 +4,7 @@ import helmet from 'helmet'
 import compression from 'compression'
 import rateLimit from 'express-rate-limit'
 import dotenv from 'dotenv'
+import fs from 'node:fs'
 import path from 'node:path'
 import { getHeapStatistics } from 'node:v8'
 import { fileURLToPath } from 'node:url'
@@ -50,8 +51,12 @@ app.use(
  */
 app.use(
   compression({
+    // O catálogo é servido PRÉ-COMPRIMIDO (`.json.gz`, gerado no build) pela
+    // rota abaixo. Recomprimir aqui seria desperdício de CPU e de memória —
+    // exatamente o que causava o pico de RSS que derrubava o pod. Todo o resto
+    // continua comprimido normalmente.
     filter(req, res) {
-      if (req.path.startsWith('/filmes/')) return false
+      if (res.getHeader('Content-Encoding')) return false
       return compression.filter(req, res)
     },
   }),
@@ -157,17 +162,62 @@ app.get('/api/health/catalog', async (_req, res) => {
 
 app.use('/api/catalog', catalogRouter)
 app.use('/api/tmdb', tmdbRouter)
-app.use('/api/admin', adminRouter)
-app.use('/api/db', dbCatalogRouter)
-app.use('/api/plans', plansRouter)
 // Distribuição dos aplicativos. O APK da TV só sai por /api/admin/apps/tv/download,
 // atrás de requireAdmin — nunca como arquivo estático.
 app.use('/api/apps', appsRouter)
+// O painel chama /api/admin/apps/tv. Este mount vem ANTES de /api/admin para
+// que o router de apps trate a rota direto, sem passar duas vezes pelo
+// requireAdmin (o adminRouter aplica requireAdmin em tudo que cai nele).
+app.use('/api/admin/apps', appsRouter)
+app.use('/api/admin', adminRouter)
+app.use('/api/db', dbCatalogRouter)
+app.use('/api/plans', plansRouter)
 // Autorização de reprodução e assinatura (rotas /playback/authorize e /subscription).
 app.use('/api', accessRouter)
 
 // Frontend estático (build do Vite)
 const dist = path.join(__dirname, '..', 'dist')
+
+/**
+ * ── CATÁLOGO PRÉ-COMPRIMIDO ────────────────────────────────────────────────
+ *
+ * `filmes.light.json` tem 15 MB e `series.light.json` 8 MB. Servidos crus, o
+ * app ficava 15–20 s na tela de skeleton: o download sozinho levava ~13 s.
+ *
+ * O build grava ao lado de cada JSON um `.json.gz` (nível 9). Aqui o arquivo
+ * comprimido é entregue direto do disco quando o cliente aceita gzip — sem
+ * comprimir por requisição, então não há custo de CPU nem pico de memória.
+ * Resultado medido: 15 MB → ~1,4 MB (≈10× menor).
+ *
+ * `Vary: Accept-Encoding` mantém caches intermediários corretos, e o
+ * `Cache-Control` longo evita rebaixar o catálogo a cada visita.
+ */
+const CATALOG_DIR = path.join(dist, 'filmes')
+app.get(/^\/filmes\/[A-Za-z0-9._-]+\.json$/, (req, res, next) => {
+  const name = path.basename(req.path)
+  const gz = path.join(CATALOG_DIR, `${name}.gz`)
+  const acceptsGzip = /\bgzip\b/i.test(req.headers['accept-encoding'] ?? '')
+  if (!acceptsGzip || !fs.existsSync(gz)) return next()
+  res.set('Content-Type', 'application/json; charset=UTF-8')
+  res.set('Content-Encoding', 'gzip')
+  res.set('Vary', 'Accept-Encoding')
+  res.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+  res.sendFile(gz)
+})
+
+// Catálogo estático com cache longo (o conteúdo só muda em novo build).
+app.use(
+  '/filmes',
+  express.static(CATALOG_DIR, {
+    maxAge: '7d',
+    index: false,
+    redirect: false,
+    setHeaders(res) {
+      res.set('Cache-Control', 'public, max-age=604800, stale-while-revalidate=604800')
+    },
+  }),
+)
+
 // redirect:false evita que /filmes (rota SPA) colida com a pasta public/filmes
 // e devolva 301 em vez do index.html.
 app.use(express.static(dist, { maxAge: '1h', index: false, redirect: false }))

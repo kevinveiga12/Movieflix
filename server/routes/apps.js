@@ -70,7 +70,7 @@ router.get('/', (_req, res) => {
   res.json({
     android: {
       available: apk.exists,
-      version: '1.0.4',
+      version: '1.0.5',
       minAndroid: '8.0',
       sizeBytes: apk.sizeBytes,
       updatedAt: apk.updatedAt,
@@ -89,7 +89,7 @@ router.get('/', (_req, res) => {
  * GET /api/admin/apps/tv — metadados do APK da TV (somente admin).
  * Não devolve o arquivo: o download tem URL própria para poder ser auditado.
  */
-router.get('/admin/tv', requireAdmin, (_req, res) => {
+router.get('/tv', requireAdmin, (_req, res) => {
   const p = tvApkPath()
   const info = fileInfo(p)
   res.set('Cache-Control', 'no-store')
@@ -110,7 +110,7 @@ router.get('/admin/tv', requireAdmin, (_req, res) => {
  * garante que o arquivo só chega a um administrador autenticado: sem token
  * válido, a resposta é 401/403 e o corpo do APK nunca é lido do disco.
  */
-router.get('/admin/tv/download', requireAdmin, (req, res, next) => {
+router.get('/tv/download', requireAdmin, (req, res, next) => {
   const p = tvApkPath()
   if (!fs.existsSync(p)) {
     return res.status(404).json({

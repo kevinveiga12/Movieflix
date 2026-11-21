@@ -28,6 +28,9 @@
 
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import fs from 'node:fs'
+import path from 'node:path'
+import zlib from 'node:zlib'
 
 // `require.resolve` dentro de um .mjs precisa do require do módulo.
 const require = createRequire(import.meta.url)
@@ -88,5 +91,35 @@ run('tsc -b', 'npx', ['tsc', '-b'])
 
 // 2. Bundle de produção.
 run('vite build', 'npx', ['vite', 'build'])
+
+/**
+ * 3. Catálogo pré-comprimido.
+ *
+ * O Vite copia `public/` para `dist/`, então os JSONs do catálogo chegam lá
+ * crus (15 MB + 8 MB). O servidor entrega o `.gz` ao lado quando o cliente
+ * aceita gzip (ver server/index.js), o que derruba o download de ~13 s para
+ * ~1,4 s. Gerar aqui, no build, evita comprimir a cada requisição — que era
+ * justamente o pico de memória que derrubava o pod.
+ */
+function gzipCatalog() {
+  const dir = path.join(process.cwd(), 'dist', 'filmes')
+  if (!fs.existsSync(dir)) {
+    console.log('[build] dist/filmes ausente — nada a comprimir')
+    return
+  }
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.json')) continue
+    const src = path.join(dir, name)
+    const out = `${src}.gz`
+    const raw = fs.readFileSync(src)
+    const gz = zlib.gzipSync(raw, { level: 9 })
+    fs.writeFileSync(out, gz)
+    console.log(
+      `[build] ${name}: ${(raw.length / 1048576).toFixed(1)} MB → ${(gz.length / 1048576).toFixed(2)} MB`,
+    )
+  }
+}
+
+gzipCatalog()
 
 console.log('\n[build] concluído')

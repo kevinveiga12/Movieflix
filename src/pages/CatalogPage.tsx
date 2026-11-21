@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { PosterCard } from '../components/PosterCard'
+import { SearchIcon, XIcon } from '../components/Icons'
 import { useHistory } from '../lib/userData'
 import {
   loadCatalog,
@@ -9,6 +10,7 @@ import {
   genresOf,
   byGenre,
   sortTitles,
+  searchTitles,
   SORT_LABELS,
   type SortKey,
 } from '../lib/catalog'
@@ -38,6 +40,13 @@ export function CatalogPage({ kind }: Props) {
 
   const genre = params.get('genero') ?? 'Todos'
   const sort = (params.get('ordem') as SortKey) ?? 'popular'
+  const [query, setQuery] = useState(params.get('q') ?? '')
+  const [debounced, setDebounced] = useState(query)
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(query), 180)
+    return () => clearTimeout(id)
+  }, [query])
 
   useEffect(() => {
     loadCatalog().then(() => setReady(true))
@@ -45,11 +54,26 @@ export function CatalogPage({ kind }: Props) {
 
   useEffect(() => {
     setVisible(PAGE_SIZE)
-  }, [genre, sort, kind])
+  }, [genre, sort, kind, debounced])
 
   const all = useMemo(() => (ready ? (kind === 'movie' ? playableMovies() : playableSeries()) : []), [ready, kind])
   const genres = useMemo(() => ['Todos', ...genresOf(all)], [all])
-  const filtered = useMemo(() => sortTitles(byGenre(all, genre), sort), [all, genre, sort])
+
+  /**
+   * Busca dentro da própria aba.
+   *
+   * Antes só existia a página /pesquisa, escondida atrás do ícone da navbar —
+   * e no app a navbar não aparece. Aqui a busca filtra o catálogo já carregado
+   * (sem requisição nova) e respeita o tipo da aba: em Filmes procura filmes,
+   * em Séries procura séries.
+   */
+  const searched = useMemo(() => {
+    const q = debounced.trim()
+    if (!q) return all
+    return searchTitles(q, kind === 'movie' ? 'movie' : 'tv')
+  }, [all, debounced, kind])
+
+  const filtered = useMemo(() => sortTitles(byGenre(searched, genre), sort), [searched, genre, sort])
 
   function setParam(key: string, value: string) {
     const next = new URLSearchParams(params)
@@ -69,6 +93,27 @@ export function CatalogPage({ kind }: Props) {
         <span className="muted" style={{ fontSize: '0.85rem' }}>
           {ready ? `${filtered.length} títulos` : 'Carregando…'}
         </span>
+      </div>
+
+      <div className="search-bar" style={{ margin: '0 0 16px', maxWidth: '100%' }}>
+        <SearchIcon size={20} />
+        <input
+          type="search"
+          placeholder={kind === 'movie' ? 'Buscar filme…' : 'Buscar série…'}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label={kind === 'movie' ? 'Buscar filme' : 'Buscar série'}
+        />
+        {query && (
+          <button
+            className="icon-btn"
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}
+            onClick={() => setQuery('')}
+            aria-label="Limpar busca"
+          >
+            <XIcon size={18} />
+          </button>
+        )}
       </div>
 
       <div className="filters">
@@ -105,9 +150,19 @@ export function CatalogPage({ kind }: Props) {
         </div>
       ) : filtered.length === 0 ? (
         <div className="empty">
-          <h3>Nenhum título encontrado</h3>
-          <p>Tente outro gênero ou remova os filtros.</p>
-          <button className="btn btn--outline" onClick={() => setParams({}, { replace: true })}>
+          <h3>{debounced.trim() ? `Nada encontrado para “${debounced.trim()}”` : 'Nenhum título encontrado'}</h3>
+          <p>
+            {debounced.trim()
+              ? 'Verifique a grafia ou tente um termo mais curto.'
+              : 'Tente outro gênero ou remova os filtros.'}
+          </p>
+          <button
+            className="btn btn--outline"
+            onClick={() => {
+              setQuery('')
+              setParams({}, { replace: true })
+            }}
+          >
             Limpar filtros
           </button>
         </div>

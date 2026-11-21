@@ -10,7 +10,7 @@
  * Nada de conteúdo protegido ou dado privado é gravado em cache.
  */
 
-const VERSION = 'movieflix-v2.0.1'
+const VERSION = 'movieflix-v2.1.0'
 const SHELL = `${VERSION}-shell`
 const IMAGES = `${VERSION}-images`
 const CATALOG = `${VERSION}-catalog`
@@ -76,29 +76,39 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Catálogo JSON — network-first
+  // Catálogo JSON — cache-first com revalidação em segundo plano.
+  //
+  // Antes era network-first: toda abertura do app baixava 23 MB de catálogo
+  // antes de sair do skeleton, mesmo sem nada ter mudado. Agora a resposta
+  // sai do cache na hora e a atualização acontece em paralelo — a próxima
+  // abertura já pega a versão nova. O catálogo só muda em novo build.
   if (url.pathname.startsWith('/filmes/')) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CATALOG)
-        try {
-          const res = await fetch(request)
-          // Só grava respostas reais e não vazias. Um catálogo vazio em cache
-          // deixaria a home permanentemente em branco.
-          if (res.ok) {
-            const clone = res.clone()
-            const body = await clone.text()
-            if (body.length > 100) {
-              await cache.put(request, new Response(body, { headers: res.headers }))
+        const hit = await cache.match(request)
+        const network = fetch(request)
+          .then(async (res) => {
+            if (res.ok) {
+              const clone = res.clone()
+              const body = await clone.text()
+              // Só grava resposta real e não vazia: um catálogo vazio em cache
+              // deixaria a home permanentemente em branco.
+              if (body.length > 100) {
+                await cache.put(request, new Response(body, { headers: res.headers }))
+              }
             }
-            return new Response(body, { status: res.status, headers: res.headers })
-          }
-          return res
-        } catch {
-          const hit = await cache.match(request)
-          if (hit) return hit
-          return new Response('[]', { headers: { 'Content-Type': 'application/json' } })
+            return res
+          })
+          .catch(() => null)
+
+        if (hit) {
+          void network
+          return hit
         }
+        const res = await network
+        if (res) return res
+        return new Response('[]', { headers: { 'Content-Type': 'application/json' } })
       })(),
     )
     return

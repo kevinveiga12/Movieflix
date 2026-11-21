@@ -27,8 +27,8 @@ android {
         applicationId = "run.velixir.movieflix"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
 
         // Endereço público do MovieFlix. Pode ser sobrescrito no build:
         //   ./gradlew assembleRelease -PmovieflixApi=https://outro.dominio

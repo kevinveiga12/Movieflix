@@ -409,6 +409,10 @@ function AppsTab({ token }: { token?: string }) {
   }
 
   const size = tv?.sizeBytes ? `${(tv.sizeBytes / 1048576).toFixed(1).replace('.', ',')} MB` : null
+  // O botão só fica bloqueado quando o servidor CONFIRMA que o arquivo não
+  // existe. Antes ele dependia de `tv?.available`, e como a rota de metadados
+  // respondia 404 o estado ficava `null` para sempre — botão morto.
+  const blocked = tv ? !tv.available : false
 
   return (
     <>
@@ -448,7 +452,7 @@ function AppsTab({ token }: { token?: string }) {
           <button
             className="btn btn--primary"
             onClick={() => void downloadTv()}
-            disabled={busy || !tv?.available}
+            disabled={busy || blocked}
           >
             <DownloadIcon size={17} /> {busy ? 'Preparando…' : 'Baixar APK da TV'}
           </button>

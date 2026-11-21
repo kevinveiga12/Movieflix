@@ -1879,3 +1879,34 @@ html[data-mf-env='app-ios'] .player-page {
   padding-top: 0;
   padding-bottom: 0;
 }
+
+/* ── Marca no topo da home ────────────────────────────────────────────────
+ * No site a navbar já exibe "MovieFlix". Dentro do app a navbar é escondida,
+ * então esta faixa mantém a marca visível no topo da página inicial.
+ * Fora do app ela não aparece (o design do site não muda). */
+.home-brand {
+  display: none;
+}
+
+html[data-mf-env='app-android'] .home-brand,
+html[data-mf-env='app-ios'] .home-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(14px + var(--mf-app-safe-top)) clamp(16px, 3vw, 56px) 6px;
+}
+
+.home-brand img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.home-brand span {
+  font-size: 1.45rem;
+  line-height: 1;
+  background: linear-gradient(92deg, #fff 30%, var(--mf-red-bright));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

@@ -87,6 +87,14 @@ export function HomePage() {
 
   return (
     <>
+      {/* Marca no topo da home. No site a navbar já mostra "MovieFlix"; dentro
+          do app a navbar é escondida, então esta faixa é o que mantém a marca
+          visível — como era antes. O CSS só a exibe em modo aplicativo. */}
+      <div className="home-brand">
+        <img src="/icon-192.png" alt="" />
+        <span className="brand-word">Movieflix</span>
+      </div>
+
       <Hero items={heroes} />
 
       <div className="page">

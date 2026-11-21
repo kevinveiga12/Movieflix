@@ -13,7 +13,11 @@ let seriesCache: Title[] | null = null
 let loading: Promise<void> | null = null
 
 async function loadJson<T>(path: string): Promise<T> {
-  const res = await fetch(path, { cache: 'force-cache' })
+  // `force-cache` foi removido: ele servia uma resposta antiga (inclusive um
+  // 502 em cache) sem nunca revalidar. O cache agora é do service worker
+  // (cache-first com revalidação em segundo plano) e do HTTP (Cache-Control
+  // longo no servidor), então aqui basta o fetch normal.
+  const res = await fetch(path)
   if (!res.ok) throw new Error(`Falha ao carregar ${path} (${res.status})`)
   return (await res.json()) as T
 }
