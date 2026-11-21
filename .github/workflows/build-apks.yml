@@ -12,6 +12,12 @@ name: Build APKs
 #   movieflix-release.keystore  (GUARDE: e a chave das atualizacoes futuras)
 #   movieflix-screenshots       (prova visual de que o app abre)
 
+# O passo "Publicar APK Android no site" faz commit do APK de volta no main.
+# Sem esta permissao o GITHUB_TOKEN e somente leitura e o push falha com
+# "Permission to ... denied to github-actions[bot]" (403).
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -170,6 +176,10 @@ jobs:
       # aponta para o build mais recente, sem passo manual.
       - name: Publicar APK Android no site
         if: github.ref == 'refs/heads/main'
+        # O commit do APK e conveniencia: se o token nao tiver permissao de
+        # escrita, o build NAO pode falhar por isso — os APKs ainda precisam
+        # ser publicados como artefato e o deploy do site nao depende disto.
+        continue-on-error: true
         run: |
           cp out/movieflix-mobile-release.apk public/apk/movieflix-android.apk
           # O APK da TV NAO vai para public/: ele e privado e so sai pela rota
