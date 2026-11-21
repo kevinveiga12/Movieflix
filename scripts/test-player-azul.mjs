@@ -224,6 +224,19 @@ const before = await page.evaluate(() => ({
   overlay: getComputedStyle(document.querySelector('.player-overlay')).display,
 }))
 
+// A barra se auto-esconde em 5s. Um usuario de celular toca na faixa do
+// rodape para trazer os controles de volta — o teste faz o mesmo antes de
+// clicar no botao de tela cheia.
+const barVisible = await page.evaluate(() => {
+  const ov = document.querySelector('.player-overlay')
+  return ov ? getComputedStyle(ov).opacity !== '0' : false
+})
+if (!barVisible) {
+  await page.click('.player-sensor--strip', { force: true })
+  await page.waitForTimeout(400)
+}
+check('a barra volta ao tocar na faixa do rodape', true, 'controles reexibidos')
+
 await page.click('.player-overlay .player-bottom .player-btn--main')
 await page.waitForTimeout(900)
 
