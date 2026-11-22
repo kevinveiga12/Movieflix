@@ -701,15 +701,25 @@ export function PlayerPage() {
             é REMONTADO em vez de só trocar o `src`. Sem isso o navegador mantém
             o documento antigo e a troca não tem efeito visível.
 
-            SANDBOX — o que está liberado:
-              allow-scripts        o player precisa rodar
-              allow-same-origin    o player precisa do próprio storage
-              allow-presentation   tela cheia / cast
-              allow-forms          login do provedor, quando houver
+            SEM `sandbox` — E ISSO É O CONSERTO.
 
-            `allow-popups` NÃO está liberado: é ele que deixa anúncio abrir aba
-            nova no primeiro toque.
-            `allow-top-navigation` também não: o iframe não troca a nossa página.
+            O MegaEmbed recusa rodar dentro de um iframe com o atributo
+            `sandbox`. Ele detecta a restrição e mostra, no lugar do vídeo:
+
+              "Sandbox Detectada — este reprodutor de vídeo foi bloqueado
+               porque o seu iframe está rodando sob restrições estritas de
+               sandbox. Isso impede a execução das APIs do MegaEmbed."
+
+            Era exatamente isso que o cliente via: NENHUM título abria, porque
+            o defeito não era por título — era UM atributo nosso, aplicado a
+            todos. O `sandbox` entrou no commit 53f3f76 e derrubou a reprodução
+            inteira.
+
+            O que continua valendo sem `sandbox`:
+              • o iframe é de OUTRA origem — não lê nosso DOM, cookies nem
+                storage; a política de origem do navegador já isola;
+              • `allow` não inclui popups nem top-navigation;
+              • `referrerPolicy="origin"` mantém o Referer que o provedor exige.
 
             `referrerPolicy="origin"` é obrigatório — o provedor só entrega o
             player quando recebe o Referer do site que o incorporou.
@@ -721,7 +731,6 @@ export function PlayerPage() {
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
             referrerPolicy="origin"
-            sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
             onLoad={() => {
               setFrameLoaded(true)
               setLoading(false)

@@ -191,6 +191,7 @@ const dom = await page.evaluate(() => {
     timeText: time?.textContent?.trim() ?? null,
     iframeAllow: iframe?.getAttribute('allow') ?? null,
     iframeAllowFullscreen: iframe?.hasAttribute('allowfullscreen') ?? false,
+    iframeSandbox: iframe?.getAttribute('sandbox') ?? null,
     iframeSrc: iframe?.getAttribute('src') ?? null,
     centerElement: probe ? `${probe.tagName}.${probe.className}` : null,
   }
@@ -212,6 +213,16 @@ check(
   'iframe permite tela cheia',
   /fullscreen/.test(dom.iframeAllow ?? '') && dom.iframeAllowFullscreen,
   `allow="${dom.iframeAllow}" allowfullscreen=${dom.iframeAllowFullscreen}`,
+)
+/*
+  O MegaEmbed recusa rodar sob `sandbox` — mostra "Sandbox Detectada" no lugar
+  do vídeo. Este atributo derrubou a reprodução de TODOS os títulos. Se ele
+  voltar, este teste falha.
+*/
+check(
+  'iframe SEM sandbox (MegaEmbed recusa rodar sob sandbox)',
+  dom.iframeSandbox === null,
+  dom.iframeSandbox === null ? 'sem atributo sandbox' : `sandbox="${dom.iframeSandbox}"`,
 )
 check(
   'nenhum recurso do StreamBetter carregado',
