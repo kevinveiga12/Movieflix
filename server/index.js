@@ -16,6 +16,7 @@ import { dbCatalogRouter } from './routes/db-catalog.js'
 import { plansRouter } from './routes/plans.js'
 import { appsRouter } from './routes/apps.js'
 import { streamRouter } from './routes/stream.js'
+import megaembedRouter from './routes/megaembed.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
 import { confirmAllPendingEmails } from './lib/profile.js'
 
@@ -180,6 +181,10 @@ app.use('/api/plans', plansRouter)
 app.use('/api', streamRouter)
 
 app.use('/api', accessRouter)
+
+// Integração MegaEmbed. O router responde 404 quando MEGAEMBED_ENABLED não é
+// 'true' — com a flag desligada (padrão) nada muda no player em produção.
+app.use('/api/megaembed', megaembedRouter)
 
 // Frontend estático (build do Vite)
 const dist = path.join(__dirname, '..', 'dist')

@@ -5,7 +5,7 @@ import { loadCatalog, getAll } from '../lib/catalog'
 import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon, KeyIcon, DownloadIcon, InfoIcon } from '../components/Icons'
 import type { Title } from '../lib/types'
 
-type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability' | 'apps'
+type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability' | 'megaembed' | 'apps'
 
 interface Stats {
   users: number
@@ -189,6 +189,7 @@ export function AdminPage() {
             ['users', 'Usuários'],
             ['plans', 'Planos'],
             ['availability', 'Disponibilidade'],
+            ['megaembed', 'MegaEmbed'],
             ['apps', 'Aplicativos'],
           ] as const
         ).map(([k, label]) => (
@@ -297,6 +298,8 @@ export function AdminPage() {
       )}
 
       {tab === 'availability' && <AvailabilityTab api={api} />}
+
+      {tab === 'megaembed' && <MegaEmbedTab api={api} />}
 
       {tab === 'apps' && <AppsTab token={token} />}
 
@@ -526,6 +529,106 @@ function AvailabilityTab({ api }: { api: (p: string, i?: RequestInit) => Promise
           Para atualizar: <code>{data.comoAtualizar ?? 'node scripts/validar-disponibilidade.cjs'}</code>
         </p>
       </div>
+    </>
+  )
+}
+
+/**
+ * ABA MEGAEMBED — estado da integração.
+ *
+ * Mostra o que a sonda REALMENTE devolveu, não um "conectado" otimista. Se o
+ * Cloudflare estiver bloqueando, aparece "em verificação" com a explicação —
+ * é a verdade, e é o que o admin precisa saber para decidir.
+ */
+function MegaEmbedTab({ api }: { api: (p: string, i?: RequestInit) => Promise<any> }) {
+  const [data, setData] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api('/megaembed/status')
+      .then(setData)
+      .catch((e) => setError(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (error) {
+    return (
+      <div className="panel">
+        <div className="panel-title">MegaEmbed</div>
+        <p className="panel-sub" style={{ marginBottom: 0 }}>
+          {error}
+        </p>
+      </div>
+    )
+  }
+  if (!data) return <p className="muted">Carregando…</p>
+
+  const estado = data.connected
+    ? 'Conectado'
+    : data.probe?.challenge
+      ? 'Em verificação (Cloudflare)'
+      : 'Sem conexão'
+
+  return (
+    <>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
+        {[
+          ['Estado da conexão', estado],
+          ['Filmes disponíveis', data.catalogo?.filmes ?? 0],
+          ['Séries disponíveis', data.catalogo?.series ?? 0],
+          ['Episódios disponíveis', data.catalogo?.episodios ?? 0],
+          ['Fontes indisponíveis', data.fontesIndisponiveis ?? 0],
+        ].map(([label, value]) => (
+          <div key={String(label)} className="panel" style={{ marginBottom: 0 }}>
+            <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{value}</div>
+            <div className="muted" style={{ fontSize: '0.82rem' }}>
+              {label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel" style={{ marginTop: 20 }}>
+        <div className="panel-title">Sonda do player</div>
+        <p className="panel-sub">
+          Base: <code>{data.base}</code>
+          <br />
+          HTTP <strong>{data.probe?.http ?? '—'}</strong> · estado{' '}
+          <strong>{data.probe?.state ?? '—'}</strong> · {data.probe?.ms ?? 0} ms
+          <br />
+          Player encontrado: <strong>{data.probe?.hasPlayer ? 'sim' : 'não'}</strong> · Anúncio
+          detectado: <strong>{data.probe?.hasAds ? 'sim' : 'não'}</strong>
+        </p>
+        <p className="panel-sub" style={{ marginBottom: 0 }}>
+          {data.ultimaAtualizacao ? (
+            <>
+              Última verificação: {new Date(data.ultimaAtualizacao).toLocaleString('pt-BR')}
+              <br />
+            </>
+          ) : (
+            <>
+              Nenhuma verificação registrada.
+              <br />
+            </>
+          )}
+          Para atualizar: <code>{data.comoAtualizar}</code>
+        </p>
+      </div>
+
+      {Array.isArray(data.falhas) && data.falhas.length > 0 && (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <div className="panel-title">Relatório de falhas</div>
+          <div style={{ maxHeight: 260, overflow: 'auto', fontSize: '0.82rem' }}>
+            {data.falhas.map((f: any, i: number) => (
+              <div key={i} className="muted">
+                {f.type} {f.id} — {f.state}
+                {f.http ? ` (HTTP ${f.http})` : ''}
+                {f.error ? ` · ${f.error}` : ''}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   )
 }
