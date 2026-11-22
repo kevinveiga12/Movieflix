@@ -15,6 +15,7 @@ import { accessRouter } from './routes/access.js'
 import { dbCatalogRouter } from './routes/db-catalog.js'
 import { plansRouter } from './routes/plans.js'
 import { appsRouter } from './routes/apps.js'
+import { streamRouter } from './routes/stream.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
 import { confirmAllPendingEmails } from './lib/profile.js'
 
@@ -173,6 +174,11 @@ app.use('/api/admin', adminRouter)
 app.use('/api/db', dbCatalogRouter)
 app.use('/api/plans', plansRouter)
 // Autorização de reprodução e assinatura (rotas /playback/authorize e /subscription).
+// Proxy do stream direto (HLS). Fica ANTES do accessRouter porque não exige
+// sessão: o player já autorizou o título, e o CDN do provedor não conhece
+// cookie nosso. A allowlist de hosts é o que impede uso como proxy aberto.
+app.use('/api', streamRouter)
+
 app.use('/api', accessRouter)
 
 // Frontend estático (build do Vite)

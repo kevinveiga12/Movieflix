@@ -15,6 +15,7 @@ import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-
 import { applyTrialMetadata } from '../lib/trial-claims.js'
 import { redeemTrialCode, TRIAL_CODE_MAX_ATTEMPTS } from '../lib/trial-codes.js'
 import { resolveSources } from '../lib/providers.js'
+import { resolveDirectStream, resolveCleanEmbed } from '../lib/stream-resolver.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -154,6 +155,23 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
     if (isDirect) {
       sources = [{ id: 'direct', label: 'Arquivo', url: sourceUrl, mode: 'direct', verified: true }]
     } else {
+      /**
+       * STREAM DIRETO PRIMEIRO.
+       *
+       * O embed do player azul é uma cadeia de três iframes, e a barra de cima
+       * que o cliente vê em tela cheia é HTML do `playerflix.ink` — que nunca
+       * se esconde e não tem parâmetro para desligar (medido em navegador
+       * real). Tocando o HLS num <video> nosso, não existe UI de provedor.
+       *
+       * Se a resolução falhar, `direct` é null e caímos no embed de sempre:
+       * o cliente nunca fica sem caminho.
+       */
+      const direct = await resolveDirectStream({
+        tmdbId,
+        season: title.type === 'tv' || season != null ? season : null,
+        episode: title.type === 'tv' || season != null ? episode : null,
+      }).catch(() => null)
+
       const resolved = await resolveSources({
         tmdbId,
         season: title.type === 'tv' || season != null ? season : null,
@@ -161,6 +179,43 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
         catalogUrl: sourceUrl,
       })
       sources = resolved.map((s) => ({ ...s, mode: 'embed' }))
+
+      if (direct) {
+        // O proxy reescreve o playlist e repassa os segmentos; o player só
+        // conhece a nossa origem, então não há CORS nem Referer a forjar.
+        // A rota termina em `.m3u8` de propósito: é o que faz o PlayerPage
+        // escolher o caminho HLS (hls.js) em vez de `video.src` direto.
+        const proxied = `/api/stream.m3u8?u=${encodeURIComponent(direct.url)}&r=${encodeURIComponent(direct.referer)}`
+        sources = [
+          { id: 'direct', label: direct.label, url: proxied, mode: 'direct', verified: true },
+          ...sources,
+        ]
+      } else {
+        /**
+         * SEGUNDA CAMADA.
+         *
+         * Sem `watchplay` (≈1/4 do catálogo), ainda tiramos a barra de cima
+         * do caminho: incorporamos a opção do provedor DIRETAMENTE, sem a
+         * camada do `playerflix.ink` — é ela que desenha aquela barra.
+         *
+         * Vai na frente, mas os embeds antigos continuam na lista: se este
+         * não entregar vídeo, o trocador de servidor do player segue
+         * funcionando.
+         */
+        const clean = await resolveCleanEmbed({
+          tmdbId,
+          season: title.type === 'tv' || season != null ? season : null,
+          episode: title.type === 'tv' || season != null ? episode : null,
+        }).catch(() => null)
+
+        if (clean) {
+          sources = [
+            { id: 'clean', label: clean.label, url: clean.url, mode: 'embed', verified: null },
+            ...sources.filter((s) => s.url !== clean.url),
+          ]
+        }
+      }
+
       // Se a resolução não devolveu nada (tmdbId estranho), mantém a URL do
       // catálogo para não deixar o cliente sem fonte nenhuma.
       if (!sources.length) {
@@ -174,7 +229,7 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
       source: {
         url: sources[0].url,
         label: sourceLabel,
-        mode: isDirect ? 'direct' : 'embed',
+        mode: sources[0].mode,
       },
       sources,
       plan: {
