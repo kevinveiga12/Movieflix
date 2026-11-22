@@ -14,8 +14,12 @@ import {
 import { getAdminClient, getAnonClient, getClientAsUser } from '../lib/supabase-server.js'
 import { applyTrialMetadata } from '../lib/trial-claims.js'
 import { redeemTrialCode, TRIAL_CODE_MAX_ATTEMPTS } from '../lib/trial-codes.js'
-import { resolveSources } from '../lib/providers.js'
-import { resolveDirectStream, resolveCleanEmbed } from '../lib/stream-resolver.js'
+import {
+  resolveMegaEmbedSources,
+  megaembedEnabled,
+  megaembedEmbedUrl,
+  MEGAEMBED_ONLY,
+} from '../lib/megaembed.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -154,6 +158,54 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
     let sources
     if (isDirect) {
       sources = [{ id: 'direct', label: 'Arquivo', url: sourceUrl, mode: 'direct', verified: true }]
+    } else if (MEGAEMBED_ONLY) {
+      /**
+       * ══════════════════════════════════════════════════════════════════════
+       * PLAYER ÚNICO: MEGAEMBED (o vermelho)
+       * ══════════════════════════════════════════════════════════════════════
+       *
+       * O proprietário pediu UM player só. O player azul (myembed.biz →
+       * playerflix.ink → v1.watchplay.shop) saiu do fluxo de reprodução por
+       * completo: não há trocador de servidor, não há fallback para ele, não
+       * há embed antigo. A lista `sources` tem UM item.
+       *
+       * ── O que a sonda diz e o que ela NÃO diz ────────────────────────────
+       *
+       * `resolveMegaEmbedSources` sonda a página do embed a partir do
+       * SERVIDOR. Neste ambiente o Cloudflare Turnstile responde 403 em todos
+       * os domínios (mgeb.space/.lat/.casa/.quest), então a sonda devolve
+       * `em_verificacao` — ela NÃO consegue provar que o vídeo toca.
+       *
+       * Isso NÃO impede a reprodução: quem carrega o embed é o NAVEGADOR DO
+       * CLIENTE, que resolve o desafio do Cloudflare sozinho (é um navegador
+       * de verdade, em rede residencial). O que a sonda falha em fazer é
+       * apenas a verificação antecipada no servidor.
+       *
+       * Por isso a URL é devolvida mesmo quando a sonda não confirma: sem
+       * isso o cliente ficaria sem fonte nenhuma por causa de uma limitação
+       * do ambiente de build, não do produto.
+       */
+      const resolved = await resolveMegaEmbedSources({
+        tmdbId,
+        season: title.type === 'tv' || season != null ? season : null,
+        episode: title.type === 'tv' || season != null ? episode : null,
+      }).catch(() => [])
+
+      sources = resolved.length
+        ? resolved.map((s) => ({ ...s, mode: 'embed' }))
+        : [
+            {
+              id: 'megaembed',
+              label: 'MegaEmbed',
+              url: megaembedEmbedUrl(
+                tmdbId,
+                title.type === 'tv' || season != null ? season : null,
+                title.type === 'tv' || season != null ? episode : null,
+              ),
+              mode: 'embed',
+              verified: null,
+            },
+          ]
     } else {
       /**
        * STREAM DIRETO PRIMEIRO.

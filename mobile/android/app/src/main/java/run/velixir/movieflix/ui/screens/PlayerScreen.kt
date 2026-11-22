@@ -456,9 +456,18 @@ internal fun EmbedPlayer(
     }
 }
 
-/** Hosts do provedor que podem navegar dentro do WebView. */
+/**
+ * Hosts do provedor que podem navegar dentro do WebView.
+ *
+ * O provedor é o MegaEmbed (`mgeb.space`). Os hosts do player azul continuam
+ * listados de propósito: se algum título antigo ainda apontar para lá, o
+ * WebView precisa conseguir carregar a página em vez de travar numa tela em
+ * branco. Eles não são usados para reproduzir — o servidor só entrega MegaEmbed.
+ */
 private fun isProviderHost(host: String): Boolean =
-    host.contains("myembed") ||
+    host.contains("mgeb") ||
+        host.contains("megaembed") ||
+        host.contains("myembed") ||
         host.contains("playerflix") ||
         host.contains("embedplay") ||
         host.contains("embedmovies") ||

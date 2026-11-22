@@ -19,8 +19,8 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC = path.join(__dirname, '..', '..', 'public', 'filmes')
 
-/** Provedor de embed (EmbedMovies). Ver src/lib/player.ts. */
-const EMBED_PROVIDER = 'https://myembed.biz'
+/** Provedor de embed (MegaEmbed). Ver src/lib/player.ts. */
+const EMBED_PROVIDER = 'https://mgeb.space'
 
 const cache = { movie: null, tv: null }
 const inflight = { movie: null, tv: null }
@@ -28,36 +28,54 @@ const inflight = { movie: null, tv: null }
 const FILES = { movie: 'filmes.light.json', tv: 'series.light.json' }
 
 /**
- * Disponibilidade verificada no provedor (EmbedMovies).
+ * Disponibilidade verificada no provedor.
  *
- * `public/filmes/disponibilidade.json` é gerado por
- * `scripts/validar-disponibilidade.cjs`, que pergunta ao player, título a
- * título, se existe fonte de reprodução. O catálogo publicado tem 18.080
- * filmes e 8.093 séries; nem todos estão disponíveis no provedor.
+ * ══════════════════════════════════════════════════════════════════════════════
+ * PLAYER ÚNICO: MEGAEMBED
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * O proprietário pediu que o catálogo público mostre SOMENTE títulos que
+ * realmente rodam no MegaEmbed. `public/filmes/megaembed-disponibilidade.json`
+ * é gerado por `scripts/gerar-disponibilidade-megaembed.mjs` e contém a
+ * interseção entre o nosso catálogo e o catálogo oficial do provedor
+ * (`/api/movie` = 21.317 IDs, `/api/series` = 7.741 IDs).
+ *
+ * Medido em 2026-11-22: 15.415 filmes e 6.400 séries do nosso catálogo estão
+ * no catálogo do MegaEmbed. Os outros 4.358 ficam fora da listagem pública —
+ * os metadados continuam no JSON, só não são servidos.
  *
  * Regra: se o arquivo existir e tiver entradas, o catálogo mostra SOMENTE o
- * que foi verificado como disponível. Se o arquivo não existir (ou estiver
- * vazio), não filtramos nada — melhor mostrar o catálogo inteiro do que um
- * site vazio por causa de um arquivo ausente.
+ * que está nele. Se o arquivo não existir (ou estiver vazio), não filtramos
+ * nada — melhor mostrar o catálogo inteiro do que um site vazio por causa de
+ * um arquivo ausente.
  */
 let availability = null
 
 async function loadAvailability() {
   if (availability) return availability
   try {
-    const raw = await fs.readFile(path.join(PUBLIC, 'disponibilidade.json'), 'utf8')
+    const raw = await fs.readFile(path.join(PUBLIC, 'megaembed-disponibilidade.json'), 'utf8')
     const data = JSON.parse(raw)
     const movies = new Set((data.filmes ?? []).map(String))
-    const series = new Set((data.series_verificadas ?? Object.keys(data.series ?? {})).map(String))
+    const series = new Set((data.series ?? []).map(String))
     availability = {
       movies,
       series,
       // Só filtra quando houve verificação de fato.
       active: movies.size > 0 || series.size > 0,
       geradoEm: data.gerado_em ?? null,
+      provedor: data.provedor ?? null,
+      reproducaoValidada: data.reproducao_validada === true,
     }
   } catch {
-    availability = { movies: new Set(), series: new Set(), active: false, geradoEm: null }
+    availability = {
+      movies: new Set(),
+      series: new Set(),
+      active: false,
+      geradoEm: null,
+      provedor: null,
+      reproducaoValidada: false,
+    }
   }
   return availability
 }
@@ -70,6 +88,8 @@ export async function availabilityStats() {
     movies: a.movies.size,
     series: a.series.size,
     geradoEm: a.geradoEm,
+    provedor: a.provedor,
+    reproducaoValidada: a.reproducaoValidada,
   }
 }
 
@@ -90,12 +110,19 @@ function normalizeRecord(t) {
   const type = raw === 'tv' || raw === 'series' || raw === 'show' ? 'tv' : 'movie'
 
   // O JSON do catálogo foi gerado quando o provedor era o Streambetter e traz
-  // `video_url` apontando para lá. Reescrevemos para o EmbedMovies na leitura,
+  // `video_url` apontando para lá. Reescrevemos para o MegaEmbed na leitura,
   // sem tocar nos arquivos (18 mil registros) e sem depender de regeneração.
+  //
+  // Qualquer host de embed que não seja o MegaEmbed é reescrito — não só o
+  // Streambetter. Assim nenhum resquício do player azul chega ao cliente.
   let video_url = t.video_url
-  if (typeof video_url === 'string' && /streambetter|strembetter/i.test(video_url)) {
-    const id = String(t.tmdb_id ?? t.id ?? '')
-    video_url = /^\d+$/.test(id) ? `${EMBED_PROVIDER}/filme/${id}` : ''
+  if (typeof video_url === 'string' && video_url && !/\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i.test(video_url)) {
+    const host = (/^https?:\/\/([^/]+)/i.exec(video_url)?.[1] ?? '').toLowerCase()
+    const isMega = host === 'mgeb.space' || host.endsWith('.mgeb.space')
+    if (!isMega) {
+      const id = String(t.tmdb_id ?? t.id ?? '')
+      video_url = /^\d+$/.test(id) ? `${EMBED_PROVIDER}/embed/${id}` : ''
+    }
   }
 
   if (t.type === type && t.media_type === type && video_url === t.video_url) return t

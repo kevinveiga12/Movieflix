@@ -135,10 +135,10 @@ export function SettingsPage() {
 /* ────────────────────────────────────────────────────────────────────────────
  * PÁGINA DE APLICATIVOS
  *
- * Dois apps, e só dois: Android e iPhone. O aplicativo de TV saiu desta página
- * de propósito — ele está em manutenção e a distribuição dele agora é feita
- * apenas dentro do painel de administrador (`/admin` → aba Aplicativos). Não
- * existe link, texto ou menção ao app de TV em nenhum lugar público do site.
+ * Três apps: Android, iPhone e TV. O de TV voltou a esta página a pedido do
+ * proprietário, com o selo "Em desenvolvimento" — ele ainda não foi validado
+ * num aparelho físico, e o aviso existe para que ninguém o trate como pronto.
+ * O painel administrativo continua com a cópia dele.
  *
  * Ambos os apps são cascas que carregam o site publicado. Isso é o que garante
  * a regra "espelho": qualquer mudança no site aparece no app na próxima
@@ -156,6 +156,16 @@ interface AppInfo {
     url: string
   }
   ios: { available: boolean; minIos: string; install: string }
+  tv?: {
+    available: boolean
+    version: string
+    minAndroid: string
+    sizeBytes: number
+    url: string
+    status?: string
+    notice?: string
+    platforms?: string[]
+  }
 }
 
 /** Fallback: se /api/apps não responder, o botão do Android continua válido. */
@@ -168,6 +178,16 @@ const FALLBACK: AppInfo = {
     url: '/apk/movieflix-android.apk',
   },
   ios: { available: true, minIos: '16.0', install: 'pwa' },
+  tv: {
+    available: true,
+    version: '1.0.4',
+    minAndroid: '8.0',
+    sizeBytes: 0,
+    url: '/api/apps/tv/download',
+    status: 'beta',
+    notice: 'Em desenvolvimento',
+    platforms: ['Android TV', 'Google TV', 'TV Box'],
+  },
 }
 
 const mb = (bytes: number) =>
@@ -289,6 +309,57 @@ export function DownloadPage() {
               mesma sensação de app, sem depender da loja.
             </p>
           </div>
+
+          {/*
+            APP DE TV — EM DESENVOLVIMENTO.
+
+            O selo não é decoração: o app de TV ainda não foi validado num
+            aparelho físico pelo proprietário. O aviso fica visível no card e
+            repetido no rodapé dele, para que ninguém baixe esperando algo
+            acabado.
+          */}
+          {info.tv && (
+            <div className="panel">
+              <div className="row-between">
+                <div>
+                  <div className="panel-title">📺 MovieFlix para TV</div>
+                  <p className="panel-sub" style={{ marginBottom: 6 }}>
+                    Para Android TV, Google TV e TV Box. Funciona inteiro pelo controle remoto:
+                    navegar, pausar, avançar, retroceder e tela cheia.
+                  </p>
+                  <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+                    {(info.tv.platforms ?? ['Android TV', 'Google TV', 'TV Box']).join(' · ')} ·
+                    versão {info.tv.version}
+                    {mb(info.tv.sizeBytes) ? ` · ${mb(info.tv.sizeBytes)}` : ''}
+                  </p>
+                </div>
+                <span className="badge badge--warn">{info.tv.notice ?? 'Em desenvolvimento'}</span>
+              </div>
+
+              <div className="inline" style={{ marginTop: 14 }}>
+                <a
+                  className="btn btn--primary"
+                  href={info.tv.url}
+                  download="movieflix-tv.apk"
+                  type="application/vnd.android.package-archive"
+                >
+                  <DownloadIcon size={17} /> Baixar para TV
+                </a>
+                <span className="muted" style={{ fontSize: '0.82rem' }}>
+                  Instale pelo pendrive ou pelo navegador da TV
+                </span>
+              </div>
+
+              <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
+                <InfoIcon size={18} />
+                <span>
+                  <strong>Em desenvolvimento.</strong> O aplicativo de TV está em fase de testes
+                  e pode apresentar falhas. Se algo não funcionar, use o site no navegador da TV
+                  enquanto publicamos a versão final.
+                </span>
+              </div>
+            </div>
+          )}
         </>
       )}
 

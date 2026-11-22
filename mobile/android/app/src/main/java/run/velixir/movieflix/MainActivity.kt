@@ -218,7 +218,8 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) 
                     onBack = { route = Route.Detail(r.title) },
                 )
                 Route.EmbedDiag -> Box(Modifier.fillMaxSize()) {
-                    EmbedPlayer("https://myembed.biz/filme/1292035")
+                    // Diagnóstico do embed. Aponta para o provedor atual (MegaEmbed).
+                    EmbedPlayer("https://mgeb.space/embed/1292035")
                 }
             }
 

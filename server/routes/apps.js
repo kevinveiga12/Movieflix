@@ -7,19 +7,16 @@ import { requireAdmin } from '../lib/auth.js'
 /**
  * Distribuição dos aplicativos MovieFlix.
  *
- * ── POR QUE O APK DA TV NÃO FICA EM `public/` ──────────────────────────────
+ * ── APK DA TV: PÚBLICO, MARCADO "EM DESENVOLVIMENTO" ────────────────────────
  *
- * O APK da TV era servido como arquivo estático (`public/apk/…`), então
- * qualquer visitante que descobrisse o caminho baixava — e a página
- * `/baixar-app` publicava o link para todo mundo. O pedido é que o aplicativo
- * de TV seja distribuído **somente ao administrador**.
+ * O proprietário pediu o app de TV na página de downloads, com o aviso de que
+ * está em desenvolvimento. Então ele é público agora — mas continua fora de
+ * `public/`, porque o arquivo é grande e não deve ser servido como estático
+ * sem controle de versão. Ele sai por `GET /api/apps/tv/download`, que é
+ * público e responde com `Content-Disposition: attachment`.
  *
- * Arquivo em `public/` (ou em `dist/`) é público por definição: o Express o
- * entrega antes de qualquer rota. Por isso o APK foi movido para
- * `storage/apps/`, que não é servido estaticamente, e só sai daqui pela rota
- * `GET /api/admin/apps/tv/download`, atrás de `requireAdmin` — que valida o
- * Bearer token no Supabase e exige `profiles.is_admin` (com a barreira extra
- * de ADMIN_EMAILS quando configurada).
+ * O caminho antigo (`/api/admin/apps/tv/download`, atrás de `requireAdmin`)
+ * continua existindo para o painel administrativo.
  *
  * ── APPS MOBILE ────────────────────────────────────────────────────────────
  *
@@ -59,13 +56,25 @@ function fileInfo(p) {
 const router = Router()
 
 /**
- * GET /api/apps — o que o site pode mostrar publicamente.
+ * Router PÚBLICO, montado só em `/api/apps`.
  *
- * Só o Android aparece aqui. O app de TV NÃO é listado: a existência dele não
- * é divulgada no site público, e o download exige admin.
+ * Existe separado porque o mesmo arquivo é montado também em
+ * `/api/admin/apps` (para o painel). Se o download público estivesse no router
+ * compartilhado, ele seria registrado antes do download protegido e o
+ * `requireAdmin` nunca rodaria — o APK sairia sem autenticação pelo caminho
+ * administrativo. Dois routers eliminam a ambiguidade.
  */
-router.get('/', (_req, res) => {
+const publicRouter = Router()
+
+/**
+ * GET /api/apps — o que o site mostra publicamente.
+ *
+ * Três aplicativos: Android, iOS e TV. O de TV vem com `status: 'beta'` e
+ * `notice`, que é o que a página usa para desenhar o selo "em desenvolvimento".
+ */
+publicRouter.get('/', (_req, res) => {
   const apk = fileInfo(ANDROID_APK)
+  const tv = fileInfo(tvApkPath())
   res.set('Cache-Control', 'no-store')
   res.json({
     android: {
@@ -82,6 +91,40 @@ router.get('/', (_req, res) => {
       minIos: '16.0',
       install: 'pwa',
     },
+    tv: {
+      available: tv.exists,
+      version: '1.0.4',
+      minAndroid: '8.0',
+      sizeBytes: tv.sizeBytes,
+      updatedAt: tv.updatedAt,
+      url: '/api/apps/tv/download',
+      /**
+       * `beta` é o que a página lê para mostrar o selo. NÃO é decoração: o
+       * app de TV ainda não foi validado num aparelho físico pelo proprietário,
+       * e o aviso existe para que ninguém o trate como pronto.
+       */
+      status: 'beta',
+      notice: 'Em desenvolvimento',
+      platforms: ['Android TV', 'Google TV', 'TV Box'],
+    },
+  })
+})
+
+/**
+ * GET /api/apps/tv/download — entrega o APK da TV ao público.
+ *
+ * Público de propósito: o card do app de TV na página de downloads aponta
+ * para cá. O arquivo continua em `storage/apps/`, fora do estático, para que
+ * a troca de versão seja uma decisão nossa e não um efeito de copiar arquivo.
+ */
+publicRouter.get('/tv/download', (req, res, next) => {
+  const p = tvApkPath()
+  if (!fs.existsSync(p)) {
+    return res.status(404).json({ error: 'APK da TV ainda não publicado no servidor.' })
+  }
+  res.type('application/vnd.android.package-archive')
+  res.download(p, 'movieflix-tv.apk', (err) => {
+    if (err && !res.headersSent) next(err)
   })
 })
 
@@ -124,4 +167,4 @@ router.get('/tv/download', requireAdmin, (req, res, next) => {
   })
 })
 
-export { router as appsRouter }
+export { router as appsRouter, publicRouter as publicAppsRouter }

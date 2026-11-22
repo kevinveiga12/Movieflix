@@ -45,6 +45,28 @@ export function megaembedEnabled() {
   return String(process.env.MEGAEMBED_ENABLED ?? '').toLowerCase() === 'true'
 }
 
+/**
+ * O MegaEmbed é o ÚNICO player do app?
+ *
+ * Padrão: SIM. O proprietário pediu um player só — o vermelho (MegaEmbed) — e
+ * que o azul saísse de vez. Com `MEGAEMBED_ONLY=false` o código antigo volta
+ * (rollback), sem precisar reverter commit.
+ */
+export const MEGAEMBED_ONLY =
+  String(process.env.MEGAEMBED_ONLY ?? 'true').toLowerCase() !== 'false'
+
+/**
+ * URL de embed de um título, filme ou episódio, em uma chamada.
+ *
+ * É o que o player usa quando a sonda não consegue confirmar nada: a URL é
+ * determinística a partir do TMDB ID, então não há motivo para deixar o
+ * cliente sem fonte por causa de uma falha de verificação.
+ */
+export function megaembedEmbedUrl(tmdbId, season = null, episode = null) {
+  if (season != null && episode != null) return episodeEmbedUrl(tmdbId, season, episode)
+  return movieEmbedUrl(tmdbId)
+}
+
 /** Estados de disponibilidade exigidos pelo pedido. */
 export const STATES = {
   AVAILABLE: 'disponivel',
@@ -99,7 +121,12 @@ export function episodeEmbedUrl(id, season, episode) {
   if (!n) return null
   const s = Number(season)
   const e = Number(episode)
-  if (!Number.isInteger(s) || !Number.isInteger(e) || s < 1 || e < 1) return null
+  /**
+   * Temporada 0 é válida: no TMDB ela é a temporada de ESPECIAIS, e o MegaEmbed
+   * aceita `/embed/{id}/0/{ep}`. Rejeitar `s < 1` fazia o episódio especial
+   * cair em `null` e o player ficar sem fonte — bug encontrado pelo teste.
+   */
+  if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e < 1) return null
   return `${MEGAEMBED_BASE}/embed/${n}/${s}/${e}`
 }
 

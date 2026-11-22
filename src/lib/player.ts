@@ -3,13 +3,18 @@ import type { Title } from './types'
 /**
  * Resolução da fonte de reprodução.
  *
- * Provedor: EmbedMovies (https://embedmovies.org). Contrato oficial, conforme
- * o guia rápido:
+ * ══════════════════════════════════════════════════════════════════════════════
+ * PROVEDOR ÚNICO: MEGAEMBED (o player vermelho)
+ * ══════════════════════════════════════════════════════════════════════════════
  *
- *   Filme            https://myembed.biz/filme/{tmdb_id}
- *   Filme (IMDb)     https://myembed.biz/filme/tt{imdb_id}
- *   Série (lista)    https://myembed.biz/serie/{tmdb_id}
- *   Série (episódio) https://myembed.biz/serie/{tmdb_id}/{temporada}/{episodio}
+ * O player azul (myembed.biz → playerflix.ink → v1.watchplay.shop) foi removido
+ * do fluxo de reprodução por completo. Contrato do MegaEmbed, conforme a
+ * documentação oficial:
+ *
+ *   Filme            https://mgeb.space/embed/{tmdb_id}
+ *   Filme (IMDb)     https://mgeb.space/embed/tt{imdb_id}
+ *   Série (episódio) https://mgeb.space/embed/{tmdb_id}/{temporada}/{episodio}
+ *   Player forçado   ?player=megaplay|megatube|vidstack|clappr
  *
  * A reprodução funciona EXCLUSIVAMENTE via iframe — o provedor não entrega
  * .mp4/.m3u8. Por isso o player tem dois modos:
@@ -32,7 +37,7 @@ export interface PlaybackSource {
 }
 
 /** Domínio do provedor de embed. */
-export const EMBED_PROVIDER = 'https://myembed.biz'
+export const EMBED_PROVIDER = 'https://mgeb.space'
 
 const DIRECT_EXT = /\.(mp4|m4v|webm|m3u8|mpd)(\?|#|$)/i
 
@@ -49,9 +54,9 @@ export function isDirectUrl(url: string): boolean {
 export function movieEmbedUrl(id: string | number): string | null {
   const raw = String(id ?? '').trim()
   if (!raw) return null
-  if (/^tt\d+$/i.test(raw)) return `${EMBED_PROVIDER}/filme/${raw.toLowerCase()}`
+  if (/^tt\d+$/i.test(raw)) return `${EMBED_PROVIDER}/embed/${raw.toLowerCase()}`
   if (!/^\d+$/.test(raw)) return null
-  return `${EMBED_PROVIDER}/filme/${raw}`
+  return `${EMBED_PROVIDER}/embed/${raw}`
 }
 
 /** URL de embed de um episódio específico. */
@@ -64,14 +69,14 @@ export function episodeEmbedUrl(
   if (!/^\d+$/.test(raw)) return null
   if (!Number.isFinite(season) || !Number.isFinite(episode)) return null
   if (season < 1 || episode < 1) return null
-  return `${EMBED_PROVIDER}/serie/${raw}/${season}/${episode}`
+  return `${EMBED_PROVIDER}/embed/${raw}/${season}/${episode}`
 }
 
 /** URL de embed da série (mostra a lista de temporadas/episódios). */
 export function seriesEmbedUrl(id: string | number): string | null {
   const raw = String(id ?? '').trim()
   if (!/^\d+$/.test(raw)) return null
-  return `${EMBED_PROVIDER}/serie/${raw}`
+  return `${EMBED_PROVIDER}/embed/${raw}`
 }
 
 export function movieSource(t: Title): PlaybackSource | null {

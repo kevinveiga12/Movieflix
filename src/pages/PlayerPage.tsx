@@ -17,7 +17,6 @@ import {
   FullscreenIcon,
   XIcon,
 } from '../components/Icons'
-import { VirtualMouse, HoldDetector, clickAtRatio } from '../lib/virtualMouse'
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -38,11 +37,12 @@ import { VirtualMouse, HoldDetector, clickAtRatio } from '../lib/virtualMouse'
  *    pequeno e os controles do site seguiam na frente. Agora o contêiner vai
  *    para tela cheia, o iframe preenche 100% dele, e a nossa UI some.
  *
- * 3) TROCA AUTOMÁTICA DE SERVIDOR
- *    O servidor devolve TODAS as opções (`sources`), já verificadas. O player
- *    começa pela primeira que sabidamente entrega player. Se em 5 segundos o
- *    iframe não carregar, troca sozinho para a próxima. E o aviso "o vídeo não
- *    está rodando" com o botão de trocar servidor está sempre a um toque.
+ * 3) UM ÚNICO PLAYER: MEGAEMBED
+ *    O proprietário pediu um player só — o vermelho (MegaEmbed). O player azul
+ *    saiu do fluxo por completo: não existe trocador de servidor, não existe
+ *    fallback, não existe embed antigo. O servidor devolve UM item em `sources`
+ *    e o player usa esse item. Se ele não carregar, o aviso aparece com
+ *    "Tentar de novo" e "Voltar" — nunca com um segundo provedor.
  *
  * ── O QUE É POSSÍVEL E O QUE NÃO É (sem inventar) ───────────────────────────
  *
@@ -67,11 +67,11 @@ const SAVE_INTERVAL = 15_000
 const UI_HIDE_MS = 5_000
 
 /**
- * Tempo máximo para o iframe do provedor carregar antes de trocar de servidor.
+ * Tempo máximo para o iframe do provedor carregar antes de avisar.
  *
- * O pedido foi "uns 5 segundos". Contamos a partir da montagem do iframe: se o
- * evento `load` não chegou nesse prazo, a opção está travada e passamos para a
- * seguinte automaticamente.
+ * Contamos a partir da montagem do iframe: se o evento `load` não chegou nesse
+ * prazo, mostramos o aviso com "Tentar de novo". Não trocamos de provedor —
+ * existe um só.
  */
 const SERVER_TIMEOUT_MS = 5_000
 
@@ -100,7 +100,6 @@ export function PlayerPage() {
 
   const [ready, setReady] = useState(false)
   const [sources, setSources] = useState<SourceOption[]>([])
-  const [sourceIndex, setSourceIndex] = useState(0)
   const [notFound, setNotFound] = useState(false)
   const [auth, setAuth] = useState<PlaybackAuth | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
@@ -141,14 +140,6 @@ export function PlayerPage() {
   /** O aviso "não está rodando" foi acionado (automático ou pelo cliente). */
   const [stalled, setStalled] = useState(false)
   /** Já trocamos de servidor automaticamente nesta sessão? */
-  const autoSwitched = useRef(false)
-
-  const mouseRef = useRef<VirtualMouse | null>(null)
-  if (!mouseRef.current) mouseRef.current = new VirtualMouse()
-  const holdRef = useRef<HoldDetector | null>(null)
-  if (!holdRef.current) holdRef.current = new HoldDetector()
-  const [mouseOn, setMouseOn] = useState(false)
-  const [mouseTick, setMouseTick] = useState(0)
 
   // ── Login obrigatório ────────────────────────────────────────────────────
   useEffect(() => {
@@ -206,11 +197,9 @@ export function PlayerPage() {
     setAuthChecking(true)
     setAuth(null)
     setSources([])
-    setSourceIndex(0)
     setError(null)
     setNotFound(false)
     setStalled(false)
-    autoSwitched.current = false
 
     authorizePlayback({
       tmdbId: id,
@@ -223,8 +212,8 @@ export function PlayerPage() {
 
       if (result.allowed) {
         /**
-         * Lista de opções. O servidor manda `sources` (todas verificadas e
-         * ordenadas). Se por algum motivo só vier `source`, montamos a lista
+         * A fonte. Existe UM player (MegaEmbed), então o servidor manda um item
+         * em `sources`. Se por algum motivo só vier `source`, montamos a lista
          * com ela — o player nunca fica sem fonte.
          */
         const list: SourceOption[] =
@@ -233,8 +222,8 @@ export function PlayerPage() {
             : result.source
               ? [
                   {
-                    id: 'catalog',
-                    label: 'Opção 1',
+                    id: 'megaembed',
+                    label: 'MegaEmbed',
                     url: result.source.url,
                     mode: result.source.mode,
                     verified: null,
@@ -243,7 +232,6 @@ export function PlayerPage() {
               : []
 
         setSources(list)
-        setSourceIndex(0)
         setLoading(true)
       } else {
         setLoading(false)
@@ -256,9 +244,8 @@ export function PlayerPage() {
     }
   }, [ready, id, type, season, episode, authAttempt, user])
 
-  const source = sources[sourceIndex] ?? null
+  const source = sources[0] ?? null
   const isEmbed = source?.mode === 'embed'
-  const hasMultiple = sources.length > 1
 
   // ── <video> nativo (modo direto) ─────────────────────────────────────────
   useEffect(() => {
@@ -488,60 +475,41 @@ export function PlayerPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggleFullscreen])
 
-  // ── Troca de servidor ────────────────────────────────────────────────────
-  const switchServer = useCallback(
-    (auto = false) => {
-      if (sources.length < 2) return
-      setSourceIndex((i) => (i + 1) % sources.length)
-      setFrameLoaded(false)
-      setStalled(false)
-      setError(null)
-      setLoading(true)
-      setShowUi(true)
-      setUiPoke((n) => n + 1)
-      if (auto) autoSwitched.current = true
-    },
-    [sources.length],
-  )
-
   /**
    * Vigia de 5 segundos.
    *
-   * Duas situações trocam o servidor sozinhas:
-   *   a) a opção atual já foi verificada como SEM player no servidor
-   *      (`verified === false`) — não há por que esperar;
-   *   b) o iframe não disparou `load` em 5 s — a página está travada.
+   * Existe UM player. Se o iframe não disparar `load` nesse prazo, mostramos o
+   * aviso com "Tentar de novo" — não há para onde trocar, e inventar um segundo
+   * provedor seria justamente o que o proprietário pediu para não existir.
    *
-   * Se o iframe carregou, NÃO trocamos por conta própria: o provedor pode
-   * exigir um toque em "Assistir" antes de tocar, e trocar nesse momento
-   * arrancaria o vídeo de quem estava prestes a assistir. Nesse caso o aviso
-   * com o botão de trocar fica disponível.
+   * Se o iframe carregou, não fazemos nada: o provedor pode exigir um toque em
+   * "Assistir" antes de tocar, e mexer na tela nesse momento arrancaria o vídeo
+   * de quem estava prestes a assistir.
    */
   useEffect(() => {
     if (!isEmbed || !source) return
-    if (source.verified === false && hasMultiple && !autoSwitched.current) {
-      switchServer(true)
-      return
-    }
-
     const timer = setTimeout(() => {
       if (frameLoaded) return
-      if (hasMultiple && !autoSwitched.current) {
-        switchServer(true)
-      } else {
-        setStalled(true)
-        setLoading(false)
-      }
+      setStalled(true)
+      setLoading(false)
     }, SERVER_TIMEOUT_MS)
-
     return () => clearTimeout(timer)
-  }, [isEmbed, source, frameLoaded, hasMultiple, switchServer])
+  }, [isEmbed, source, frameLoaded])
 
   // ── Atalhos de teclado / controle remoto ─────────────────────────────────
+  /**
+   * UM comando por toque.
+   *
+   * O mouse virtual saiu junto com o player azul: ele existia só para clicar na
+   * UI do provedor, que não existe mais. Sem ele, cada tecla tem exatamente um
+   * efeito — nada de "segurar OK liga o cursor" competindo com "OK pausa".
+   *
+   *   OK / Enter / Espaço  → pausa e despausa
+   *   ←                    → retrocede 10 s
+   *   →                    → avança 10 s
+   *   Escape               → sai da tela cheia, ou do player
+   */
   useEffect(() => {
-    const mouse = mouseRef.current!
-    const hold = holdRef.current!
-
     const isOk = (key: string) =>
       key === ' ' ||
       key === 'k' ||
@@ -561,79 +529,30 @@ export function PlayerPage() {
 
       if (isOk(e.key)) {
         e.preventDefault()
-        if (!e.repeat) hold.onDown(performance.now())
+        // `e.repeat` filtra o auto-repeat do controle: segurar OK não alterna
+        // pausa dezenas de vezes.
+        if (!e.repeat) void togglePlay()
         return
       }
 
       if (e.key === 'ArrowLeft' || e.key === 'MediaRewind') {
         e.preventDefault()
-        if (mouse.active) {
-          mouse.move(-1, 0)
-          setMouseTick((n) => n + 1)
-        } else {
-          const v = videoRef.current
-          if (v) v.currentTime = Math.max(0, v.currentTime - 10)
-        }
+        const v = videoRef.current
+        if (v) v.currentTime = Math.max(0, v.currentTime - 10)
         return
       }
 
       if (e.key === 'ArrowRight' || e.key === 'MediaFastForward') {
         e.preventDefault()
-        if (mouse.active) {
-          mouse.move(1, 0)
-          setMouseTick((n) => n + 1)
-        } else {
-          const v = videoRef.current
-          if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
-        }
+        const v = videoRef.current
+        if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + 10)
         return
       }
-
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (mouse.active) {
-          e.preventDefault()
-          mouse.move(0, e.key === 'ArrowUp' ? -1 : 1)
-          setMouseTick((n) => n + 1)
-        }
-      }
     }
-
-    function onKeyUp(e: KeyboardEvent) {
-      if (!isOk(e.key)) return
-      if (hold.onUp() === 'short') {
-        if (mouse.active) {
-          clickAtRatio(document, window, mouse.ratioX(), mouse.ratioY())
-          setMouseTick((n) => n + 1)
-        } else {
-          void togglePlay()
-        }
-      }
-    }
-
-    const timer = window.setInterval(() => {
-      if (hold.tick(performance.now()) === 'hold') {
-        mouse.toggle()
-        setMouseOn(mouse.active)
-        setMouseTick((n) => n + 1)
-      }
-    }, 50)
 
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
-    }
+    return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    const mouse = mouseRef.current!
-    const sync = () => mouse.setBounds(window.innerWidth, window.innerHeight)
-    sync()
-    window.addEventListener('resize', sync)
-    return () => window.removeEventListener('resize', sync)
   }, [])
 
   async function togglePlay() {
@@ -778,9 +697,9 @@ export function PlayerPage() {
           /*
             O iframe do provedor.
 
-            `key` = URL: trocar de servidor REMONTA o iframe em vez de só
-            mudar o `src`. Sem isso o navegador mantém o documento antigo e a
-            troca não tem efeito visível.
+            `key` = URL: se a URL mudar (outro título, outro episódio), o iframe
+            é REMONTADO em vez de só trocar o `src`. Sem isso o navegador mantém
+            o documento antigo e a troca não tem efeito visível.
 
             SANDBOX — o que está liberado:
               allow-scripts        o player precisa rodar
@@ -788,8 +707,8 @@ export function PlayerPage() {
               allow-presentation   tela cheia / cast
               allow-forms          login do provedor, quando houver
 
-            `allow-popups` NÃO está liberado: era ele que deixava o anúncio do
-            provedor abrir aba nova no primeiro toque.
+            `allow-popups` NÃO está liberado: é ele que deixa anúncio abrir aba
+            nova no primeiro toque.
             `allow-top-navigation` também não: o iframe não troca a nossa página.
 
             `referrerPolicy="origin"` é obrigatório — o provedor só entrega o
@@ -819,25 +738,15 @@ export function PlayerPage() {
         {/*
           AVISO "NÃO ESTÁ RODANDO".
 
-          Aparece quando o iframe não carregou em 5 s e não há outra opção para
-          trocar sozinho, ou quando o cliente pede. Sempre com o botão de trocar
-          servidor — nunca um beco sem saída.
+          Aparece quando o iframe não carregou em 5 s. Existe UM player, então o
+          aviso oferece "Tentar de novo" e "Voltar" — nunca um segundo provedor.
         */}
         {stalled && (
           <div className="player-error">
             <div className="player-error-card">
               <h3>O vídeo não está rodando</h3>
-              <p>
-                {hasMultiple
-                  ? 'Este servidor não respondeu. Troque para outra opção — o filme continua do mesmo ponto.'
-                  : 'Este servidor não respondeu agora. Tente novamente em instantes.'}
-              </p>
+              <p>O player não respondeu agora. Tente novamente em instantes.</p>
               <div className="inline" style={{ justifyContent: 'center' }}>
-                {hasMultiple && (
-                  <button className="btn btn--primary" onClick={() => switchServer()}>
-                    Trocar servidor
-                  </button>
-                )}
                 <button
                   className="btn btn--outline"
                   onClick={() => {
@@ -862,11 +771,6 @@ export function PlayerPage() {
               <h3>Não foi possível reproduzir</h3>
               <p>{error}</p>
               <div className="inline" style={{ justifyContent: 'center' }}>
-                {hasMultiple && (
-                  <button className="btn btn--primary" onClick={() => switchServer()}>
-                    Trocar servidor
-                  </button>
-                )}
                 <button className="btn btn--outline" onClick={() => navigate(-1)}>
                   Voltar
                 </button>
@@ -905,16 +809,6 @@ export function PlayerPage() {
             </div>
 
             <div className="player-top-actions">
-              {hasMultiple && (
-                <button
-                  className="player-btn player-btn--pill"
-                  onClick={() => switchServer()}
-                  aria-label="Trocar servidor"
-                  title={`Servidor: ${source?.label ?? ''} — toque para trocar`}
-                >
-                  <span className="player-btn-label">{source?.label ?? 'Servidor'}</span>
-                </button>
-              )}
               <button
                 className="player-btn"
                 onClick={() => void toggleFullscreen()}

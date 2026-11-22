@@ -9,23 +9,30 @@ import type { Title, MediaType } from './types'
  */
 
 /**
- * Provedor ÚNICO de reprodução: o player azul (EmbedMovies / myembed.biz).
+ * Provedor ÚNICO de reprodução: MegaEmbed (o player vermelho).
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ * O PLAYER AZUL SAIU
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * O proprietário pediu um player só. O player azul (myembed.biz →
+ * playerflix.ink → v1.watchplay.shop) não é mais usado em lugar nenhum: não há
+ * trocador de servidor, não há fallback, não há embed antigo.
  *
  * O catálogo publicado foi gerado quando o provedor era o StreamBetter e traz
- * `video_url` apontando para `streambetter.shop` em todos os 18.080 filmes.
- * O servidor já reescreve isso na leitura (server/lib/static-catalog.js), mas o
+ * `video_url` apontando para `streambetter.shop` em todos os registros. O
+ * servidor já reescreve isso na leitura (server/lib/static-catalog.js), mas o
  * NAVEGADOR lê este JSON direto de /filmes/*.json — sem a mesma reescrita, a
- * URL do StreamBetter continuava chegando ao cliente (e era ela que aparecia
- * em "com fonte" e em qualquer caminho que usasse `video_url`).
+ * URL antiga continuava chegando ao cliente.
  *
- * A normalização aqui garante que o StreamBetter não exista em nenhum ponto do
- * app: qualquer host de embed que não seja o player azul vira o player azul.
+ * A normalização aqui garante que nenhum host de embed que não seja o MegaEmbed
+ * exista em nenhum ponto do app.
  */
-export const EMBED_PROVIDER = 'https://myembed.biz'
+export const EMBED_PROVIDER = 'https://mgeb.space'
 
 const EMBED_HOST = /^https?:\/\/([^/]+)/i
 
-/** Reescreve uma URL de embed de outro provedor para o player azul. */
+/** Reescreve uma URL de embed de outro provedor para o MegaEmbed. */
 function normalizeVideoUrl(raw: string | null | undefined, tmdbId: number): string {
   const url = String(raw ?? '').trim()
   if (!url) return ''
@@ -34,14 +41,52 @@ function normalizeVideoUrl(raw: string | null | undefined, tmdbId: number): stri
   const m = EMBED_HOST.exec(url)
   if (!m) return url
   const host = m[1].toLowerCase()
-  if (host === 'myembed.biz' || host.endsWith('.myembed.biz')) return url
-  // Qualquer outro provedor de embed (streambetter.shop, etc.) → player azul.
-  return tmdbId > 0 ? `${EMBED_PROVIDER}/filme/${tmdbId}` : ''
+  if (host === 'mgeb.space' || host.endsWith('.mgeb.space')) return url
+  // Qualquer outro provedor de embed (myembed.biz, streambetter.shop…) → MegaEmbed.
+  return tmdbId > 0 ? `${EMBED_PROVIDER}/embed/${tmdbId}` : ''
 }
 
 let moviesCache: Title[] | null = null
 let seriesCache: Title[] | null = null
 let loading: Promise<void> | null = null
+
+/**
+ * IDs que o MegaEmbed realmente serve.
+ *
+ * `public/filmes/megaembed-disponibilidade.json` é gerado por
+ * `scripts/gerar-disponibilidade-megaembed.mjs` a partir do catálogo oficial do
+ * provedor (`/api/movie` = 21.317 IDs, `/api/series` = 7.741 IDs).
+ *
+ * O catálogo público mostra SOMENTE o que está aqui. Título fora da lista não
+ * aparece na home, na busca, nas categorias nem nos relacionados — mas os
+ * metadados continuam no JSON, nada é apagado.
+ *
+ * Se o arquivo não existir, `active` fica `false` e nada é filtrado: melhor
+ * mostrar o catálogo inteiro do que um site vazio por causa de um arquivo
+ * ausente.
+ */
+interface Availability {
+  movies: Set<string>
+  series: Set<string>
+  active: boolean
+}
+
+let availability: Availability | null = null
+
+async function loadAvailability(): Promise<Availability> {
+  if (availability) return availability
+  try {
+    const res = await fetch('/filmes/megaembed-disponibilidade.json')
+    if (!res.ok) throw new Error(String(res.status))
+    const data = (await res.json()) as { filmes?: number[]; series?: number[] }
+    const movies = new Set((data.filmes ?? []).map(String))
+    const series = new Set((data.series ?? []).map(String))
+    availability = { movies, series, active: movies.size > 0 || series.size > 0 }
+  } catch {
+    availability = { movies: new Set(), series: new Set(), active: false }
+  }
+  return availability
+}
 
 async function loadJson<T>(path: string): Promise<T> {
   // `force-cache` foi removido: ele servia uma resposta antiga (inclusive um
@@ -92,12 +137,15 @@ export async function loadCatalog(): Promise<void> {
   if (moviesCache && seriesCache) return
   if (loading) return loading
   loading = (async () => {
-    const [movies, series] = await Promise.all([
+    const [movies, series, avail] = await Promise.all([
       loadJson<Title[]>('/filmes/filmes.light.json'),
       loadJson<Title[]>('/filmes/series.light.json'),
+      loadAvailability(),
     ])
-    moviesCache = movies.map(normalizeTitle)
-    seriesCache = series.map(normalizeTitle)
+    const keep = (list: Title[], allowed: Set<string>) =>
+      avail.active ? list.filter((t) => allowed.has(String(t.tmdb_id))) : list
+    moviesCache = keep(movies, avail.movies).map(normalizeTitle)
+    seriesCache = keep(series, avail.series).map(normalizeTitle)
   })()
   try {
     await loading

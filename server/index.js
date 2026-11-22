@@ -14,7 +14,7 @@ import { tmdbRouter } from './routes/tmdb.js'
 import { accessRouter } from './routes/access.js'
 import { dbCatalogRouter } from './routes/db-catalog.js'
 import { plansRouter } from './routes/plans.js'
-import { appsRouter } from './routes/apps.js'
+import { appsRouter, publicAppsRouter } from './routes/apps.js'
 import { streamRouter } from './routes/stream.js'
 import megaembedRouter from './routes/megaembed.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
@@ -166,7 +166,7 @@ app.use('/api/catalog', catalogRouter)
 app.use('/api/tmdb', tmdbRouter)
 // Distribuição dos aplicativos. O APK da TV só sai por /api/admin/apps/tv/download,
 // atrás de requireAdmin — nunca como arquivo estático.
-app.use('/api/apps', appsRouter)
+app.use('/api/apps', publicAppsRouter)
 // O painel chama /api/admin/apps/tv. Este mount vem ANTES de /api/admin para
 // que o router de apps trate a rota direto, sem passar duas vezes pelo
 // requireAdmin (o adminRouter aplica requireAdmin em tudo que cai nele).
