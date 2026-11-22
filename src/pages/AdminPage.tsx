@@ -334,13 +334,14 @@ export function AdminPage() {
  * ────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Disponibilidade do catálogo no provedor (EmbedMovies).
+ * Disponibilidade do catálogo no provedor (MegaEmbed).
  *
- * O catálogo base tem 18.080 filmes e 8.093 séries, mas o provedor não entrega
- * todos. `scripts/validar-disponibilidade.cjs` pergunta ao player, título a
- * título, e grava o resultado em `public/filmes/disponibilidade.json`; o
- * servidor filtra o catálogo por esse arquivo. Esta aba só mostra o resultado —
- * não existe API pública de catálogo em massa para consultar em tempo real.
+ * O catálogo base tem 18.080 filmes e 8.093 séries, mas o MegaEmbed não entrega
+ * todos. `scripts/gerar-disponibilidade-megaembed.mjs` cruza o nosso catálogo
+ * com o catálogo oficial do provedor (`/api/movie` = 21.317 IDs,
+ * `/api/series` = 7.741 IDs) e grava o resultado em
+ * `public/filmes/megaembed-disponibilidade.json`; o servidor filtra o catálogo
+ * por esse arquivo. Esta aba só mostra o resultado.
  */
 /* ────────────────────────────────────────────────────────────────────────────
  * ABA APLICATIVOS — distribuição privada do app de TV
@@ -509,10 +510,11 @@ function AvailabilityTab({ api }: { api: (p: string, i?: RequestInit) => Promise
       <div className="panel" style={{ marginTop: 20 }}>
         <div className="panel-title">Como a disponibilidade é verificada</div>
         <p className="panel-sub">
-          Provedor: <strong>{data.provedor ?? 'embedmovies'}</strong>. O EmbedMovies não publica uma
-          API de catálogo em massa, então cada título é consultado individualmente no player e o
-          resultado é gravado em <code>public/filmes/disponibilidade.json</code>. O catálogo exibe
-          apenas o que foi confirmado com fonte de reprodução.
+          Provedor: <strong>{data.provedor ?? 'megaembed'}</strong>. O MegaEmbed publica o catálogo
+          de IDs que serve (<code>/api/movie</code> e <code>/api/series</code>), e o nosso catálogo
+          é cruzado com ele — o resultado vai para{' '}
+          <code>public/filmes/megaembed-disponibilidade.json</code>. O catálogo exibe apenas o que
+          o provedor declara ter.
         </p>
         <p className="panel-sub" style={{ marginBottom: 0 }}>
           {data.geradoEm ? (
