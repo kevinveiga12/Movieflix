@@ -174,7 +174,13 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val f = runCatching { api.favorites() }.getOrDefault(emptyList())
             val h = runCatching { api.history() }.getOrDefault(emptyList())
-            update { it.copy(favorites = f, history = h) }
+            // Favoritos e Histórico vêm do Supabase e podem apontar para títulos
+            // que o provedor não serve mais. A lista de disponibilidade diz o que
+            // ainda abre; escondemos o resto sem apagar nada do banco.
+            val avail = runCatching { api.availability() }.getOrNull()
+            val visibleF = if (avail == null) f else f.filter { avail.allows(it.tmdbId, it.mediaType) }
+            val visibleH = if (avail == null) h else h.filter { avail.allows(it.tmdbId, it.mediaType) }
+            update { it.copy(favorites = visibleF, history = visibleH) }
             // As capas vêm do catálogo, não do banco (ver FavoriteRow).
             resolvePosters()
         }

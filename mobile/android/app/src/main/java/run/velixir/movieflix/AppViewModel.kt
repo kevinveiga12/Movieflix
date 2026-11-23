@@ -221,7 +221,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val favs = runCatching { api.favorites() }.getOrDefault(emptyList())
             val hist = runCatching { api.history() }.getOrDefault(emptyList())
-            update { it.copy(favorites = favs, history = hist) }
+            // Favoritos e Histórico vêm do Supabase e podem apontar para títulos
+            // que o provedor não serve mais. A lista de disponibilidade diz o que
+            // ainda abre; escondemos o resto sem apagar nada do banco.
+            val avail = runCatching { api.availability() }.getOrNull()
+            val visibleF = if (avail == null) favs else favs.filter { avail.allows(it.tmdbId, it.mediaType) }
+            val visibleH = if (avail == null) hist else hist.filter { avail.allows(it.tmdbId, it.mediaType) }
+            update { it.copy(favorites = visibleF, history = visibleH) }
         }
     }
 

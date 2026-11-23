@@ -93,6 +93,19 @@ class MovieFlixApi(
     suspend fun seasons(tmdbId: Long): SeasonsResponse =
         json.decodeFromString(get("/api/db/series/$tmdbId/episodes"))
 
+    /**
+     * Títulos que o provedor realmente serve.
+     *
+     * O catálogo já chega filtrado pela API, mas Favoritos e Histórico são
+     * lidos direto do Supabase e podem ter linhas de títulos que hoje não abrem.
+     * Esta lista permite esconder esses cards sem apagar nada do banco.
+     *
+     * Devolve `null` quando a rota não responde — nesse caso o app NÃO filtra,
+     * para não esconder tudo por causa de uma falha de rede.
+     */
+    suspend fun availability(): Availability? =
+        runCatching { json.decodeFromString<Availability>(get("/api/catalog/availability")) }.getOrNull()
+
     // ── Autenticação ────────────────────────────────────────────────────────
 
     suspend fun login(email: String, password: String): LoginResponse {

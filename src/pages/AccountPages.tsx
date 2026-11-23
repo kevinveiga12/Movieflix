@@ -257,6 +257,17 @@ export function HistoryPage() {
     loadCatalog().then(() => setReady(true))
   }, [])
 
+  /**
+   * Só mostra o que ainda existe no catálogo verificado.
+   *
+   * O histórico vem do Supabase e pode ter linhas de títulos que o provedor não
+   * serve mais (ou que nunca serviram). Mostrar o card levaria o cliente a um
+   * player que não abre; escondemos o card sem apagar nada do banco.
+   */
+  const visible = ready
+    ? history.filter((h) => Boolean(getById(String(h.tmdb_id), h.media_type)))
+    : history
+
   if (!user) {
     return (
       <div className="page">
@@ -281,7 +292,7 @@ export function HistoryPage() {
           Histórico
         </h1>
         <span className="muted" style={{ fontSize: '0.85rem' }}>
-          {history.length} registro(s)
+          {visible.length} registro(s)
         </span>
       </div>
 
@@ -291,7 +302,7 @@ export function HistoryPage() {
             <div key={i} className="skeleton skeleton-card" />
           ))}
         </div>
-      ) : history.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="empty">
           <div className="empty-icon">
             <ClockIcon size={30} />
@@ -304,7 +315,7 @@ export function HistoryPage() {
         </div>
       ) : (
         <div className="episode-list">
-          {history.map((h) => {
+          {visible.map((h) => {
             const t = getById(String(h.tmdb_id), h.media_type)
             const ep = parseEpisodeId(h.episode_id)
             /**

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { readOverrides, applyOverrides } from '../lib/store.js'
-import { loadStatic } from '../lib/static-catalog.js'
+import { loadStatic, availabilityStats } from '../lib/static-catalog.js'
 
 const router = Router()
 
@@ -108,6 +108,33 @@ async function posterIndex() {
   posterIndexCache = map
   return map
 }
+
+/**
+ * GET /api/catalog/availability
+ *
+ * Lista os `tmdb_id` que o provedor realmente serve (verificado por
+ * `scripts/gerar-disponibilidade-megaembed.mjs`). O catálogo já é servido
+ * filtrado, mas os apps de TV e celular leem Favoritos e Histórico direto do
+ * Supabase — linhas antigas podem apontar para títulos que hoje não abrem.
+ * Com esta lista o app esconde esses cards, sem apagar nada do banco.
+ *
+ * Resposta: { ativo, gerado_em, filmes: [ids], series: [ids] }
+ */
+router.get('/availability', async (_req, res, next) => {
+  try {
+    const stats = await availabilityStats()
+    const [movies, series] = await Promise.all([loadStatic('movie'), loadStatic('tv')])
+    res.set('Cache-Control', 'public, max-age=300')
+    res.json({
+      ativo: stats.active,
+      gerado_em: stats.geradoEm,
+      filmes: movies.map((t) => Number(t.tmdb_id)).filter((n) => Number.isFinite(n)),
+      series: series.map((t) => Number(t.tmdb_id)).filter((n) => Number.isFinite(n)),
+    })
+  } catch (e) {
+    next(e)
+  }
+})
 
 router.get('/genres', async (_req, res, next) => {
   try {

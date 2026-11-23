@@ -160,6 +160,30 @@ data class Plan(
 @Serializable
 data class PlansResponse(val plans: List<Plan> = emptyList())
 
+/**
+ * Títulos que o provedor realmente serve (GET /api/catalog/availability).
+ *
+ * Usado para esconder de Favoritos e Histórico os títulos que hoje não abrem,
+ * sem apagar nada do banco. `ativo=false` (ou lista vazia) significa "sem
+ * verificação" — nesse caso o app não filtra nada.
+ */
+@Serializable
+data class Availability(
+    val ativo: Boolean = false,
+    @SerialName("gerado_em") val geradoEm: String? = null,
+    val filmes: List<Long> = emptyList(),
+    val series: List<Long> = emptyList(),
+) {
+    private val movieSet: Set<Long> get() = filmes.toHashSet()
+    private val seriesSet: Set<Long> get() = series.toHashSet()
+
+    /** O título (por tmdb_id + tipo) ainda abre no player? */
+    fun allows(tmdbId: Long, mediaType: String): Boolean {
+        if (!ativo) return true
+        return if (mediaType == "tv") seriesSet.contains(tmdbId) else movieSet.contains(tmdbId)
+    }
+}
+
 /** Números do painel administrativo (GET /api/admin/stats). */
 @Serializable
 data class AdminStats(
