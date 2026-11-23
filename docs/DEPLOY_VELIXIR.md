@@ -75,3 +75,52 @@ descompactado, 55 MB, dos quais ~20 MB são APKs em `public/apk/` e ~27 MB são
 os catálogos JSON em `public/filmes/`). Com o teto de 1 GB, o pool comporta
 cerca de 33 releases. Reduzir o pacote desacelera o problema, mas não substitui
 publicar por um caminho que reenvie a fonte.
+
+---
+
+## API de releases e ativação (verificado em 2026-11-23)
+
+O auto-deploy por push (`velixir/movieflix` status no commit) continua sujeito
+ao 404 de retenção descrito acima: o release é criado, mas o build não acha a
+fonte. Medido nesta data: v210 (commit `86d5ffe`) nasceu e falhou com
+`Response status code does not indicate success: 404 (Not Found).` — exatamente
+o sintoma já documentado. v209 (commit `6208b8c`) compilou e ficou `Succeeded`.
+
+Base da API: `https://velixir.net` (não `api.velixir.run`, que devolve o HTML do
+painel). Autenticação: header `X-API-Key`.
+
+```bash
+# App real (o ID citado nas tarefas tem um dígito trocado: 44d4, não 44b4)
+A=ff356224-47e9-44d4-b54b-499c4fe1f990
+
+# Releases, do mais novo para o mais antigo
+curl -s -H "X-API-Key: $VELIXIR_API_KEY" \
+  "https://velixir.net/api/v1/apps/$A/releases"
+
+# Log de build de um release (diz se foi 404 de fonte ou erro de código)
+curl -s -H "X-API-Key: $VELIXIR_API_KEY" \
+  "https://velixir.net/api/v1/releases/<releaseId>/build-log"
+```
+
+### Publicar = ATIVAR um release que já compilou
+
+`POST /api/v1/apps/{appId}/deployments` com `{"releaseId":"..."}`. Isso cria um
+registro `deployment` no slot `production` com status `Pending` e faz a troca de
+pods. **Não reenviar a fonte por este caminho** — é por isso que ele não sofre o
+404 de retenção, e é o substituto correto de "Deploy latest commit".
+
+```bash
+curl -s -H "X-API-Key: $VELIXIR_API_KEY" -H "Content-Type: application/json" \
+  -X POST -d '{"releaseId":"<id-do-release-Succeeded>"}' \
+  "https://velixir.net/api/v1/apps/$A/deployments"
+```
+
+Depois confirmar (o `/api/health` devolve `startedAt` novo quando os pods
+realmente trocaram):
+
+```bash
+curl -s https://movieflix.velixir.run/api/health
+```
+
+Se o release mais novo falhar, publicar o último `Succeeded` mantém produção no
+código bom — nunca se aponta produção para um release `Failed`.
