@@ -120,7 +120,7 @@ function cacheSet(key, value) {
  * Devolve `[{ embed, label, id }]` ou `[]`. Nunca lança: qualquer falha vira
  * lista vazia, e quem chama cai no modo embed.
  */
-async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }) {
+export async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }) {
   const isEpisode = season != null && episode != null
   const qs = new URLSearchParams({
     type: isEpisode ? 'tv' : 'movie',
@@ -147,7 +147,14 @@ async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }) {
     if (!Array.isArray(options)) return []
     return options
       .filter((o) => typeof o?.embed === 'string' && /^https:\/\//.test(o.embed))
-      .map((o) => ({ embed: o.embed, label: o.label ?? '', id: o.id ?? '' }))
+      .map((o) => ({
+        embed: o.embed,
+        label: o.label ?? '',
+        id: o.id ?? '',
+        // `budget` é o sinal de fonte do provedor: "success" = tem vídeo,
+        // "danger" = só o plano pago, ou seja, NÃO reproduz.
+        budget: String(o?.budget ?? ''),
+      }))
   } catch {
     return []
   } finally {
@@ -212,10 +219,23 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
   const options = await fetchOptions({ tmdbId: id, season, episode })
   if (!options.length) return null
 
+  /**
+   * Só opções com fonte REAL. O provedor marca cada opção com `budget`:
+   * `success` = tem vídeo, `danger` = só o plano pago.
+   *
+   * Antes daqui não havia esse filtro: o resolvedor tentava `danger` como se
+   * fosse fonte, gastava o tempo de todas as sondas e, quando nada abria,
+   * o cliente recebia o embed do MegaEmbed — que responde a tela "Todas as
+   * fontes falharam". Filtrar aqui é o que faz um título sem fonte falhar
+   * RÁPIDO e ser tratado como tal, em vez de virar erro no player.
+   */
+  const usable = options.filter((o) => o.budget !== 'danger')
+  if (!usable.length) return null
+
   // `watchplay` primeiro: é o player de verdade, com HLS e sem UI de cima.
   const ordered = [
-    ...options.filter((o) => o.id === 'watchplay'),
-    ...options.filter((o) => o.id !== 'watchplay'),
+    ...usable.filter((o) => o.id === 'watchplay'),
+    ...usable.filter((o) => o.id !== 'watchplay'),
   ]
 
   for (const opt of ordered) {
@@ -255,7 +275,10 @@ export async function resolveCleanEmbed({ tmdbId, season = null, episode = null 
   const options = await fetchOptions({ tmdbId: id, season, episode })
   if (!options.length) return null
 
-  const clean = options.find((o) => CLEAN_EMBED_IDS.includes(o.id))
+  // Embeds sem fonte (`budget: danger`) nunca são oferecidos: eles existem,
+  // respondem 200, mas não têm vídeo — é exatamente o caso que o cliente
+  // relatou como "Todas as fontes falharam".
+  const clean = options.find((o) => CLEAN_EMBED_IDS.includes(o.id) && o.budget !== 'danger')
   if (!clean) return null
 
   return { url: clean.embed, label: clean.label || 'Servidor principal' }

@@ -48,12 +48,44 @@ export function megaembedEnabled() {
 /**
  * O MegaEmbed é o ÚNICO player do app?
  *
- * Padrão: SIM. O proprietário pediu um player só — o vermelho (MegaEmbed) — e
- * que o azul saísse de vez. Com `MEGAEMBED_ONLY=false` o código antigo volta
- * (rollback), sem precisar reverter commit.
+ * Padrão: SIM — mas só como ÚLTIMO recurso. Ver `PLAYER_CHAIN` abaixo.
+ *
+ * ── O QUE MUDOU EM 2026-11-23 (medido) ────────────────
+ *
+ * O MegaEmbed respondia 403 `cf-mitigated: challenge` em TODOS os domínios
+ * (mgeb.space/.lat/.casa/.quest, megaembed.com), com curl E com Chromium
+ * completo em Xvfb. O desafio nunca passa de datacenter. Resultado no cliente:
+ * o iframe abria a tela do PRÓPRIO provedor
+ *
+ *     "Ops, ocorreu um problema / Todas as fontes falharam."
+ *
+ * — que é o print que o proprietário enviou. Como TODO título ia para esse
+ * domínio, TODO título parecia quebrado, inclusive os Bad Boys.
+ *
+ * O caminho que REPRODUZ de verdade é outro e já existe no projeto
+ * (`server/lib/stream-resolver.js`):
+ *
+ *     playerflix.ink (lista as fontes, com `budget: success|danger`)
+ *        └─ watchplay       → HLS em <video> nosso (melhor caso)
+ *        └─ embedplay/embedplayer → iframe direto, sem camada do playerflix
+ *
+ * Medido: Bad Boys 9737/8961/38700/573435 todos com `watchplay:success` e
+ * playlist respondendo 200 com 2.900+ linhas.
  */
 export const MEGAEMBED_ONLY =
-  String(process.env.MEGAEMBED_ONLY ?? 'true').toLowerCase() !== 'false'
+  String(process.env.MEGAEMBED_ONLY ?? 'false').toLowerCase() !== 'false'
+
+/**
+ * Cadeia de reprodução, na ordem em que é tentada.
+ *
+ * `resolver` = playerflix + watchplay + embeds verificados (funciona).
+ * `megaembed` = o domínio bloqueado, mantido só como último recurso para que
+ * um rollback seja uma variável de ambiente, não um revert de commit.
+ */
+export const PLAYER_CHAIN =
+  String(process.env.PLAYER_CHAIN ?? 'resolver').toLowerCase() === 'megaembed'
+    ? ['megaembed']
+    : ['resolver', 'megaembed']
 
 /**
  * URL de embed de um título, filme ou episódio, em uma chamada.

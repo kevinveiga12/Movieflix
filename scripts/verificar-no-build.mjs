@@ -99,6 +99,34 @@ async function main() {
     return
   }
 
+  /**
+   * LISTA AUTORITATIVA JÁ COMITADA.
+   *
+   * `public/filmes/megaembed-disponibilidade.json` é gerado por
+   * `scripts/verificar-catalogo-real.mjs`, que testa CADA título contra o
+   * provedor que responde (`playerflix.ink`) e grava `reproducao_validada:true`.
+   *
+   * Quando esse arquivo existe e está validado, ele é a verdade — e esta
+   * verificação de build NÃO deve rodar: ela sonda o MegaEmbed, que responde
+   * 403 a datacenter, então ou não conclui nada (e não oculta ninguém) ou
+   * ocultaria por um sinal que não é o real. Rodar as duas seria ter duas
+   * verdades diferentes sobre o mesmo catálogo.
+   */
+  try {
+    const raw = await fs.readFile(path.join(PUBLIC, 'megaembed-disponibilidade.json'), 'utf8')
+    const data = JSON.parse(raw)
+    if (data?.reproducao_validada === true) {
+      console.log(
+        `[verify] lista autoritativa já comitada (${data.gerado_em}) — ` +
+          `${data.filmes_disponiveis} filmes / ${data.series_disponiveis} séries verificados. ` +
+          'Verificação de build ignorada.',
+      )
+      return
+    }
+  } catch {
+    /* sem arquivo: segue para a verificação de build */
+  }
+
   const started = Date.now()
 
   // 1) Teste de sanidade: se estes quatro não abrirem, o ambiente está barrado.

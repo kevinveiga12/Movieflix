@@ -20,6 +20,7 @@ import {
   megaembedEmbedUrl,
   MEGAEMBED_ONLY,
 } from '../lib/megaembed.js'
+import { resolveDirectStream, resolveCleanEmbed } from '../lib/stream-resolver.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -158,120 +159,78 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
     let sources
     if (isDirect) {
       sources = [{ id: 'direct', label: 'Arquivo', url: sourceUrl, mode: 'direct', verified: true }]
-    } else if (MEGAEMBED_ONLY) {
-      /**
-       * ══════════════════════════════════════════════════════════════════════
-       * PLAYER ÚNICO: MEGAEMBED (o vermelho)
-       * ══════════════════════════════════════════════════════════════════════
-       *
-       * O proprietário pediu UM player só. O player azul (myembed.biz →
-       * playerflix.ink → v1.watchplay.shop) saiu do fluxo de reprodução por
-       * completo: não há trocador de servidor, não há fallback para ele, não
-       * há embed antigo. A lista `sources` tem UM item.
-       *
-       * ── O que a sonda diz e o que ela NÃO diz ────────────────────────────
-       *
-       * `resolveMegaEmbedSources` sonda a página do embed a partir do
-       * SERVIDOR. Neste ambiente o Cloudflare Turnstile responde 403 em todos
-       * os domínios (mgeb.space/.lat/.casa/.quest), então a sonda devolve
-       * `em_verificacao` — ela NÃO consegue provar que o vídeo toca.
-       *
-       * Isso NÃO impede a reprodução: quem carrega o embed é o NAVEGADOR DO
-       * CLIENTE, que resolve o desafio do Cloudflare sozinho (é um navegador
-       * de verdade, em rede residencial). O que a sonda falha em fazer é
-       * apenas a verificação antecipada no servidor.
-       *
-       * Por isso a URL é devolvida mesmo quando a sonda não confirma: sem
-       * isso o cliente ficaria sem fonte nenhuma por causa de uma limitação
-       * do ambiente de build, não do produto.
-       */
-      const resolved = await resolveMegaEmbedSources({
-        tmdbId,
-        season: title.type === 'tv' || season != null ? season : null,
-        episode: title.type === 'tv' || season != null ? episode : null,
-      }).catch(() => [])
-
-      sources = resolved.length
-        ? resolved.map((s) => ({ ...s, mode: 'embed' }))
-        : [
-            {
-              id: 'megaembed',
-              label: 'MegaEmbed',
-              url: megaembedEmbedUrl(
-                tmdbId,
-                title.type === 'tv' || season != null ? season : null,
-                title.type === 'tv' || season != null ? episode : null,
-              ),
-              mode: 'embed',
-              verified: null,
-            },
-          ]
     } else {
       /**
-       * STREAM DIRETO PRIMEIRO.
+       * ══════════════════════════════════════════════════════════════════════
+       * CADEIA DE REPRODUÇÃO (corrigida em 2026-11-23, com medição)
+       * ══════════════════════════════════════════════════════════════════════
        *
-       * O embed do player azul é uma cadeia de três iframes, e a barra de cima
-       * que o cliente vê em tela cheia é HTML do `playerflix.ink` — que nunca
-       * se esconde e não tem parâmetro para desligar (medido em navegador
-       * real). Tocando o HLS num <video> nosso, não existe UI de provedor.
+       * O QUE ESTAVA ERRADO
+       * ──────────────────────────────────────────────────────────────────────
+       * Este ramo apontava TODO título para `https://mgeb.space/embed/{id}`.
+       * Medido neste ambiente e no de build: TODOS os domínios do MegaEmbed
+       * respondem 403 `cf-mitigated: challenge` (Cloudflare Turnstile), com
+       * curl E com Chromium completo em Xvfb. O desafio nunca passa de
+       * datacenter. O cliente abria o filme e via a tela do próprio provedor:
        *
-       * Se a resolução falhar, `direct` é null e caímos no embed de sempre:
-       * o cliente nunca fica sem caminho.
+       *     "Ops, ocorreu um problema
+       *      Todas as fontes falharam. Nenhuma opção disponível."
+       *
+       * É exatamente o print enviado pelo proprietário — e explica por que
+       * TODO título parecia quebrado, inclusive os Bad Boys.
+       *
+       * A ORDEM AGORA
+       * ──────────────────────────────────────────────────────────────────────
+       * 1) `resolveDirectStream` → HLS do `watchplay`, tocado num <video> nosso,
+       *    atrás do proxy `/api/stream.m3u8` (resolve CORS e Referer). É o
+       *    melhor caso: sem UI de provedor, retomada exata, tela cheia real.
+       * 2) `resolveCleanEmbed` → embed direto do `embedplay`/`embedplayer`,
+       *    sem a camada do `playerflix.ink` (que desenha a barra de cima).
+       * 3) MegaEmbed → só se as duas acima não derem nada. Mantido para que
+       *    um rollback seja uma variável (`PLAYER_CHAIN=megaembed`), não um
+       *    revert de commit.
+       *
+       * Ambas as escolhas respeitam `budget`: o provedor marca cada fonte com
+       * `success` (tem vídeo) ou `danger` (só o plano pago). `danger` nunca é
+       * oferecido — antes ele era tentado como se fosse fonte, e o cliente
+       * caía justamente na tela de erro.
        */
-      const direct = await resolveDirectStream({
-        tmdbId,
-        season: title.type === 'tv' || season != null ? season : null,
-        episode: title.type === 'tv' || season != null ? episode : null,
-      }).catch(() => null)
+      const s = title.type === 'tv' || season != null ? season : null
+      const e = title.type === 'tv' || season != null ? episode : null
 
-      const resolved = await resolveSources({
-        tmdbId,
-        season: title.type === 'tv' || season != null ? season : null,
-        episode: title.type === 'tv' || season != null ? episode : null,
-        catalogUrl: sourceUrl,
-      })
-      sources = resolved.map((s) => ({ ...s, mode: 'embed' }))
+      sources = []
 
-      if (direct) {
-        // O proxy reescreve o playlist e repassa os segmentos; o player só
-        // conhece a nossa origem, então não há CORS nem Referer a forjar.
-        // A rota termina em `.m3u8` de propósito: é o que faz o PlayerPage
-        // escolher o caminho HLS (hls.js) em vez de `video.src` direto.
-        const proxied = `/api/stream.m3u8?u=${encodeURIComponent(direct.url)}&r=${encodeURIComponent(direct.referer)}`
-        sources = [
-          { id: 'direct', label: direct.label, url: proxied, mode: 'direct', verified: true },
-          ...sources,
-        ]
-      } else {
-        /**
-         * SEGUNDA CAMADA.
-         *
-         * Sem `watchplay` (≈1/4 do catálogo), ainda tiramos a barra de cima
-         * do caminho: incorporamos a opção do provedor DIRETAMENTE, sem a
-         * camada do `playerflix.ink` — é ela que desenha aquela barra.
-         *
-         * Vai na frente, mas os embeds antigos continuam na lista: se este
-         * não entregar vídeo, o trocador de servidor do player segue
-         * funcionando.
-         */
-        const clean = await resolveCleanEmbed({
-          tmdbId,
-          season: title.type === 'tv' || season != null ? season : null,
-          episode: title.type === 'tv' || season != null ? episode : null,
-        }).catch(() => null)
+      if (MEGAEMBED_ONLY === false) {
+        // (1) HLS direto — o caminho que reproduz de verdade.
+        const direct = await resolveDirectStream({ tmdbId, season: s, episode: e }).catch(() => null)
+        if (direct) {
+          const proxied = `/api/stream.m3u8?u=${encodeURIComponent(direct.url)}&r=${encodeURIComponent(direct.referer)}`
+          sources.push({ id: 'direct', label: direct.label, url: proxied, mode: 'direct', verified: true })
+        }
 
-        if (clean) {
-          sources = [
-            { id: 'clean', label: clean.label, url: clean.url, mode: 'embed', verified: null },
-            ...sources.filter((s) => s.url !== clean.url),
-          ]
+        // (2) Embed direto do provedor, sem a camada do playerflix.
+        const clean = await resolveCleanEmbed({ tmdbId, season: s, episode: e }).catch(() => null)
+        if (clean && !sources.some((x) => x.url === clean.url)) {
+          sources.push({ id: 'clean', label: clean.label, url: clean.url, mode: 'embed', verified: true })
         }
       }
 
-      // Se a resolução não devolveu nada (tmdbId estranho), mantém a URL do
-      // catálogo para não deixar o cliente sem fonte nenhuma.
+      /**
+       * (3) Último recurso. Só entra quando não há fonte nenhuma acima — e é
+       * o único caso em que o cliente pode ver a tela de erro do provedor.
+       * Como o catálogo já é servido filtrado pelos títulos verificados, um
+       * título que chega aqui é exceção, não a regra.
+       */
       if (!sources.length) {
-        sources = [{ id: 'catalog', label: 'Opção 1', url: sourceUrl, mode: 'embed', verified: null }]
+        sources = [
+          {
+            id: 'megaembed',
+            label: 'MegaEmbed',
+            url: megaembedEmbedUrl(tmdbId, s, e),
+            mode: 'embed',
+            verified: null,
+          },
+        ]
       }
     }
 
