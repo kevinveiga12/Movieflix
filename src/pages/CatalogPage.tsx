@@ -15,17 +15,18 @@ import {
   type SortKey,
 } from '../lib/catalog'
 import { sessionSeed, applyVariety } from '../lib/variety'
+import { useInfiniteScroll } from '../lib/useInfiniteScroll'
 
 interface Props {
   kind: 'movie' | 'tv'
 }
 
-const PAGE_SIZE = 60
+/** Bloco de 50 cards por vez, como pedido. */
+const PAGE_SIZE = 50
 
 export function CatalogPage({ kind }: Props) {
   const [params, setParams] = useSearchParams()
   const [ready, setReady] = useState(false)
-  const [visible, setVisible] = useState(PAGE_SIZE)
   const { progressFor } = useHistory()
 
   /**
@@ -52,10 +53,6 @@ export function CatalogPage({ kind }: Props) {
   useEffect(() => {
     loadCatalog().then(() => setReady(true))
   }, [])
-
-  useEffect(() => {
-    setVisible(PAGE_SIZE)
-  }, [genre, sort, kind, debounced])
 
   const all = useMemo(() => (ready ? (kind === 'movie' ? playableMovies() : playableSeries()) : []), [ready, kind])
   const genres = useMemo(() => ['Todos', ...genresOf(all)], [all])
@@ -90,6 +87,15 @@ export function CatalogPage({ kind }: Props) {
     const canVary = sort === 'popular' && !debounced.trim()
     return canVary ? applyVariety(sorted, sessionSeed()) : sorted
   }, [searched, genre, sort, debounced])
+
+  /**
+   * Rolagem infinita.
+   *
+   * `filtered.length` como total: quando o filtro muda, o hook volta ao
+   * primeiro bloco sozinho. O catálogo inteiro já está em memória — o que
+   * cresce é só quantos cards são renderizados.
+   */
+  const { visible, hasMore, loadMore, sentinelRef } = useInfiniteScroll(filtered.length, PAGE_SIZE)
 
   function setParam(key: string, value: string) {
     const next = new URLSearchParams(params)
@@ -189,12 +195,37 @@ export function CatalogPage({ kind }: Props) {
               <PosterCard key={`${t.type}-${t.tmdb_id}`} title={t} progress={progressOf(t.tmdb_id)} />
             ))}
           </div>
-          {visible < filtered.length && (
-            <div className="center" style={{ marginTop: 36 }}>
-              <button className="btn btn--outline btn--lg" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
+
+          {/*
+            SENTINELA DA ROLAGEM INFINITA.
+
+            Fica logo abaixo da grade. Quando entra na viewport (600px de
+            antecedência), o próximo bloco de 50 entra sozinho. O botão
+            continua existindo como reserva para navegador sem
+            IntersectionObserver — e é ele que aparece se o observer falhar.
+          */}
+          <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
+
+          {hasMore ? (
+            <div className="center" style={{ marginTop: 28, paddingBottom: 24 }}>
+              <div className="infinite-loading" role="status" aria-live="polite">
+                <span className="infinite-spinner" aria-hidden="true" />
+                Carregando mais títulos…
+              </div>
+              <button
+                className="btn btn--ghost"
+                style={{ marginTop: 12 }}
+                onClick={loadMore}
+              >
                 Carregar mais ({filtered.length - visible} restantes)
               </button>
             </div>
+          ) : (
+            filtered.length > PAGE_SIZE && (
+              <div className="center infinite-end" style={{ marginTop: 28, paddingBottom: 24 }}>
+                Você chegou ao fim — {filtered.length} títulos.
+              </div>
+            )
           )}
         </>
       )}

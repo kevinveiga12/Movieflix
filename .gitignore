@@ -37,3 +37,4 @@ mobile/shell/ios/DerivedData/
 # Build antigo de TV (artefatos gerados, nunca versionar)
 movieflix-tv/
 >>>>>>> e8dba3c (feat: navegação de séries na TV, olho na senha, scroll infinito e variedade por sessão)
+core

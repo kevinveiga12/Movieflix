@@ -144,7 +144,14 @@ export function PlayerPage() {
   const [frameLoaded, setFrameLoaded] = useState(false)
   /** O aviso "não está rodando" foi acionado (automático ou pelo cliente). */
   const [stalled, setStalled] = useState(false)
-  /** Já trocamos de servidor automaticamente nesta sessão? */
+  /**
+   * O vídeo está PAUSADO?
+   *
+   * Só é observável no modo direto (`<video>` nosso). No modo embed o player é
+   * de outra origem e não expõe `paused` — nesse caso o card nunca aparece, e
+   * isso é honesto: não inventamos um estado que não conseguimos ler.
+   */
+  const [paused, setPaused] = useState(false)
 
   // ── Login obrigatório ────────────────────────────────────────────────────
   useEffect(() => {
@@ -703,9 +710,13 @@ export function PlayerPage() {
             crossOrigin="anonymous"
             onPlay={() => {
               setPlaying(true)
+              setPaused(false)
               setLoading(false)
             }}
-            onPause={() => setPlaying(false)}
+            onPause={() => {
+              setPlaying(false)
+              setPaused(true)
+            }}
             onWaiting={() => setLoading(true)}
             onPlaying={() => setLoading(false)}
             onCanPlay={() => setLoading(false)}
@@ -838,6 +849,39 @@ export function PlayerPage() {
           funciona. A saída continua disponível por Escape e pelo botão
           Voltar do navegador/aparelho.
         */}
+        {/*
+          CARD DE PAUSA.
+
+          Pedido do proprietário: ao pausar, aparece no meio da tela um card
+          com capa, título e descrição; ao despausar, ele some e o vídeo
+          continua de onde parou.
+
+          Só existe no modo DIRETO. No modo embed o `<video>` é de outra origem
+          e o navegador não expõe `paused` — não há como saber que o cliente
+          pausou lá dentro. Mostrar o card ali seria adivinhar.
+
+          `pointer-events: none` no card: ele é informativo, não um botão. Se
+          capturasse o toque, o primeiro toque para despausar morreria nele —
+          exatamente o tipo de camada que atrapalha o player.
+        */}
+        {paused && source?.mode === 'direct' && (
+          <div className="player-pause-card" aria-live="polite">
+            {title?.poster_url ? (
+              <img className="player-pause-poster" src={title.poster_url} alt="" />
+            ) : null}
+            <div className="player-pause-body">
+              <div className="player-pause-kicker">
+                {type === 'tv' ? `Temporada ${season} · Episódio ${episode}` : 'Pausado'}
+              </div>
+              <h2 className="player-pause-title">{title?.title}</h2>
+              {title?.description ? (
+                <p className="player-pause-desc">{title.description}</p>
+              ) : null}
+              <div className="player-pause-hint">Toque para continuar</div>
+            </div>
+          </div>
+        )}
+
         <div className={`player-overlay ${showUi ? 'visible' : ''}`}>
           {!isEmbed && (
           <div className="player-top">

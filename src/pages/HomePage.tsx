@@ -1,19 +1,35 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Hero } from '../components/Hero'
 import { CarouselRow } from '../components/CarouselRow'
 import { PosterCard } from '../components/PosterCard'
-import { loadCatalog, featured, rowsForHome, getById } from '../lib/catalog'
+import { loadCatalog, featured, rowsForHome, getById, playableMovies, playableSeries, sortTitles } from '../lib/catalog'
 import { sessionSeed } from '../lib/variety'
+import { useInfiniteScroll } from '../lib/useInfiniteScroll'
 import { useAuth } from '../context/AuthContext'
 import { useHistory, parseEpisodeId } from '../lib/userData'
 import { PlayIcon } from '../components/Icons'
+
+/** Bloco de 50 cards por vez na grade "Explorar tudo". */
+const PAGE_SIZE = 50
 
 export function HomePage() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { user } = useAuth()
   const { continueWatching, progressFor } = useHistory()
+
+  /**
+   * Semente do DESTAQUE, nova a cada entrada na home.
+   *
+   * `sessionSeed()` é estável por aba — bom para as fileiras (não se
+   * reorganizam enquanto a pessoa navega), mas o pedido é que o banner
+   * principal mude a cada entrada na página inicial. Por isso o destaque usa
+   * uma semente própria, criada uma vez por montagem do componente: voltar
+   * para a home sorteia outro título, e ele não troca sozinho enquanto a
+   * pessoa está olhando.
+   */
+  const heroSeed = useRef(`hero:${Date.now()}:${Math.random().toString(36).slice(2)}`).current
 
   /**
    * Fração assistida de um título, para a barrinha do card.
@@ -37,8 +53,21 @@ export function HomePage() {
     }
   }, [])
 
-  const heroes = useMemo(() => (ready ? featured(5, sessionSeed()) : []), [ready])
+  const heroes = useMemo(() => (ready ? featured(5, heroSeed) : []), [ready, heroSeed])
   const rows = useMemo(() => (ready ? rowsForHome(sessionSeed()) : []), [ready])
+
+  /**
+   * GRADE "EXPLORAR TUDO" — rolagem infinita de verdade na home.
+   *
+   * As fileiras acima mostram 20 títulos cada; a home terminava ali. Esta
+   * grade percorre o catálogo inteiro (filmes + séries) em blocos de 50, até
+   * o último título. É o que faz a página inicial nunca "acabar".
+   */
+  const explore = useMemo(() => {
+    if (!ready) return []
+    return sortTitles([...playableMovies(), ...playableSeries()], 'popular')
+  }, [ready])
+  const { visible, hasMore, loadMore, sentinelRef } = useInfiniteScroll(explore.length, PAGE_SIZE)
   const resume = useMemo(() => {
     if (!ready || !user) return []
     return continueWatching()
@@ -160,6 +189,46 @@ export function HomePage() {
             <h3>Catálogo vazio</h3>
             <p>Nenhum título com fonte de reprodução disponível no momento.</p>
           </div>
+        )}
+
+        {/*
+          GRADE INFINITA.
+
+          Depois das fileiras, o catálogo inteiro em blocos de 50. O sentinela
+          fica no fim; quando entra na viewport, o próximo bloco entra sozinho.
+          A mensagem de fim só aparece quando o catálogo realmente acaba.
+        */}
+        {explore.length > 0 && (
+          <section className="home-explore">
+            <div className="row-head">
+              <h2 className="row-title">Explorar tudo</h2>
+              <span className="row-count">{explore.length} títulos</span>
+            </div>
+
+            <div className="grid">
+              {explore.slice(0, visible).map((t) => (
+                <PosterCard key={`${t.type}-${t.tmdb_id}`} title={t} progress={progressOf(t.tmdb_id)} />
+              ))}
+            </div>
+
+            <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
+
+            {hasMore ? (
+              <div className="center" style={{ marginTop: 28, paddingBottom: 24 }}>
+                <div className="infinite-loading" role="status" aria-live="polite">
+                  <span className="infinite-spinner" aria-hidden="true" />
+                  Carregando mais títulos…
+                </div>
+                <button className="btn btn--ghost" style={{ marginTop: 12 }} onClick={loadMore}>
+                  Carregar mais ({explore.length - visible} restantes)
+                </button>
+              </div>
+            ) : (
+              <div className="center infinite-end" style={{ marginTop: 28, paddingBottom: 24 }}>
+                Você chegou ao fim — {explore.length} títulos.
+              </div>
+            )}
+          </section>
         )}
       </div>
     </>

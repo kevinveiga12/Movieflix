@@ -201,17 +201,34 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
       sources = []
 
       if (MEGAEMBED_ONLY === false) {
-        // (1) HLS direto — o caminho que reproduz de verdade.
+        // (1) HLS direto — o caminho que reproduz de verdade, SEM anúncio.
+        //     Vale igual para filme e para episódio: o resolvedor recebe
+        //     season/episode e monta a URL do episódio sozinho.
         const direct = await resolveDirectStream({ tmdbId, season: s, episode: e }).catch(() => null)
         if (direct) {
           const proxied = `/api/stream.m3u8?u=${encodeURIComponent(direct.url)}&r=${encodeURIComponent(direct.referer)}`
           sources.push({ id: 'direct', label: direct.label, url: proxied, mode: 'direct', verified: true })
         }
 
-        // (2) Embed direto do provedor, sem a camada do playerflix.
-        const clean = await resolveCleanEmbed({ tmdbId, season: s, episode: e }).catch(() => null)
-        if (clean && !sources.some((x) => x.url === clean.url)) {
-          sources.push({ id: 'clean', label: clean.label, url: clean.url, mode: 'embed', verified: true })
+        /**
+         * (2) Embed limpo — SÓ quando ele é o player de verdade.
+         *
+         * `resolveCleanEmbed` devolve `embedplay`/`embedplayer`/`watchplay`.
+         * Medido em 2026-11-23: `embedplayer` aponta para
+         * `embedplayer2.xyz`, cujo HTML é ofuscado com packer e carrega
+         * trackers de anúncio (`tracker.Royale.com`,
+         * `tracker.advertising.com`) com `poplimit:false` — é exatamente a
+         * origem do pop-up que o cliente vê ao tocar no player da série.
+         *
+         * Por isso o embed só entra quando NÃO existe HLS direto E o id é
+         * `watchplay` (o mesmo player, em modo iframe). `embedplayer` fica de
+         * fora: preferimos dizer "não está rodando" a abrir propaganda.
+         */
+        if (!sources.length) {
+          const clean = await resolveCleanEmbed({ tmdbId, season: s, episode: e }).catch(() => null)
+          if (clean && clean.id === 'watchplay' && !sources.some((x) => x.url === clean.url)) {
+            sources.push({ id: 'clean', label: clean.label, url: clean.url, mode: 'embed', verified: true })
+          }
         }
       }
 

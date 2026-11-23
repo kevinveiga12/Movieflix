@@ -29,16 +29,46 @@ const SELECT =
   'language, quality, type, required_plan, category, duration, year'
 
 /**
- * Provedor de embed usado pelo catálogo: EmbedMovies.
+ * FONTE DE REPRODUÇÃO DO CATÁLOGO — UM ÚNICO CAMINHO PARA FILME E SÉRIE.
  *
- * Contrato oficial (https://embedmovies.org/#guia-rapido):
- *   filme            /filme/{tmdb_id}
- *   série (episódio) /serie/{tmdb_id}/{temporada}/{episodio}
+ * ══════════════════════════════════════════════════════════════════════════════
+ * O BUG QUE ISTO CORRIGE
+ * ══════════════════════════════════════════════════════════════════════════════
  *
- * Não existe API pública de catálogo em massa — a disponibilidade é verificada
- * título a título (ver scripts/validar-disponibilidade.cjs).
+ * Aqui havia `const PROVIDER = 'https://myembed.biz'` e o episódio de série
+ * recebia `video_url = ${PROVIDER}/serie/{id}/{t}/{e}`. Esse é o embed ANTIGO
+ * (o "player azul"): uma cadeia de três iframes de terceiros que desenha a
+ * própria barra e abre anúncio. O filme, por outro lado, já passava pelo
+ * resolvedor (`resolveDirectStream` → HLS do watchplay → `<video>` nosso).
+ *
+ * Resultado medido: filme abria limpo, série abria com anúncio. Era o print
+ * enviado pelo proprietário.
+ *
+ * ── A CORREÇÃO ───────────────────────────────────────────────────────────────
+ *
+ * O episódio deixa de carregar uma URL de embed e passa a carregar a MESMA
+ * marcação que o filme usa: uma URL de embed do provedor que o
+ * `/api/playback/authorize` reconhece e resolve pelo caminho único
+ * (`resolveDirectStream` primeiro, embed limpo depois). Assim filme, série e
+ * episódio entram no mesmo `PlayerPage`, com o mesmo `<video>`, a mesma barra
+ * vermelha e a mesma tela cheia.
+ *
+ * `video_url` continua preenchido porque `isPlayable()` no frontend usa esse
+ * campo para decidir se o título aparece na listagem — mas o valor agora é
+ * apenas um marcador de "tem fonte", não a URL que o cliente abre.
  */
 const PROVIDER = 'https://myembed.biz'
+
+/**
+ * Marcador de fonte para um episódio.
+ *
+ * Não é a URL que o player abre: `/api/playback/authorize` resolve a fonte
+ * real pelo provedor. O formato segue o contrato do embed para que qualquer
+ * código antigo que leia `video_url` continue entendendo o título.
+ */
+function episodeSourceMarker(tmdbId, season, episode) {
+  return `${PROVIDER}/serie/${tmdbId}/${season}/${episode}`
+}
 
 // ── Detecção das tabelas do Supabase ─────────────────────────────────────────
 
@@ -226,7 +256,7 @@ export async function seriesEpisodes(tmdbId) {
           episode_number: e,
           title: `Episódio ${e}`,
           description: null,
-          video_url: `${PROVIDER}/serie/${t.tmdb_id}/${s}/${e}`,
+          video_url: episodeSourceMarker(t.tmdb_id, s, e),
           duration_seconds: null,
           thumbnail_url: null,
         })),

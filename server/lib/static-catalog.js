@@ -51,31 +51,61 @@ const FILES = { movie: 'filmes.light.json', tv: 'series.light.json' }
  */
 let availability = null
 
+/**
+ * Arquivo de disponibilidade, em ordem de preferência.
+ *
+ * `fontes-limpas.json` é o critério NOVO e correto: só entra o título que tem
+ * fonte `watchplay` (HLS limpo, sem anúncio). `megaembed-disponibilidade.json`
+ * é o critério antigo ("tem qualquer opção com budget success"), que deixava
+ * passar títulos cujo único caminho era o `embedplayer` — o iframe com
+ * anúncio. Mantemos o antigo como reserva para o caso de o novo não existir
+ * (deploy sem a validação rodada), mas o novo manda quando está presente.
+ */
+const AVAILABILITY_FILES = ['fontes-limpas.json', 'megaembed-disponibilidade.json']
+
 async function loadAvailability() {
   if (availability) return availability
-  try {
-    const raw = await fs.readFile(path.join(PUBLIC, 'megaembed-disponibilidade.json'), 'utf8')
-    const data = JSON.parse(raw)
-    const movies = new Set((data.filmes ?? []).map(String))
-    const series = new Set((data.series ?? []).map(String))
-    availability = {
-      movies,
-      series,
-      // Só filtra quando houve verificação de fato.
-      active: movies.size > 0 || series.size > 0,
-      geradoEm: data.gerado_em ?? null,
-      provedor: data.provedor ?? null,
-      reproducaoValidada: data.reproducao_validada === true,
+
+  for (const file of AVAILABILITY_FILES) {
+    try {
+      const raw = await fs.readFile(path.join(PUBLIC, file), 'utf8')
+      const data = JSON.parse(raw)
+      const movies = new Set((data.filmes ?? []).map(String))
+      const series = new Set((data.series ?? []).map(String))
+      if (!movies.size && !series.size) continue
+
+      availability = {
+        movies,
+        series,
+        active: true,
+        arquivo: file,
+        geradoEm: data.gerado_em ?? null,
+        provedor: data.provedor ?? null,
+        reproducaoValidada: data.reproducao_validada === true,
+        /**
+         * Episódios com fonte limpa, por série.
+         *
+         * `{ "5920": ["1/1","1/2"] }`. Vazio quando o arquivo é o antigo
+         * (`megaembed-disponibilidade.json`), que não trazia essa informação —
+         * nesse caso o player consulta o provedor episódio a episódio.
+         */
+        episodes: data.episodios ?? {},
+      }
+      return availability
+    } catch {
+      /* tenta o próximo */
     }
-  } catch {
-    availability = {
-      movies: new Set(),
-      series: new Set(),
-      active: false,
-      geradoEm: null,
-      provedor: null,
-      reproducaoValidada: false,
-    }
+  }
+
+  availability = {
+    movies: new Set(),
+    series: new Set(),
+    active: false,
+    arquivo: null,
+    geradoEm: null,
+    provedor: null,
+    reproducaoValidada: false,
+    episodes: {},
   }
   return availability
 }
@@ -87,9 +117,11 @@ export async function availabilityStats() {
     active: a.active,
     movies: a.movies.size,
     series: a.series.size,
+    arquivo: a.arquivo,
     geradoEm: a.geradoEm,
     provedor: a.provedor,
     reproducaoValidada: a.reproducaoValidada,
+    episodiosValidados: Object.keys(a.episodes ?? {}).length,
   }
 }
 

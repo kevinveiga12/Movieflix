@@ -10,15 +10,21 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -39,8 +46,10 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -48,6 +57,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import run.velixir.movieflix.tv.TvViewModel
@@ -445,6 +455,110 @@ private fun TvDirectPlayer(
                 duration = durationState.value,
                 visible = ui.visible,
             )
+        }
+
+        /*
+          CARD DE PAUSA — o mesmo comportamento do site.
+
+          Aparece quando o vídeo está pausado, com capa, título e descrição.
+          Some ao despausar.
+
+          Aqui o estado é CONFIÁVEL: o ExoPlayer é nosso, então `isPlaying` diz
+          a verdade (diferente do modo embed do site, onde o `<video>` é de
+          outra origem). Por isso o card funciona na TV mesmo quando o site não
+          consegue mostrá-lo.
+
+          `userPaused` é exigido junto: a retentativa de autoplay pausa o player
+          por alguns instantes ao montar, e sem essa condição o card piscaria na
+          abertura, antes do primeiro frame.
+        */
+        if (userPaused && !playingState.value) {
+            TvPauseCard(
+                title = title,
+                season = season,
+                episode = episode,
+            )
+        }
+    }
+}
+
+/**
+ * Card de pausa da TV.
+ *
+ * Desenhado sobre o vídeo, centralizado. Não recebe foco: o D-pad continua
+ * indo para o Box do player, então OK despausa normalmente — o card é
+ * informativo, nunca um obstáculo entre o controle e o vídeo.
+ */
+@Composable
+private fun TvPauseCard(
+    title: Title?,
+    season: Int?,
+    episode: Int?,
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xD10A0A0E))
+                .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(20.dp))
+                .padding(24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            val poster = title?.posterUrl
+            if (!poster.isNullOrBlank()) {
+                AsyncImage(
+                    model = poster,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(120.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(12.dp)),
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = if (season != null && episode != null) {
+                        "TEMPORADA $season · EPISÓDIO $episode"
+                    } else {
+                        "PAUSADO"
+                    },
+                    color = Color(0xFFDF0A15),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
+                )
+                Text(
+                    text = title?.title ?: "",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val desc = title?.description
+                if (!desc.isNullOrBlank()) {
+                    Text(
+                        text = desc,
+                        color = Color(0xB8FFFFFF),
+                        fontSize = 15.sp,
+                        lineHeight = 21.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = "Pressione OK para continuar",
+                    color = Color(0x73FFFFFF),
+                    fontSize = 13.sp,
+                )
+            }
         }
     }
 }

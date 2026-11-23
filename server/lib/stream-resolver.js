@@ -281,7 +281,7 @@ export async function resolveCleanEmbed({ tmdbId, season = null, episode = null 
   const clean = options.find((o) => CLEAN_EMBED_IDS.includes(o.id) && o.budget !== 'danger')
   if (!clean) return null
 
-  return { url: clean.embed, label: clean.label || 'Servidor principal' }
+  return { id: clean.id, url: clean.embed, label: clean.label || 'Servidor principal' }
 }
 
 /**
