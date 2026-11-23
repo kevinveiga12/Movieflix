@@ -10,7 +10,7 @@ import {
 } from '../lib/store.js'
 import { normalizeProfile } from '../lib/profile.js'
 import { availabilityStats, loadStatic, loadRaw } from '../lib/static-catalog.js'
-import { verifyTitles } from '../lib/verify-embeds.js'
+import { verifyTitles, probeTitle, EMBED_BASE } from '../lib/verify-embeds.js'
 import { generateTrialCode, publicCodes, TRIAL_CODE_TTL_DAYS } from '../lib/trial-codes.js'
 
 const router = Router()
@@ -267,6 +267,43 @@ router.post('/hidden/verify', async (req, res, next) => {
       aviso: bloqueado
         ? 'O servidor não conseguiu abrir o embed (provável bloqueio do Cloudflare). Nada foi ocultado.'
         : null,
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * GET /api/admin/hidden/diagnostico?ids=550,278,1550338
+ *
+ * Testa o provedor a partir do RUNTIME de produção e mostra o que cada título
+ * respondeu. Serve para responder a pergunta que decide tudo: "o servidor
+ * consegue abrir o embed, ou também está bloqueado?"
+ *
+ * Se todos vierem `incerto` com motivo de Cloudflare, a verificação automática
+ * não é viável daqui e a ferramenta manual é o caminho — melhor saber isso do
+ * que publicar uma verificação que nunca acha nada.
+ */
+router.get('/hidden/diagnostico', async (req, res, next) => {
+  try {
+    const ids = String(req.query.ids ?? '550,278,155,13,1550338')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s))
+      .slice(0, 20)
+
+    const resultados = await Promise.all(
+      ids.map(async (id) => ({ tmdb_id: id, ...(await probeTitle(id)) })),
+    )
+
+    const algumOk = resultados.some((r) => r.status === 'ok')
+    res.json({
+      provedor: EMBED_BASE,
+      acessivel: algumOk,
+      resultados,
+      conclusao: algumOk
+        ? 'O servidor alcança o provedor: a verificação automática funciona.'
+        : 'O servidor NÃO alcança o provedor (bloqueio do Cloudflare). Use a ferramenta manual.',
     })
   } catch (e) {
     next(e)
