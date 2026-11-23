@@ -140,11 +140,36 @@ function normalizeHidden(raw) {
 }
 
 export async function readOverrides() {
-  let base
+  const [runtime, baseline, broken] = await Promise.all([
+    readRuntimeOverrides(),
+    readBaselineFile(),
+    readBrokenReport(),
+  ])
+
+  // A lista de ocultos é a UNIÃO das três fontes. Nenhuma sobrescreve a outra,
+  // porque cada uma responde por um caminho diferente:
+  //
+  //   runtime  → o que o dono ocultou no painel (arquivo local)
+  //   baseline → o que veio comitado no código (sobrevive ao deploy)
+  //   broken   → o que a verificação do build descobriu nesta versão
+  //
+  // A ordem importa: runtime primeiro, então um registro do painel tem
+  // precedência quando o mesmo título aparece em mais de uma fonte (é o
+  // normalizeHidden que deduplica).
+  return {
+    movies: runtime.movies,
+    series: runtime.series,
+    hidden: normalizeHidden([...runtime.hidden, ...baseline.hidden, ...broken]),
+    updatedAt: runtime.updatedAt ?? baseline.updatedAt ?? null,
+  }
+}
+
+/** Lê só o arquivo de runtime (o que o painel gravou). */
+async function readRuntimeOverrides() {
   try {
     const raw = await fs.readFile(OVERRIDES, 'utf8')
     const parsed = JSON.parse(raw)
-    base = {
+    return {
       ...EMPTY,
       ...parsed,
       movies: { ...(parsed.movies ?? {}) },
@@ -152,14 +177,8 @@ export async function readOverrides() {
       hidden: normalizeHidden(parsed.hidden),
     }
   } catch {
-    // Sem arquivo de runtime: semeia a partir do baseline versionado.
-    return readBaseline()
+    return { ...EMPTY, hidden: [] }
   }
-
-  // O relatório do build vale SEMPRE, mesmo com arquivo de runtime presente:
-  // ele é refeito a cada build e representa a verificação mais recente.
-  base.hidden = normalizeHidden([...base.hidden, ...(await readBrokenReport())])
-  return base
 }
 
 /**
@@ -169,12 +188,11 @@ export async function readOverrides() {
  * (primeira instalação), devolve vazio — o site mostra o catálogo completo em
  * vez de quebrar.
  */
-async function readBaseline() {
-  let base = { ...EMPTY, hidden: [] }
+async function readBaselineFile() {
   try {
     const raw = await fs.readFile(BASELINE, 'utf8')
     const parsed = JSON.parse(raw)
-    base = {
+    return {
       ...EMPTY,
       ...parsed,
       movies: { ...(parsed.movies ?? {}) },
@@ -182,18 +200,8 @@ async function readBaseline() {
       hidden: normalizeHidden(parsed.hidden),
     }
   } catch {
-    /* sem baseline: começa vazio */
+    return { ...EMPTY, hidden: [] }
   }
-
-  // Soma o que o build verificou e marcou como quebrado.
-  //
-  // `public/filmes/quebrados.json` é gerado por scripts/verificar-no-build.mjs
-  // durante o build. Ele existe porque o plano Free não tem volume persistente:
-  // o que o build descobre precisa viajar com o código, não com o disco.
-  //
-  // As duas fontes convivem: baseline (comitado) + relatório do build.
-  base.hidden = normalizeHidden([...base.hidden, ...(await readBrokenReport())])
-  return base
 }
 
 /** Lê a lista de quebrados que o build gerou. Ausente = lista vazia. */

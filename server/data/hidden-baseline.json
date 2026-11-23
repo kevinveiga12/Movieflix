@@ -1,0 +1,16 @@
+{
+  "_comentario": "Títulos ocultos. COMITADO de propósito: o plano Free da Velixir não tem volume persistente, então o que o painel ocultar precisa viajar com o código para valer no deploy seguinte. Gerado por scripts/exportar-ocultos.mjs ou editado à mão.",
+  "gerado_em": "2026-11-23T13:45:00.000Z",
+  "total_oculto": 1,
+  "hidden": [
+    {
+      "tmdb_id": "1550338",
+      "type": "movie",
+      "title": "Visões de um Amor",
+      "poster_url": "https://image.tmdb.org/t/p/w500/2dlXexLn0PJzzsqVRlxaREBNTJ4.jpg",
+      "motivo": "confirmado pelo proprietário com print: abre a tela de erro 'Todas as fontes falharam' em vez do player",
+      "origem": "manual",
+      "em": "2026-11-23T13:45:00.000Z"
+    }
+  ]
+}
