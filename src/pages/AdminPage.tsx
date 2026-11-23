@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { loadCatalog, getAll } from '../lib/catalog'
+import { loadCatalog, getAll, invalidateHiddenCache } from '../lib/catalog'
 import { CheckIcon, XIcon, SearchIcon, SettingsIcon, UserIcon, FilmIcon, KeyIcon, DownloadIcon, InfoIcon } from '../components/Icons'
 import type { Title } from '../lib/types'
 
-type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability' | 'megaembed' | 'apps'
+type Tab = 'overview' | 'catalog' | 'users' | 'plans' | 'availability' | 'megaembed' | 'apps' | 'hidden'
 
 interface Stats {
   users: number
@@ -189,6 +189,7 @@ export function AdminPage() {
             ['users', 'Usuários'],
             ['plans', 'Planos'],
             ['availability', 'Disponibilidade'],
+            ['hidden', 'Títulos ocultos'],
             ['megaembed', 'MegaEmbed'],
             ['apps', 'Aplicativos'],
           ] as const
@@ -298,6 +299,20 @@ export function AdminPage() {
       )}
 
       {tab === 'availability' && <AvailabilityTab api={api} />}
+
+      {tab === 'hidden' && (
+        <HiddenTitlesTab
+          api={api}
+          onChanged={(msg) => {
+            setNotice(msg)
+            // O catálogo do site fica em cache no navegador; limpar aqui faz a
+            // mudança aparecer na mesma sessão, sem recarregar a página.
+            invalidateHiddenCache()
+            void loadCatalog()
+          }}
+          onError={(m) => setError(m)}
+        />
+      )}
 
       {tab === 'megaembed' && <MegaEmbedTab api={api} />}
 
@@ -470,6 +485,387 @@ function AppsTab({ token }: { token?: string }) {
           site publicado, então qualquer alteração feita no site aparece neles na próxima
           abertura — sem gerar versão nova.
         </p>
+      </div>
+    </>
+  )
+}
+
+/**
+ * ABA "TÍTULOS OCULTOS" — a ferramenta manual do dono.
+ *
+ * ── Por que ela existe ─────────────────────────────────────────────────────
+ * A verificação automática cruza o nosso catálogo com o catálogo do provedor,
+ * mas só sabe o que o provedor DECLARA ter. Título que o provedor lista e que
+ * mesmo assim abre a tela de erro ("Todas as fontes falharam") passa pela
+ * verificação — foi o caso de "Visões de um Amor" (TMDB 1550338). Quem vê o
+ * erro é o cliente, no aparelho dele; então o dono precisa de um botão.
+ *
+ * ── Como funciona ──────────────────────────────────────────────────────────
+ * A busca usa `/api/admin/hidden/search`, que varre o catálogo BRUTO — inclui
+ * o que já está oculto e o que está fora da listagem pública, senão o dono não
+ * conseguiria reexibir nem corrigir um oculto por engano.
+ *
+ * Ocultar e reexibir gravam em `server/data/catalog-overrides.json` (campo
+ * `hidden`). Nenhuma tabela nova, nenhuma migração, nada no Supabase. O filtro
+ * é aplicado na leitura, então vale na hora no site, na TV e no app.
+ *
+ * O visual reaproveita as classes do painel (`panel`, `chip`, `episode`,
+ * `btn`) — nada de CSS novo, nada de redesenho.
+ */
+function HiddenTitlesTab({
+  api,
+  onChanged,
+  onError,
+}: {
+  api: (p: string, i?: RequestInit) => Promise<any>
+  onChanged: (msg: string) => void
+  onError: (msg: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<any[]>([])
+  const [searching, setSearching] = useState(false)
+  const [hidden, setHidden] = useState<any[]>([])
+  const [loadingHidden, setLoadingHidden] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [target, setTarget] = useState<any | null>(null)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<any | null>(null)
+
+  async function loadHidden() {
+    setLoadingHidden(true)
+    try {
+      const data = await api('/hidden')
+      setHidden(data.items ?? [])
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setLoadingHidden(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadHidden()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Busca com atraso de 350 ms: o catálogo tem 27 MB e não faz sentido disparar
+  // uma requisição por tecla digitada.
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 2) {
+      setResults([])
+      return
+    }
+    setSearching(true)
+    const timer = setTimeout(() => {
+      api(`/hidden/search?q=${encodeURIComponent(q)}&limit=30`)
+        .then((d) => setResults(d.items ?? []))
+        .catch((e) => onError((e as Error).message))
+        .finally(() => setSearching(false))
+    }, 350)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query])
+
+  async function ocultar(item: any) {
+    setBusy(`${item.type}-${item.tmdb_id}`)
+    try {
+      await api('/hidden', {
+        method: 'POST',
+        body: JSON.stringify({
+          tmdb_id: item.tmdb_id,
+          type: item.type,
+          title: item.title,
+          poster_url: item.poster_url,
+          motivo,
+        }),
+      })
+      onChanged(`"${item.title}" foi ocultado do catálogo.`)
+      setMotivo('')
+      setTarget(null)
+      setResults((prev) =>
+        prev.map((r) =>
+          r.tmdb_id === item.tmdb_id && r.type === item.type ? { ...r, hidden: true } : r,
+        ),
+      )
+      await loadHidden()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Roda a verificação de reprodução NO SERVIDOR.
+   *
+   * O navegador não pode fazer isso: o embed é cross-origin e o Cloudflare
+   * bloqueia o ambiente de build. O servidor de produção tenta abrir o embed de
+   * cada título e só oculta o que o provedor responde como "sem fonte".
+   *
+   * `dry_run` primeiro: mostra o resultado sem gravar nada. O dono confere e só
+   * então aplica. É a diferença entre "achei 200 quebrados" e "escondi 200".
+   */
+  async function verificar(dryRun: boolean) {
+    setVerifying(true)
+    setVerifyResult(null)
+    try {
+      const data = await api('/hidden/verify', {
+        method: 'POST',
+        body: JSON.stringify({ dry_run: dryRun, type: 'all' }),
+      })
+      setVerifyResult(data)
+      if (!dryRun && data.ocultados > 0) {
+        onChanged(`${data.ocultados} título(s) ocultado(s) pela verificação.`)
+        await loadHidden()
+      }
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  async function reexibir(item: any) {
+    setBusy(`${item.type}-${item.tmdb_id}`)
+    try {
+      await api(`/hidden/${item.type}/${item.tmdb_id}`, { method: 'DELETE' })
+      onChanged(`"${item.title || item.tmdb_id}" voltou a aparecer no catálogo.`)
+      setResults((prev) =>
+        prev.map((r) =>
+          r.tmdb_id === item.tmdb_id && r.type === item.type ? { ...r, hidden: false } : r,
+        ),
+      )
+      await loadHidden()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <>
+      <div className="panel">
+        <div className="panel-title">Verificação automática</div>
+        <p className="panel-sub">
+          Abre o player de cada título no servidor e oculta os que o provedor responde como{' '}
+          <strong>sem fonte</strong> — é o caso de títulos que mostram a tela de erro em vez do
+          player. Roda no servidor porque o navegador não consegue ler o player de outro domínio.
+        </p>
+        <p className="panel-sub">
+          <strong>Recomendado:</strong> rode primeiro a conferência (não grava nada), veja quantos
+          apareceram e só depois aplique. Se o servidor estiver bloqueado pelo provedor, a
+          verificação avisa e não oculta nada.
+        </p>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn--outline btn--sm"
+            disabled={verifying}
+            onClick={() => void verificar(true)}
+          >
+            {verifying ? 'Verificando…' : 'Conferir (sem alterar)'}
+          </button>
+          <button
+            className="btn btn--primary btn--sm"
+            disabled={verifying}
+            onClick={() => void verificar(false)}
+          >
+            {verifying ? 'Verificando…' : 'Verificar e ocultar os quebrados'}
+          </button>
+        </div>
+
+        {verifying && (
+          <p className="muted" style={{ marginTop: 12, marginBottom: 0 }}>
+            Verificando o catálogo no servidor. Isso pode levar alguns minutos — não feche a página.
+          </p>
+        )}
+
+        {verifyResult && (
+          <div style={{ marginTop: 16 }}>
+            {verifyResult.aviso && <div className="alert alert--error">{verifyResult.aviso}</div>}
+            <div
+              className="grid"
+              style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}
+            >
+              {[
+                ['Verificados', verifyResult.verificado],
+                ['Funcionam', verifyResult.funcionam],
+                ['Quebrados', verifyResult.quebrados],
+                ['Incerto', verifyResult.incertos],
+                [verifyResult.dry_run ? 'Seriam ocultados' : 'Ocultados', verifyResult.ocultados],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="panel" style={{ marginBottom: 0 }}>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{value}</div>
+                  <div className="muted" style={{ fontSize: '0.8rem' }}>
+                    {label}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {verifyResult.amostra_quebrados?.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div className="muted" style={{ fontSize: '0.85rem', marginBottom: 6 }}>
+                  Exemplos de quebrados:
+                </div>
+                <div className="episode-sub">
+                  {verifyResult.amostra_quebrados
+                    .map((r: any) => `${r.title || r.tmdb_id} (${r.type === 'movie' ? 'filme' : 'série'})`)
+                    .join(' · ')}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-title">Ocultar um título</div>
+        <p className="panel-sub">
+          Busque pelo nome. Use quando o título abre a tela de erro em vez do player — ele sai das
+          listas, da busca, das categorias, dos destaques, do histórico e dos favoritos no site, no
+          app de TV e no app normal. Nada é apagado: dá para reexibir a qualquer momento.
+        </p>
+
+        <div className="search-bar" style={{ margin: '0 0 16px', maxWidth: '100%' }}>
+          <SearchIcon size={20} />
+          <input
+            type="search"
+            placeholder="Buscar filme ou série pelo nome…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+
+        {searching && <p className="muted">Buscando…</p>}
+        {!searching && query.trim().length >= 2 && results.length === 0 && (
+          <p className="muted">Nenhum título encontrado com esse nome.</p>
+        )}
+
+        <div className="episode-list">
+          {results.map((t) => {
+            const key = `${t.type}-${t.tmdb_id}`
+            const isBusy = busy === key
+            return (
+              <div key={key} className="episode" style={{ cursor: 'default' }}>
+                <img
+                  src={t.poster_url || '/icon-192.png'}
+                  alt=""
+                  style={{ width: 40, height: 58, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
+                />
+                <div className="episode-info">
+                  <div className="episode-title">{t.title}</div>
+                  <div className="episode-sub">
+                    {t.type === 'movie' ? 'Filme' : 'Série'} · {t.year || '—'}
+                    {t.category ? ` · ${t.category}` : ''} · TMDB {t.tmdb_id}
+                  </div>
+                </div>
+                {t.hidden ? (
+                  <span className="badge badge--red" style={{ flexShrink: 0 }}>
+                    Oculto
+                  </span>
+                ) : target && target.tmdb_id === t.tmdb_id && target.type === t.type ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                    <input
+                      type="text"
+                      placeholder="Motivo (opcional)"
+                      value={motivo}
+                      onChange={(e) => setMotivo(e.target.value)}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid var(--border, #333)',
+                        background: 'transparent',
+                        color: 'inherit',
+                        width: 190,
+                      }}
+                    />
+                    <button
+                      className="btn btn--primary btn--sm"
+                      disabled={isBusy}
+                      onClick={() => void ocultar(t)}
+                    >
+                      {isBusy ? 'Ocultando…' : 'Confirmar'}
+                    </button>
+                    <button
+                      className="btn btn--outline btn--sm"
+                      onClick={() => {
+                        setTarget(null)
+                        setMotivo('')
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn--outline btn--sm"
+                    style={{ flexShrink: 0 }}
+                    onClick={() => {
+                      setTarget(t)
+                      setMotivo('')
+                    }}
+                  >
+                    <XIcon size={15} /> Ocultar
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: 20 }}>
+        <div className="panel-title">
+          Títulos ocultos {hidden.length > 0 && <span className="muted">({hidden.length})</span>}
+        </div>
+        <p className="panel-sub">
+          Estes títulos não aparecem em lugar nenhum. Clique em <strong>Reexibir</strong> para
+          devolvê-los ao catálogo quando voltarem a funcionar.
+        </p>
+
+        {loadingHidden && <p className="muted">Carregando…</p>}
+        {!loadingHidden && hidden.length === 0 && (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Nenhum título oculto no momento.
+          </p>
+        )}
+
+        <div className="episode-list">
+          {hidden.map((t) => {
+            const key = `${t.type}-${t.tmdb_id}`
+            const isBusy = busy === key
+            return (
+              <div key={key} className="episode" style={{ cursor: 'default' }}>
+                <img
+                  src={t.poster_url || '/icon-192.png'}
+                  alt=""
+                  style={{ width: 40, height: 58, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
+                />
+                <div className="episode-info">
+                  <div className="episode-title">{t.title || `TMDB ${t.tmdb_id}`}</div>
+                  <div className="episode-sub">
+                    {t.type === 'movie' ? 'Filme' : t.type === 'tv' ? 'Série' : 'Filme e série'} ·
+                    TMDB {t.tmdb_id}
+                    {t.motivo ? ` · ${t.motivo}` : ''}
+                    {t.em ? ` · ${new Date(t.em).toLocaleDateString('pt-BR')}` : ''}
+                  </div>
+                </div>
+                <button
+                  className="btn btn--outline btn--sm"
+                  style={{ flexShrink: 0 }}
+                  disabled={isBusy}
+                  onClick={() => void reexibir(t)}
+                >
+                  {isBusy ? 'Reexibindo…' : 'Reexibir'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </>
   )

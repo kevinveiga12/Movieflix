@@ -73,6 +73,55 @@ interface Availability {
 
 let availability: Availability | null = null
 
+/**
+ * IDs ocultados pelo painel administrativo.
+ *
+ * ── Por que o cliente também filtra ────────────────────────────────────────
+ * O site lê o catálogo de `/filmes/*.json`, um arquivo ESTÁTICO com cache de 7
+ * dias. O servidor filtra as rotas `/api/catalog/*`, mas esse JSON não passa
+ * por elas — então um título ocultado no painel continuaria na home até o
+ * próximo build.
+ *
+ * `GET /api/catalog/hidden` devolve só os IDs (resposta de poucos KB) e aqui
+ * eles são removidos junto com o filtro de disponibilidade. Resultado: ocultar
+ * no painel vale no site na hora, sem rebuild.
+ *
+ * Se a rota falhar, `active` fica `false` e nada é filtrado — o site continua
+ * funcionando com o catálogo completo em vez de ficar vazio.
+ */
+interface HiddenList {
+  movies: Set<string>
+  series: Set<string>
+  active: boolean
+}
+
+let hiddenList: HiddenList | null = null
+
+async function loadHidden(): Promise<HiddenList> {
+  if (hiddenList) return hiddenList
+  try {
+    const res = await fetch('/api/catalog/hidden', { cache: 'no-cache' })
+    if (!res.ok) throw new Error(String(res.status))
+    const data = (await res.json()) as { filmes?: number[]; series?: number[] }
+    const movies = new Set((data.filmes ?? []).map(String))
+    const series = new Set((data.series ?? []).map(String))
+    hiddenList = { movies, series, active: movies.size > 0 || series.size > 0 }
+  } catch {
+    hiddenList = { movies: new Set(), series: new Set(), active: false }
+  }
+  return hiddenList
+}
+
+/**
+ * Descarta o cache da lista de ocultos.
+ *
+ * O painel chama isto depois de ocultar/reexibir, para a mudança aparecer na
+ * mesma sessão do navegador sem precisar recarregar a página.
+ */
+export function invalidateHiddenCache(): void {
+  hiddenList = null
+}
+
 async function loadAvailability(): Promise<Availability> {
   if (availability) return availability
   try {
@@ -137,15 +186,19 @@ export async function loadCatalog(): Promise<void> {
   if (moviesCache && seriesCache) return
   if (loading) return loading
   loading = (async () => {
-    const [movies, series, avail] = await Promise.all([
+    const [movies, series, avail, hidden] = await Promise.all([
       loadJson<Title[]>('/filmes/filmes.light.json'),
       loadJson<Title[]>('/filmes/series.light.json'),
       loadAvailability(),
+      loadHidden(),
     ])
-    const keep = (list: Title[], allowed: Set<string>) =>
-      avail.active ? list.filter((t) => allowed.has(String(t.tmdb_id))) : list
-    moviesCache = keep(movies, avail.movies).map(normalizeTitle)
-    seriesCache = keep(series, avail.series).map(normalizeTitle)
+    const keep = (list: Title[], allowed: Set<string>, blocked: Set<string>) => {
+      let out = avail.active ? list.filter((t) => allowed.has(String(t.tmdb_id))) : list
+      if (hidden.active) out = out.filter((t) => !blocked.has(String(t.tmdb_id)))
+      return out
+    }
+    moviesCache = keep(movies, avail.movies, hidden.movies).map(normalizeTitle)
+    seriesCache = keep(series, avail.series, hidden.series).map(normalizeTitle)
   })()
   try {
     await loading

@@ -1,14 +1,298 @@
 import { Router } from 'express'
 import { requireAdmin, supabaseAdmin } from '../lib/auth.js'
-import { readOverrides, writeOverrides, readAdminConfig, writeAdminConfig } from '../lib/store.js'
+import {
+  readOverrides,
+  writeOverrides,
+  readAdminConfig,
+  writeAdminConfig,
+  hideTitle,
+  unhideTitle,
+} from '../lib/store.js'
 import { normalizeProfile } from '../lib/profile.js'
-import { availabilityStats, loadStatic } from '../lib/static-catalog.js'
+import { availabilityStats, loadStatic, loadRaw } from '../lib/static-catalog.js'
+import { verifyTitles } from '../lib/verify-embeds.js'
 import { generateTrialCode, publicCodes, TRIAL_CODE_TTL_DAYS } from '../lib/trial-codes.js'
 
 const router = Router()
 
 // Todas as rotas exigem admin verificado no banco.
 router.use(requireAdmin)
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * TÍTULOS OCULTOS — a ferramenta manual do painel
+ *
+ * POR QUE ESTA SEÇÃO EXISTE
+ * A verificação automática cruza o nosso catálogo com o catálogo do provedor,
+ * mas ela só sabe o que o provedor DECLARA ter. Título que o provedor lista e
+ * mesmo assim abre a tela de erro ("Todas as fontes falharam") passa pela
+ * verificação — foi o caso de "Visões de um Amor" (TMDB 1550338). Quem vê o
+ * erro é o cliente, no aparelho dele; então o dono precisa de um botão.
+ *
+ * ONDE FICA GRAVADO
+ * `server/data/catalog-overrides.json` → campo `hidden`. É o MESMO arquivo que
+ * o painel já usava para editar metadados: nenhuma tabela nova, nenhuma
+ * migração, nenhuma alteração no Supabase. Apagar o arquivo desfaz tudo.
+ *
+ * COMO VALE NO SITE, NA TV E NO APP
+ * O filtro é aplicado na LEITURA, nos pontos que os três clientes usam:
+ *   • /api/catalog/movies e /api/catalog/series  (listas, busca, categorias)
+ *   • /api/catalog/availability                  (histórico e favoritos)
+ *   • o catálogo estático que o navegador baixa  (home, destaques, relacionados)
+ * Por isso ocultar aqui vale imediatamente, sem rebuild e sem reinstalar app.
+ * ────────────────────────────────────────────────────────────────────────────── */
+
+/** Normaliza para busca: minúsculas e sem acento. */
+function fold(s) {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+/**
+ * GET /api/admin/hidden?q=visoes
+ *
+ * Lista os títulos ocultos. Sem `q`, devolve todos (mais recentes primeiro).
+ * Com `q`, filtra por nome — a busca é feita sobre o `title` gravado no
+ * momento de ocultar, então não precisa varrer o catálogo.
+ */
+router.get('/hidden', async (req, res, next) => {
+  try {
+    const overrides = await readOverrides()
+    const q = fold(req.query.q ?? '').trim()
+    const all = [...(overrides.hidden ?? [])].sort((a, b) =>
+      String(b.em ?? '').localeCompare(String(a.em ?? '')),
+    )
+    const items = q
+      ? all.filter((e) => fold(e.title).includes(q) || String(e.tmdb_id).includes(q))
+      : all
+    res.json({ total: all.length, items, updatedAt: overrides.updatedAt ?? null })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * GET /api/admin/hidden/search?q=visoes&limit=30
+ *
+ * Busca no catálogo BRUTO (inclui o que já está oculto e o que está fora da
+ * listagem pública) para o dono escolher o título a ocultar.
+ *
+ * Devolve só o necessário para a lista: id, tipo, nome, capa, ano e se já
+ * está oculto. Não devolve sinopse nem elenco — a resposta precisa ser leve.
+ */
+router.get('/hidden/search', async (req, res, next) => {
+  try {
+    const q = fold(req.query.q ?? '').trim()
+    if (q.length < 2) return res.json({ items: [], total: 0 })
+
+    const limit = Math.min(Number(req.query.limit ?? 30) || 30, 60)
+    const overrides = await readOverrides()
+    const hiddenKeys = new Set((overrides.hidden ?? []).map((e) => `${e.type ?? '*'}:${e.tmdb_id}`))
+    const isHidden = (id, type) => hiddenKeys.has(`${type}:${id}`) || hiddenKeys.has(`*:${id}`)
+
+    const [movies, series] = await Promise.all([loadRaw('movie'), loadRaw('tv')])
+    const terms = q.split(/\s+/).filter(Boolean)
+
+    const scored = []
+    for (const [list, type] of [
+      [movies, 'movie'],
+      [series, 'tv'],
+    ]) {
+      for (const t of list) {
+        const name = fold(t.title)
+        let score = 0
+        let all = true
+        for (const term of terms) {
+          if (name.startsWith(term)) score += 100
+          else if (name.includes(term)) score += 50
+          else all = false
+        }
+        if (!all) continue
+        score += (t.popularity ?? 0) / 1000
+        scored.push({ t, type, score })
+      }
+    }
+
+    scored.sort((a, b) => b.score - a.score)
+    const items = scored.slice(0, limit).map(({ t, type }) => ({
+      tmdb_id: String(t.tmdb_id ?? t.id),
+      type,
+      title: t.title,
+      poster_url: t.poster_url ?? '',
+      year: t.year ?? '',
+      category: t.category ?? '',
+      hidden: isHidden(String(t.tmdb_id ?? t.id), type),
+    }))
+
+    res.json({ items, total: scored.length })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * POST /api/admin/hidden
+ * body: { tmdb_id, type: 'movie'|'tv', title?, poster_url?, motivo? }
+ *
+ * Oculta um título. Idempotente: ocultar de novo só atualiza o motivo.
+ * Vale na hora para site, TV e app — o filtro é aplicado na leitura.
+ */
+router.post('/hidden', async (req, res, next) => {
+  try {
+    const tmdbId = String(req.body?.tmdb_id ?? '').trim()
+    if (!/^\d+$/.test(tmdbId)) {
+      return res.status(400).json({ error: 'Informe um tmdb_id numérico.' })
+    }
+    const rawType = String(req.body?.type ?? '').toLowerCase()
+    if (rawType !== 'movie' && rawType !== 'tv' && rawType !== 'series') {
+      return res.status(400).json({ error: 'Tipo inválido. Use "movie" ou "tv".' })
+    }
+    const type = rawType === 'movie' ? 'movie' : 'tv'
+
+    // Nome e capa: usa o que o painel mandou; se não mandou, procura no
+    // catálogo bruto para a lista de ocultos ficar legível.
+    let title = String(req.body?.title ?? '').trim()
+    let posterUrl = String(req.body?.poster_url ?? '').trim()
+    if (!title || !posterUrl) {
+      const list = await loadRaw(type === 'movie' ? 'movie' : 'tv')
+      const found = list.find((t) => String(t.tmdb_id ?? t.id) === tmdbId)
+      if (found) {
+        title = title || found.title || ''
+        posterUrl = posterUrl || found.poster_url || ''
+      }
+    }
+
+    const saved = await hideTitle({
+      tmdbId,
+      type,
+      title,
+      posterUrl,
+      motivo: req.body?.motivo ?? '',
+      origem: 'manual',
+    })
+
+    res.status(201).json({
+      ok: true,
+      hidden: saved.hidden.length,
+      item: saved.hidden.find((e) => e.tmdb_id === tmdbId && e.type === type) ?? null,
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * POST /api/admin/hidden/verify
+ * body: { limit?: number, type?: 'movie'|'tv'|'all', dry_run?: boolean }
+ *
+ * Verifica a REPRODUÇÃO de verdade, no servidor, e oculta o que o provedor
+ * responde como "sem fonte".
+ *
+ * ── Por que roda aqui e não no build ───────────────────────────────────────
+ * O provedor está atrás do Cloudflare Turnstile e barra o ambiente de build
+ * (403 em todos os domínios). O servidor de produção está em outro datacenter;
+ * se ele também for barrado, a verificação devolve tudo como "incerto" e NÃO
+ * oculta nada — nunca esconde título por falha de rede.
+ *
+ * ── O que conta como quebrado ──────────────────────────────────────────────
+ * Só sinal positivo: "Movie or Episode Not Found", "Nenhuma fonte cadastrada",
+ * "Todas as fontes falharam". 403/timeout/página vazia = incerto, fica de fora.
+ *
+ * `dry_run: true` só relata, sem gravar — é o modo seguro para conferir antes.
+ */
+router.post('/hidden/verify', async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.body?.limit ?? 0) || 0, 5000)
+    const type = String(req.body?.type ?? 'all')
+    const dryRun = req.body?.dry_run === true
+
+    const kinds = type === 'movie' ? ['movie'] : type === 'tv' ? ['tv'] : ['movie', 'tv']
+    const lists = await Promise.all(kinds.map((k) => loadRaw(k === 'movie' ? 'movie' : 'tv')))
+
+    let items = []
+    for (let i = 0; i < kinds.length; i++) {
+      for (const t of lists[i]) {
+        const id = String(t.tmdb_id ?? t.id)
+        if (!/^\d+$/.test(id)) continue
+        items.push({
+          tmdb_id: id,
+          type: kinds[i],
+          title: t.title ?? '',
+          poster_url: t.poster_url ?? '',
+        })
+      }
+    }
+    if (limit) items = items.slice(0, limit)
+
+    const results = await verifyTitles(items, { concurrency: 8 })
+    const quebrados = results.filter((r) => r.status === 'quebrado')
+    const ok = results.filter((r) => r.status === 'ok')
+    const incertos = results.filter((r) => r.status === 'incerto')
+
+    // Se NADA foi confirmado como funcional, o servidor provavelmente está
+    // barrado pelo Cloudflare. Nesse caso não ocultamos nada: seria esconder o
+    // catálogo inteiro por causa de um bloqueio de rede.
+    const bloqueado = ok.length === 0 && incertos.length > 0
+
+    let ocultados = 0
+    if (!dryRun && !bloqueado) {
+      for (const r of quebrados) {
+        await hideTitle({
+          tmdbId: r.tmdb_id,
+          type: r.type,
+          title: r.title,
+          posterUrl: r.poster_url,
+          motivo: 'verificação: provedor respondeu sem fonte',
+          origem: 'verificacao',
+        })
+        ocultados++
+      }
+    }
+
+    res.json({
+      ok: true,
+      dry_run: dryRun,
+      bloqueado,
+      verificado: results.length,
+      funcionam: ok.length,
+      quebrados: quebrados.length,
+      incertos: incertos.length,
+      ocultados,
+      amostra_quebrados: quebrados.slice(0, 20).map((r) => ({
+        tmdb_id: r.tmdb_id,
+        type: r.type,
+        title: r.title,
+      })),
+      aviso: bloqueado
+        ? 'O servidor não conseguiu abrir o embed (provável bloqueio do Cloudflare). Nada foi ocultado.'
+        : null,
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * DELETE /api/admin/hidden/:type/:id — reexibe um título oculto.
+ *
+ * `type` aceita 'movie' e 'tv'. O título volta a aparecer em todas as listas
+ * na próxima leitura — nada é recriado, porque nada foi apagado.
+ */
+router.delete('/hidden/:type/:id', async (req, res, next) => {
+  try {
+    const { type, id } = req.params
+    if (type !== 'movie' && type !== 'tv') {
+      return res.status(400).json({ error: 'Tipo inválido. Use "movie" ou "tv".' })
+    }
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'ID inválido.' })
+
+    const saved = await unhideTitle({ tmdbId: id, type })
+    res.json({ ok: true, hidden: saved.hidden.length })
+  } catch (e) {
+    next(e)
+  }
+})
 
 /**
  * GET /api/admin/availability — situação do catálogo no provedor.
@@ -136,12 +420,24 @@ router.put('/overrides/:kind/:id', async (req, res, next) => {
     const bucket = kind === 'movie' ? 'movies' : 'series'
     overrides[bucket] = { ...(overrides[bucket] ?? {}), [id]: { ...(overrides[bucket]?.[id] ?? {}), ...patch } }
 
+    // `hidden` aqui é o atalho do editor de metadados. Ele delega para as
+    // mesmas funções da seção "Títulos ocultos", para existir UM só formato
+    // de registro (com tipo, motivo e data) — antes gravava ID solto e o
+    // título ficava oculto nos dois catálogos por engano.
     if (req.body.hidden === true) {
-      const set = new Set(overrides.hidden ?? [])
-      set.add(id)
-      overrides.hidden = [...set]
+      const found = (await loadRaw(kind === 'movie' ? 'movie' : 'tv')).find(
+        (t) => String(t.tmdb_id ?? t.id) === id,
+      )
+      await hideTitle({
+        tmdbId: id,
+        type: kind === 'movie' ? 'movie' : 'tv',
+        title: found?.title ?? '',
+        posterUrl: found?.poster_url ?? '',
+        motivo: 'ocultado pelo editor de metadados',
+        origem: 'manual',
+      })
     } else if (req.body.hidden === false) {
-      overrides.hidden = (overrides.hidden ?? []).filter((x) => x !== id)
+      await unhideTitle({ tmdbId: id, type: kind === 'movie' ? 'movie' : 'tv' })
     }
 
     const saved = await writeOverrides(overrides)
@@ -161,8 +457,9 @@ router.delete('/overrides/:kind/:id', async (req, res, next) => {
     const overrides = await readOverrides()
     const bucket = kind === 'movie' ? 'movies' : 'series'
     if (overrides[bucket]) delete overrides[bucket][id]
-    overrides.hidden = (overrides.hidden ?? []).filter((x) => x !== id)
-    const saved = await writeOverrides(overrides)
+    // Desfazer as edições também reexibe o título — mas só no catálogo certo.
+    await unhideTitle({ tmdbId: id, type: kind === 'movie' ? 'movie' : 'tv' })
+    const saved = await writeOverrides(await readOverrides())
     res.json({ ok: true, overrides: saved })
   } catch (e) {
     next(e)

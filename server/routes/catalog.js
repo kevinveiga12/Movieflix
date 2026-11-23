@@ -120,10 +120,53 @@ async function posterIndex() {
  *
  * Resposta: { ativo, gerado_em, filmes: [ids], series: [ids] }
  */
+/**
+ * GET /api/catalog/hidden
+ *
+ * Lista PÚBLICA (somente IDs) dos títulos ocultos pelo painel.
+ *
+ * ── Por que o navegador precisa disso ──────────────────────────────────────
+ * A home, a busca e as categorias do site leem o catálogo direto de
+ * `/filmes/*.json` (estático, com cache de 7 dias). O servidor filtra as rotas
+ * `/api/catalog/*`, mas o JSON estático não passa por ele. Sem esta rota, um
+ * título ocultado no painel continuaria aparecendo no site até o próximo build.
+ *
+ * Com ela, `src/lib/catalog.ts` baixa a lista e filtra no cliente: ocultar no
+ * painel vale no site na hora, sem rebuild e sem reinstalar app.
+ *
+ * Resposta: { filmes: [ids], series: [ids], total }
+ */
+router.get('/hidden', async (_req, res, next) => {
+  try {
+    const overrides = await readOverrides()
+    const filmes = []
+    const series = []
+    for (const entry of overrides.hidden ?? []) {
+      const id = Number(entry.tmdb_id)
+      if (!Number.isFinite(id)) continue
+      // `type: null` = entrada antiga sem tipo: esconde nos dois catálogos.
+      if (entry.type === 'movie' || entry.type === null) filmes.push(id)
+      if (entry.type === 'tv' || entry.type === null) series.push(id)
+    }
+    res.set('Cache-Control', 'no-cache')
+    res.json({ filmes, series, total: (overrides.hidden ?? []).length })
+  } catch (e) {
+    next(e)
+  }
+})
+
 router.get('/availability', async (_req, res, next) => {
   try {
     const stats = await availabilityStats()
-    const [movies, series] = await Promise.all([loadStatic('movie'), loadStatic('tv')])
+    const overrides = await readOverrides()
+    // `loadStatic` já remove o que o provedor não serve; aqui removemos também
+    // o que o dono ocultou no painel. É esta lista que o app de TV e o app de
+    // celular usam para esconder Histórico e Favoritos — sem apagar nada do
+    // banco, só deixando de exibir o card.
+    const [movies, series] = await Promise.all([
+      loadStatic('movie').then((l) => applyOverrides(l, overrides, 'movie')),
+      loadStatic('tv').then((l) => applyOverrides(l, overrides, 'series')),
+    ])
     res.set('Cache-Control', 'public, max-age=300')
     res.json({
       ativo: stats.active,

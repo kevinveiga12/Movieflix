@@ -130,6 +130,37 @@ function normalizeRecord(t) {
 }
 
 /**
+ * Catálogo BRUTO — sem o filtro de disponibilidade.
+ *
+ * Existe para o painel administrativo: quando o dono procura um título para
+ * ocultar, ele precisa encontrar TAMBÉM os que já estão fora da listagem
+ * pública (senão não consegue reexibir nem corrigir um oculto por engano).
+ *
+ * É o MESMO array já parseado (`cache`), só que sem o filtro — não há segundo
+ * parse, então não custa memória. NUNCA mutar o retorno.
+ */
+export async function loadRaw(kind) {
+  if (cache[kind]) return cache[kind]
+  if (inflight[kind]) return inflight[kind]
+
+  inflight[kind] = (async () => {
+    try {
+      const raw = await fs.readFile(path.join(PUBLIC, FILES[kind]), 'utf8')
+      const list = JSON.parse(raw)
+      cache[kind] = Array.isArray(list) ? list.map(normalizeRecord) : []
+      return cache[kind]
+    } catch {
+      cache[kind] = []
+      return []
+    } finally {
+      inflight[kind] = null
+    }
+  })()
+
+  return inflight[kind]
+}
+
+/**
  * Devolve a lista (já parseada) de filmes ou séries.
  * O array é compartilhado — NUNCA o mutar; use filter/map/slice.
  */
