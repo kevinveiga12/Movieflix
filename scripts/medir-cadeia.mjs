@@ -110,7 +110,9 @@ async function testTitle({ tmdbId, season, episode }) {
   if (!chain.length) return { stage: 0, reason: 'no_source', providers: [] }
   const providers = chain.map((s) => s.provider)
   const v = await validateSource(chain[0])
-  return { ...v, providers }
+  // `validateSource` devolve o provider da FONTE; o fallback cobre o caso em
+  // que ele não veio (fonte sem `provider`), para não contar como "desconhecido".
+  return { ...v, provider: v.provider || providers[0], providers }
 }
 
 function spread(arr, n) {
