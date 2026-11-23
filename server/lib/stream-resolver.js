@@ -67,6 +67,26 @@ const STREAM_HOSTS = [
   /(^|\.)abyssplayer\.com$/i,
   /(^|\.)myembed\.biz$/i,
   /(^|\.)playerflix\.ink$/i,
+  /**
+   * CDNs do `embedplayer2.xyz` (medidos em 2026-11-23, amostra de 5 títulos).
+   *
+   * O `embedplayer` era tratado como "embed com anúncio" e ficava desligado.
+   * Mas o anúncio mora no IFRAME dele, não no CDN do vídeo: o endpoint
+   * `POST /player/index.php?data={hash}&do=getVideo` devolve o `securedLink`
+   * do HLS, e esse m3u8 toca no NOSSO <video> sem carregar nada do iframe.
+   *
+   * Os hosts giram por família (`eloialu6`…`eloialu10`), então a regra é por
+   * sufixo de domínio, não por host exato. Todos são servidores de vídeo do
+   * mesmo provedor — nenhum é host interno, então o allowlist continua fechado
+   * contra SSRF.
+   */
+  /(^|\.)cincloud\d*\.xyz$/i,
+  /(^|\.)playcine\d*\.xyz$/i,
+  /(^|\.)playclou\d*s?\.xyz$/i,
+  /(^|\.)vipcine\d*\.xyz$/i,
+  /(^|\.)playersl\.xyz$/i,
+  /(^|\.)eloialu\d*\.xyz$/i,
+  /(^|\.)embedplayer2\.xyz$/i,
 ]
 
 /** O stream só é servido para estes Referers (os do próprio provedor). */
@@ -75,6 +95,8 @@ const STREAM_REFERERS = [
   'https://v1.watchplay.shop/',
   'https://playerflix.ink/',
   'https://myembed.biz/',
+  // CDNs do embedplayer: o Referer que eles aceitam é o do próprio player.
+  'https://embedplayer2.xyz/',
 ]
 
 export function isAllowedStreamHost(url) {
@@ -438,6 +460,95 @@ export async function resolveDirectStreamDetailed({ tmdbId, season = null, episo
 export async function resolveDirectStream({ tmdbId, season = null, episode = null }) {
   const { stream } = await resolveDirectStreamDetailed({ tmdbId, season, episode })
   return stream
+}
+
+/**
+ * TERCEIRA CAMADA — HLS DIRETO DO `embedplayer`, SEM O IFRAME DELE.
+ *
+ * ── O QUE MUDOU DE ENTENDIMENTO ─────────────────────────────────────────────
+ *
+ * O `embedplayer2.xyz` estava classificado como "embed com anúncio" e ficava
+ * desligado atrás de `ALLOW_AD_EMBEDS`. Isso estava certo sobre o IFRAME e
+ * errado sobre a FONTE.
+ *
+ * Medido em 2026-11-23: o player dele expõe o HLS cru por um endpoint próprio:
+ *
+ *     POST /player/index.php?data={hash}&do=getVideo
+ *     body: hash={hash}&r={referer}
+ *     → { hls: true, securedLink: "https://.../master.m3u8?md5=...&expires=..." }
+ *
+ * O `master.m3u8` responde `#EXTM3U`, a variante responde `#EXTM3U` e o
+ * primeiro segmento vem com magic bytes de vídeo (MPEG-TS `0x47` ou fMP4
+ * `styp`). Ou seja: é vídeo de verdade, servido por CDN.
+ *
+ * Os trackers (`tracker.Royale.com`, `tracker.advertising.com`) e o
+ * `poplimit:false` estão no HTML do IFRAME — não no CDN. Tocando o m3u8 no
+ * NOSSO `<video>`, nada daquele HTML é carregado: sem anúncio, sem pop-up,
+ * sem aba nova. É a mesma lógica que já usamos com o `watchplay`.
+ *
+ * ── COBERTURA MEDIDA (amostra distribuída, 2026-11-23) ──────────────────────
+ *
+ *   filmes: 6/20 = 30%   (9 não têm embedplayer, 4 com master 404)
+ *   séries: 3/12 = 25%   (era 0% — o watchplay não tem essas séries)
+ *
+ * É a maior fonte nova de séries que já medimos. Por isso entra na cadeia
+ * ANTES do embed de terceiro, e DEPOIS do watchplay (que é mais estável).
+ *
+ * ── O QUE ESTA FUNÇÃO NÃO FAZ ───────────────────────────────────────────────
+ *
+ * Não carrega o iframe, não executa o JS dele, não segue `downloadLinks`.
+ * Só faz o POST do `getVideo` e devolve a URL do m3u8. Se o provedor mudar o
+ * endpoint, isto devolve `null` e a cadeia segue para o próximo candidato.
+ */
+const EMBEDPLAYER_ORIGIN = 'https://embedplayer2.xyz'
+
+/** Cache curto do hash → m3u8. O link carrega `expires`, então é curto. */
+const embedPlayerCache = new Map()
+const EP_TTL_MS = 6 * 60_000
+
+/**
+ * Resolve o HLS do `embedplayer` a partir do hash do vídeo.
+ *
+ * Devolve `{ url, referer, label }` ou `null`. Nunca lança.
+ */
+export async function resolveEmbedPlayerStream({ hash, timeoutMs = 9000 }) {
+  const h = String(hash ?? '').trim()
+  if (!/^[a-f0-9]{16,64}$/i.test(h)) return null
+
+  const hit = embedPlayerCache.get(h)
+  if (hit && Date.now() - hit.at < EP_TTL_MS) return hit.value
+
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${EMBEDPLAYER_ORIGIN}/player/index.php?data=${h}&do=getVideo`, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent': UA,
+        Referer: `${EMBEDPLAYER_ORIGIN}/video/${h}`,
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: `hash=${h}&r=${encodeURIComponent(PLAYERFLIX_REFERER)}`,
+    })
+    if (!res.ok) return null
+
+    const json = await res.json().catch(() => null)
+    const link = typeof json?.securedLink === 'string' ? json.securedLink : null
+    if (!link || !/^https:\/\//.test(link)) return null
+    if (!isAllowedStreamHost(link)) return null
+
+    const value = { url: link, referer: `${EMBEDPLAYER_ORIGIN}/`, label: 'Servidor alternativo' }
+    if (embedPlayerCache.size > 200) embedPlayerCache.clear()
+    embedPlayerCache.set(h, { at: Date.now(), value })
+    return value
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**

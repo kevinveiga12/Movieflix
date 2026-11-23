@@ -49,7 +49,7 @@
  * global, então uma falha do Ajax desligava também o caminho que funcionava.
  */
 
-import { resolveDirectStreamDetailed, resolveCleanEmbed, fetchOptions } from './stream-resolver.js'
+import { resolveDirectStreamDetailed, resolveCleanEmbed, resolveEmbedPlayerStream, fetchOptions } from './stream-resolver.js'
 
 /**
  * Provedores que podem abrir anúncio.
@@ -215,7 +215,43 @@ export async function resolvePlaybackChain({ tmdbId, season = null, episode = nu
     }
   }
 
-  // ── 3) Embeds de terceiro (com anúncio) — só se autorizado ────────────────
+  // ── 3) HLS DIRETO do embedplayer (sem o iframe dele) ───────────────────────
+  //
+  // O `embedplayer2.xyz` era tratado como "embed com anúncio". O anúncio está
+  // no IFRAME; o CDN do vídeo é limpo. O endpoint `getVideo` devolve o
+  // `securedLink` do m3u8, e esse m3u8 toca no NOSSO <video> — nada do HTML
+  // do iframe (trackers, poplimit) é carregado.
+  //
+  // Medido: 30% dos filmes e 25% das séries (que estavam em 0%). Entra DEPOIS
+  // do watchplay (mais estável) e ANTES dos embeds de terceiro.
+  if (!sources.length && !isOpen('embedplayer')) {
+    const opts = await fetchOptions({ tmdbId: id, season, episode }).catch(() => [])
+    const ep = opts.find((o) => o.id === 'embedplayer' && o.budget !== 'danger')
+    if (ep) {
+      const hash = ep.embed_id || String(ep.embed || '').split('/').pop()
+      const stream = await resolveEmbedPlayerStream({ hash }).catch(() => null)
+      if (stream) {
+        record('embedplayer', true)
+        tried.push({ provider: 'embedplayer', result: 'hls' })
+        sources.push({
+          id: 'embedplayer-hls',
+          label: stream.label || 'Servidor alternativo',
+          url: `/api/stream.m3u8?u=${encodeURIComponent(stream.url)}&r=${encodeURIComponent(stream.referer)}`,
+          mode: 'direct',
+          verified: true,
+          provider: 'embedplayer',
+        })
+      } else {
+        // Só penaliza quando o host respondeu mal de verdade. Um hash sem
+        // m3u8 é falha do TÍTULO — mesma lição do bug de 2026-11-23.
+        tried.push({ provider: 'embedplayer', result: 'no_hls' })
+      }
+    } else {
+      tried.push({ provider: 'embedplayer', result: 'not_listed' })
+    }
+  }
+
+  // ── 4) Embeds de terceiro (com anúncio) — só se autorizado ────────────────
   //
   // Medido: `embedplay` (embedplayabyss.top) carrega `sn.bataraanimals.com` e
   // `mz.sinonneurism.com`; `embedplayer` (embedplayer2.xyz) carrega
