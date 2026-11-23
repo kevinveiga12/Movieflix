@@ -133,37 +133,52 @@ export function invalidateHiddenCache(): void {
 async function loadAvailability(): Promise<Availability> {
   if (availability) return availability
   /*
-    `fontes-limpas.json` primeiro: é o critério que só aceita fonte
-    `watchplay` (HLS limpo, sem anúncio). O arquivo antigo
-    (`megaembed-disponibilidade.json`) aceitava qualquer opção com budget
-    success — inclusive `embedplayer`, o iframe que abre pop-up. Ele fica como
-    reserva para o caso de o novo não existir.
+    LISTA = `megaembed-disponibilidade.json` (12.672 filmes / 1.965 séries).
+
+    É o catálogo que o cliente já conhece. O `fontes-limpas.json` é mais
+    restrito (7.307 filmes / 171 séries) e usá-lo aqui derrubaria 42% dos
+    filmes e 91% das séries — regressão que ninguém pediu.
+
+    A eliminação do anúncio não depende deste arquivo: ela acontece no
+    servidor (`server/routes/access.js`), que só aceita o embed quando ele é
+    `watchplay` e descarta o `embedplayer` (o iframe com pop-up).
   */
-  for (const file of ['fontes-limpas.json', 'megaembed-disponibilidade.json']) {
-    try {
-      const res = await fetch(`/filmes/${file}`)
-      if (!res.ok) continue
-      const data = (await res.json()) as {
-        filmes?: number[]
-        series?: number[]
-        episodios?: Record<string, string[]>
-      }
-      const movies = new Set((data.filmes ?? []).map(String))
-      const series = new Set((data.series ?? []).map(String))
-      if (!movies.size && !series.size) continue
-      availability = {
-        movies,
-        series,
-        active: true,
-        episodes: data.episodios ?? {},
-      }
-      return availability
-    } catch {
-      /* tenta o próximo */
-    }
+  try {
+    const res = await fetch('/filmes/megaembed-disponibilidade.json')
+    if (!res.ok) throw new Error(String(res.status))
+    const data = (await res.json()) as { filmes?: number[]; series?: number[] }
+    const movies = new Set((data.filmes ?? []).map(String))
+    const series = new Set((data.series ?? []).map(String))
+    availability = { movies, series, active: movies.size > 0 || series.size > 0, episodes: {} }
+  } catch {
+    availability = { movies: new Set(), series: new Set(), active: false, episodes: {} }
   }
-  availability = { movies: new Set(), series: new Set(), active: false, episodes: {} }
   return availability
+}
+
+/**
+ * Episódios com fonte limpa, por série — sinal ADICIONAL.
+ *
+ * `fontes-limpas.json` traz `{ "5920": ["1/1","1/2"] }`: os episódios cuja
+ * fonte `watchplay` foi medida. Serve para NÃO oferecer um episódio que só
+ * existe no `embedplayer` (o iframe com anúncio).
+ *
+ * Só restringe as séries que aparecem no arquivo. Série ausente fica com a
+ * lista original — o servidor decide na hora, episódio a episódio.
+ */
+let cleanEpisodes: Record<string, string[]> | null = null
+
+async function loadCleanEpisodes(): Promise<Record<string, string[]>> {
+  if (cleanEpisodes) return cleanEpisodes
+  try {
+    const res = await fetch('/filmes/fontes-limpas.json')
+    if (!res.ok) throw new Error(String(res.status))
+    const data = (await res.json()) as { episodios?: Record<string, string[]> }
+    cleanEpisodes = data.episodios ?? {}
+  } catch {
+    cleanEpisodes = {}
+  }
+  return cleanEpisodes
 }
 
 async function loadJson<T>(path: string): Promise<T> {
@@ -215,11 +230,12 @@ export async function loadCatalog(): Promise<void> {
   if (moviesCache && seriesCache) return
   if (loading) return loading
   loading = (async () => {
-    const [movies, series, avail, hidden] = await Promise.all([
+    const [movies, series, avail, hidden, clean] = await Promise.all([
       loadJson<Title[]>('/filmes/filmes.light.json'),
       loadJson<Title[]>('/filmes/series.light.json'),
       loadAvailability(),
       loadHidden(),
+      loadCleanEpisodes(),
     ])
     const keep = (list: Title[], allowed: Set<string>, blocked: Set<string>) => {
       let out = avail.active ? list.filter((t) => allowed.has(String(t.tmdb_id))) : list
@@ -236,21 +252,16 @@ export async function loadCatalog(): Promise<void> {
       isto, o cliente abriria o E1 de uma série cujo E1 só existe no
       `embedplayer` (o iframe com anúncio) — exatamente o problema relatado.
 
-      `episodes_available` passa a listar SÓ os episódios com fonte limpa. Se a
-      série não tem nenhum, ela sai da listagem: melhor não oferecer do que
-      oferecer um player que abre propaganda.
-
-      Quando `avail.episodes` está vazio (arquivo antigo), nada é filtrado —
-      o player consulta o provedor na hora e decide.
+      Só restringe as séries presentes em `fontes-limpas.json`. Série ausente
+      mantém a lista original: o servidor decide na hora, episódio a episódio,
+      e um episódio sem fonte limpa diz "não está rodando" em vez de abrir
+      propaganda.
     */
-    if (Object.keys(avail.episodes).length) {
-      const filtered: Title[] = []
-      for (const t of seriesCache) {
-        const clean = avail.episodes[String(t.tmdb_id)]
-        if (!clean || !clean.length) continue
-        filtered.push({ ...t, episodes_available: clean })
-      }
-      seriesCache = filtered
+    if (Object.keys(clean).length) {
+      seriesCache = seriesCache.map((t) => {
+        const ok = clean[String(t.tmdb_id)]
+        return ok && ok.length ? { ...t, episodes_available: ok } : t
+      })
     }
   })()
   try {

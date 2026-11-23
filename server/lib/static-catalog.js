@@ -54,14 +54,30 @@ let availability = null
 /**
  * Arquivo de disponibilidade, em ordem de preferência.
  *
- * `fontes-limpas.json` é o critério NOVO e correto: só entra o título que tem
- * fonte `watchplay` (HLS limpo, sem anúncio). `megaembed-disponibilidade.json`
- * é o critério antigo ("tem qualquer opção com budget success"), que deixava
- * passar títulos cujo único caminho era o `embedplayer` — o iframe com
- * anúncio. Mantemos o antigo como reserva para o caso de o novo não existir
- * (deploy sem a validação rodada), mas o novo manda quando está presente.
+ * ══════════════════════════════════════════════════════════════════════════════
+ * POR QUE O ARQUIVO ANTIGO VEM PRIMEIRO
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * `megaembed-disponibilidade.json` lista 12.672 filmes e 1.965 séries — o
+ * catálogo que o cliente já conhece.
+ *
+ * `fontes-limpas.json` é mais restrito: só entra o título com fonte `watchplay`
+ * medida. Medido em 2026-11-23: 7.307 filmes e 171 séries. Usá-lo como filtro
+ * de LISTAGEM derrubaria 42% dos filmes e 91% das séries — uma regressão que o
+ * proprietário não pediu.
+ *
+ * A eliminação do anúncio NÃO depende deste arquivo: ela acontece no runtime,
+ * em `server/routes/access.js`, que só aceita o embed quando ele é `watchplay`
+ * e descarta o `embedplayer` (o iframe com pop-up). Um título cujo único
+ * caminho é o embedplayer aparece na lista e, ao abrir, diz "não está rodando"
+ * — em vez de abrir propaganda.
+ *
+ * O `fontes-limpas.json` fica como sinal ADICIONAL: quando presente, seus
+ * episódios validados restringem a lista de episódios de cada série (o que
+ * evita oferecer um episódio que só existe no embedplayer). Ele não remove
+ * títulos da listagem.
  */
-const AVAILABILITY_FILES = ['fontes-limpas.json', 'megaembed-disponibilidade.json']
+const AVAILABILITY_FILES = ['megaembed-disponibilidade.json', 'fontes-limpas.json']
 
 async function loadAvailability() {
   if (availability) return availability
