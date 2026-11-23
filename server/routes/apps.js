@@ -37,19 +37,28 @@ export const PRIVATE_APPS_DIR = path.join(ROOT, 'storage', 'apps')
  *
  * O pool de armazenamento da Velixir está cheio: um pacote com os 10,8 MB do
  * APK da TV não passa (o de 13 MB passou, o de 23 MB falhou). Então o APK sai
- * do tarball e é servido pelo CDN de artefatos — a rota continua sendo
- * `/api/apps/tv/download`, que agora REDIRECIONA para lá quando o arquivo não
- * está no disco do servidor.
+ * do tarball e é servido de fora — a rota continua sendo
+ * `/api/apps/tv/download`, que REDIRECIONA quando o arquivo não está no disco.
+ *
+ * ── POR QUE O GITHUB E NÃO O CDN DE ARTEFATOS ──────────────────────────────
+ *
+ * O CDN de artefatos (`static.teamily.ai`) exige token de acesso: um navegador
+ * sem sessão recebe 403. Testado — o redirect para lá devolvia 403 ao cliente.
+ *
+ * O repositório é PÚBLICO e o workflow de build commita o APK em
+ * `storage/apps/movieflix-tv.apk` a cada build. O `raw.githubusercontent.com`
+ * entrega esse arquivo sem autenticação (verificado: 200, 10.873.657 bytes).
+ * É a única das duas opções que funciona no navegador de quem baixa.
  *
  * Ordem: disco local primeiro (um deploy com o APK incluído continua ganhando),
- * CDN como reserva. Nenhum dos dois existe → 404 honesto.
+ * GitHub como reserva. Nenhum dos dois existe → 404 honesto.
  */
 const TV_APK_CDN =
-  'https://static.teamily.ai/sites/c9d0e079-23bd-4930-8d8f-d03b2d44e0df/documents/movieflix-tv/movieflix-tv.apk'
+  'https://raw.githubusercontent.com/kevinveiga12/Movieflix/main/storage/apps/movieflix-tv.apk'
 
 /** APK do Android hospedado fora do pacote (mesmo motivo). */
 const ANDROID_APK_CDN =
-  'https://static.teamily.ai/sites/c9d0e079-23bd-4930-8d8f-d03b2d44e0df/documents/movieflix-android/movieflix-android.apk'
+  'https://raw.githubusercontent.com/kevinveiga12/Movieflix/main/public/apk/movieflix-android.apk'
 
 /** Descrição pública dos apps (sem caminho de arquivo privado). */
 const ANDROID_APK = path.join(ROOT, 'public', 'apk', 'movieflix-android.apk')
