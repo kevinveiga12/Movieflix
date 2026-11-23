@@ -105,6 +105,14 @@ export function PlayerPage() {
 
   const [ready, setReady] = useState(false)
   const [sources, setSources] = useState<SourceOption[]>([])
+  /**
+   * Qual item da cadeia está tocando agora.
+   *
+   * O servidor devolve uma CADEIA ordenada (`sources`). Começamos no 0 e só
+   * avançamos quando a reprodução falha DE VERDADE — nunca por pausa, buffering
+   * normal ou troca de episódio. Ver `advanceSource`.
+   */
+  const [sourceIndex, setSourceIndex] = useState(0)
   const [notFound, setNotFound] = useState(false)
   const [auth, setAuth] = useState<PlaybackAuth | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
@@ -209,6 +217,7 @@ export function PlayerPage() {
     setAuthChecking(true)
     setAuth(null)
     setSources([])
+    setSourceIndex(0)
     setError(null)
     setNotFound(false)
     setStalled(false)
@@ -256,8 +265,36 @@ export function PlayerPage() {
     }
   }, [ready, id, type, season, episode, authAttempt, user])
 
-  const source = sources[0] ?? null
+  const source = sources[sourceIndex] ?? null
   const isEmbed = source?.mode === 'embed'
+
+  /**
+   * Troca para a próxima fonte da cadeia — SÓ em falha real.
+   *
+   * Chamado por: `onError` do <video> (manifesto inválido, 404, codec), rejeição
+   * de `play()`, e o vigia de tempo do iframe. NÃO é chamado por pausa, por
+   * `waiting` (buffering normal) nem por troca de episódio.
+   *
+   * Se não houver próxima, mostra o aviso honesto — nunca inventa uma fonte.
+   */
+  function advanceSource(reason: string) {
+    setSourceIndex((i) => {
+      const nextIndex = i + 1
+      if (nextIndex < sources.length) {
+        // Há alternativa: remonta o player na próxima fonte, sem alarde.
+        setFrameLoaded(false)
+        setLoading(true)
+        setError(null)
+        setStalled(false)
+        return nextIndex
+      }
+      // Fim da cadeia: é aqui que dizemos a verdade ao cliente.
+      setLoading(false)
+      setStalled(true)
+      if (import.meta.env.DEV) console.warn('[player] cadeia esgotada:', reason)
+      return i
+    })
+  }
 
   // ── <video> nativo (modo direto) ─────────────────────────────────────────
   useEffect(() => {
@@ -533,8 +570,9 @@ export function PlayerPage() {
     if (!isEmbed || !source) return
     const timer = setTimeout(() => {
       if (frameLoaded) return
-      setStalled(true)
-      setLoading(false)
+      // O iframe não carregou no prazo: é falha real, então tenta a próxima
+      // fonte da cadeia. Se não houver, `advanceSource` mostra o aviso.
+      advanceSource('embed_timeout')
     }, SERVER_TIMEOUT_MS)
     return () => clearTimeout(timer)
   }, [isEmbed, source, frameLoaded])
@@ -605,7 +643,11 @@ export function PlayerPage() {
       try {
         await v.play()
       } catch {
-        setError('O navegador bloqueou a reprodução automática. Toque em play.')
+        // Rejeição de play() pode ser bloqueio de autoplay (não é falha de
+        // fonte) ou mídia quebrada. Só trocamos de fonte se o elemento já
+        // reportou erro; caso contrário pedimos o toque, como antes.
+        if (v.error) advanceSource('play_rejected')
+        else setError('O navegador bloqueou a reprodução automática. Toque em play.')
       }
     } else {
       v.pause()
@@ -734,8 +776,9 @@ export function PlayerPage() {
               }
             }}
             onError={() => {
-              setError('Não foi possível reproduzir este vídeo.')
-              setLoading(false)
+              // Falha real de mídia (manifesto inválido, 404, codec): tenta a
+              // próxima fonte da cadeia antes de mostrar erro ao cliente.
+              advanceSource('video_error')
             }}
           />
         )}
@@ -808,6 +851,8 @@ export function PlayerPage() {
                   onClick={() => {
                     setStalled(false)
                     setFrameLoaded(false)
+                    // Recomeça a cadeia do topo: a falha pode ter sido passageira.
+                    setSourceIndex(0)
                     setUiPoke((n) => n + 1)
                   }}
                 >

@@ -20,7 +20,7 @@ import {
   megaembedEmbedUrl,
   MEGAEMBED_ONLY,
 } from '../lib/megaembed.js'
-import { resolveDirectStream, resolveCleanEmbed } from '../lib/stream-resolver.js'
+import { resolvePlaybackChain, recentPlaybackDecisions, breakerStatus } from '../lib/playback-chain.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -162,81 +162,40 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
     } else {
       /**
        * ══════════════════════════════════════════════════════════════════════
-       * CADEIA DE REPRODUÇÃO (corrigida em 2026-11-23, com medição)
+       * CADEIA MULTIPROVEDOR — a decisão vive em `lib/playback-chain.js`
        * ══════════════════════════════════════════════════════════════════════
        *
-       * O QUE ESTAVA ERRADO
-       * ──────────────────────────────────────────────────────────────────────
-       * Este ramo apontava TODO título para `https://mgeb.space/embed/{id}`.
-       * Medido neste ambiente e no de build: TODOS os domínios do MegaEmbed
-       * respondem 403 `cf-mitigated: challenge` (Cloudflare Turnstile), com
-       * curl E com Chromium completo em Xvfb. O desafio nunca passa de
-       * datacenter. O cliente abria o filme e via a tela do próprio provedor:
+       * Antes esta rota montava a lista à mão: tentava o HLS direto, depois UM
+       * embed, e se nada desse mandava o MegaEmbed. O cliente recebia uma lista
+       * de um item só — se aquela fonte falhasse no aparelho dele, não havia
+       * para onde ir, e ele via a tela "Nenhuma fonte de reprodução funcional
+       * disponível" (que é do MegaEmbed, não nossa).
        *
-       *     "Ops, ocorreu um problema
-       *      Todas as fontes falharam. Nenhuma opção disponível."
+       * Agora a lista é uma CADEIA ORDENADA de candidatos independentes, com
+       * disjuntor POR PROVEDOR (uma falha do Ajax do `playerflix.ink` não
+       * desliga mais o `watchplay`, que é o caminho que funciona) e histórico
+       * técnico de cada decisão para o painel.
        *
-       * É exatamente o print enviado pelo proprietário — e explica por que
-       * TODO título parecia quebrado, inclusive os Bad Boys.
-       *
-       * A ORDEM AGORA
-       * ──────────────────────────────────────────────────────────────────────
-       * 1) `resolveDirectStream` → HLS do `watchplay`, tocado num <video> nosso,
-       *    atrás do proxy `/api/stream.m3u8` (resolve CORS e Referer). É o
-       *    melhor caso: sem UI de provedor, retomada exata, tela cheia real.
-       * 2) `resolveCleanEmbed` → embed direto do `embedplay`/`embedplayer`,
-       *    sem a camada do `playerflix.ink` (que desenha a barra de cima).
-       * 3) MegaEmbed → só se as duas acima não derem nada. Mantido para que
-       *    um rollback seja uma variável (`PLAYER_CHAIN=megaembed`), não um
-       *    revert de commit.
-       *
-       * Ambas as escolhas respeitam `budget`: o provedor marca cada fonte com
-       * `success` (tem vídeo) ou `danger` (só o plano pago). `danger` nunca é
-       * oferecido — antes ele era tentado como se fosse fonte, e o cliente
-       * caía justamente na tela de erro.
+       * A ordem e o porquê de cada posição estão documentados no módulo. Em
+       * resumo: HLS direto do watchplay primeiro (player nosso, sem anúncio),
+       * embed do mesmo player depois, e os embeds de terceiro (que abrem
+       * pop-up) só entram se `ALLOW_AD_EMBEDS=1`.
        */
       const s = title.type === 'tv' || season != null ? season : null
       const e = title.type === 'tv' || season != null ? episode : null
 
-      sources = []
-
-      if (MEGAEMBED_ONLY === false) {
-        // (1) HLS direto — o caminho que reproduz de verdade, SEM anúncio.
-        //     Vale igual para filme e para episódio: o resolvedor recebe
-        //     season/episode e monta a URL do episódio sozinho.
-        const direct = await resolveDirectStream({ tmdbId, season: s, episode: e }).catch(() => null)
-        if (direct) {
-          const proxied = `/api/stream.m3u8?u=${encodeURIComponent(direct.url)}&r=${encodeURIComponent(direct.referer)}`
-          sources.push({ id: 'direct', label: direct.label, url: proxied, mode: 'direct', verified: true })
-        }
-
-        /**
-         * (2) Embed limpo — SÓ quando ele é o player de verdade.
-         *
-         * `resolveCleanEmbed` devolve `embedplay`/`embedplayer`/`watchplay`.
-         * Medido em 2026-11-23: `embedplayer` aponta para
-         * `embedplayer2.xyz`, cujo HTML é ofuscado com packer e carrega
-         * trackers de anúncio (`tracker.Royale.com`,
-         * `tracker.advertising.com`) com `poplimit:false` — é exatamente a
-         * origem do pop-up que o cliente vê ao tocar no player da série.
-         *
-         * Por isso o embed só entra quando NÃO existe HLS direto E o id é
-         * `watchplay` (o mesmo player, em modo iframe). `embedplayer` fica de
-         * fora: preferimos dizer "não está rodando" a abrir propaganda.
-         */
-        if (!sources.length) {
-          const clean = await resolveCleanEmbed({ tmdbId, season: s, episode: e }).catch(() => null)
-          if (clean && clean.id === 'watchplay' && !sources.some((x) => x.url === clean.url)) {
-            sources.push({ id: 'clean', label: clean.label, url: clean.url, mode: 'embed', verified: true })
-          }
-        }
-      }
+      sources = MEGAEMBED_ONLY === false
+        ? await resolvePlaybackChain({ tmdbId, season: s, episode: e })
+        : []
 
       /**
-       * (3) Último recurso. Só entra quando não há fonte nenhuma acima — e é
-       * o único caso em que o cliente pode ver a tela de erro do provedor.
-       * Como o catálogo já é servido filtrado pelos títulos verificados, um
-       * título que chega aqui é exceção, não a regra.
+       * Último recurso: só quando a cadeia não devolveu NADA.
+       *
+       * O MegaEmbed responde 403 `cf-mitigated: challenge` (Cloudflare
+       * Turnstile) de datacenter — medido com curl e com Chromium em Xvfb. Ou
+       * seja, este caminho quase sempre termina na tela de erro do próprio
+       * provedor. Ele fica aqui apenas para que um rollback seja uma variável
+       * (`PLAYER_CHAIN=megaembed`), não um revert de commit.
        */
       if (!sources.length) {
         sources = [
@@ -890,6 +849,41 @@ router.post('/auth/activate-all', strict, async (req, res, next) => {
     await ensureProfile(resolved.user)
 
     res.json({ ok: true, ...result })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * GET /api/playback/diagnostics — por que um título não abriu.
+ *
+ * Só o administrador. Devolve as últimas decisões da cadeia multiprovedor
+ * (qual provedor foi tentado, o que respondeu) e o estado dos disjuntores.
+ *
+ * Existe porque "não está rodando" não é diagnóstico: sem isto, descobrir que
+ * o Ajax do `playerflix.ink` estava bloqueado exigiu medir de dentro do pod.
+ * Com isto, o painel responde na hora.
+ *
+ * Não expõe token, e-mail de cliente nem URL de stream — só id de título,
+ * provedor e resultado.
+ */
+router.get('/playback/diagnostics', strict, async (req, res, next) => {
+  try {
+    const token = bearer(req)
+    if (!token) return res.status(401).json({ error: 'Token ausente.' })
+    const resolved = await resolveUser(token)
+    if (resolved.error) return res.status(401).json({ error: resolved.error })
+
+    const email = String(resolved.user.email ?? '').toLowerCase()
+    if (!adminEmails().includes(email)) {
+      return res.status(403).json({ error: 'Apenas o administrador pode ver o diagnóstico.' })
+    }
+
+    res.json({
+      breakers: breakerStatus(),
+      decisions: recentPlaybackDecisions().slice(0, 60),
+      adEmbedsEnabled: process.env.ALLOW_AD_EMBEDS === '1',
+    })
   } catch (e) {
     next(e)
   }

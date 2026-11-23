@@ -130,6 +130,12 @@ data class PlaybackResponse(
     val reason: String? = null,
     val message: String? = null,
     val source: PlaybackSource? = null,
+    /**
+     * Cadeia multiprovedor: o servidor devolve TODAS as fontes em ordem de
+     * preferência. O app começa na primeira e, em falha real (erro de rede,
+     * página que não carrega, sem <video>), avança para a próxima.
+     */
+    val sources: List<PlaybackSource> = emptyList(),
 )
 
 @Serializable

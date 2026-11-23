@@ -38,6 +38,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import run.velixir.movieflix.AppViewModel
+import run.velixir.movieflix.data.PlaybackSource
 import run.velixir.movieflix.data.Title
 import run.velixir.movieflix.ui.theme.MfColors
 
@@ -67,6 +68,12 @@ fun PlayerScreen(
     var mode by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
+    /**
+     * Cadeia multiprovedor devolvida pelo servidor, em ordem de preferência.
+     * Começamos no índice 0 e só avançamos em falha real — nunca por pausa.
+     */
+    var chain by remember { mutableStateOf<List<PlaybackSource>>(emptyList()) }
+    var chainIndex by remember { mutableStateOf(0) }
 
     /**
      * TELA CHEIA PELO NOSSO LADO — LIGADA AO ABRIR.
@@ -135,12 +142,40 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(title.tmdbId, season, episode) {
-        vm.authorize(title.tmdbId, season, episode) { u, m, msg ->
-            url = u
-            mode = m
-            message = msg
+        vm.authorize(title.tmdbId, season, episode) { sources, msg ->
+            if (sources.isEmpty()) {
+                url = null
+                mode = null
+                message = msg
+                loading = false
+                return@authorize
+            }
+            chain = sources
+            chainIndex = 0
+            url = sources[0].url
+            mode = sources[0].mode
+            message = null
             loading = false
         }
+    }
+
+    /**
+     * Avança para a próxima fonte da cadeia — SÓ em falha real.
+     *
+     * Chamado pelo erro de carregamento do player. Se a cadeia acabar, mostra a
+     * mensagem honesta em vez de inventar uma fonte.
+     */
+    fun advanceSource() {
+        val next = chainIndex + 1
+        if (next < chain.size) {
+            chainIndex = next
+            url = chain[next].url
+            mode = chain[next].mode
+            return
+        }
+        url = null
+        mode = null
+        message = "Nenhuma fonte de reprodução está disponível agora. Tente novamente em instantes."
     }
 
     Box(
@@ -184,12 +219,14 @@ fun PlayerScreen(
                 season = season,
                 episode = episode,
                 vm = vm,
+                onSourceFailed = { advanceSource() },
             )
 
             url != null -> EmbedPlayer(
                 url = url!!,
                 immersive = immersive,
                 onToggleImmersive = { immersive = !immersive },
+                onSourceFailed = { advanceSource() },
             )
         }
 
@@ -218,6 +255,7 @@ private fun DirectPlayer(
     season: Int?,
     episode: Int?,
     vm: AppViewModel,
+    onSourceFailed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val player = remember {
@@ -226,6 +264,18 @@ private fun DirectPlayer(
             prepare()
             playWhenReady = true
         }
+    }
+
+    // Falha REAL de mídia (manifesto inválido, 404, codec): avança a cadeia.
+    // Buffering e pausa NÃO passam por aqui.
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                onSourceFailed()
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
     }
 
     DisposableEffect(Unit) {
@@ -298,6 +348,7 @@ internal fun EmbedPlayer(
     url: String,
     immersive: Boolean = false,
     onToggleImmersive: () -> Unit = {},
+    onSourceFailed: () -> Unit = {},
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -389,6 +440,26 @@ internal fun EmbedPlayer(
                             fullscreenCallback?.onCustomViewHidden()
                             fullscreenCallback = null
                             onToggleImmersive()
+                        }
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            ready = true
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            // Falha real no frame principal: avança a cadeia.
+                            if (request?.isForMainFrame == true) {
+                                failed = true
+                                onSourceFailed()
+                            }
                         }
                     }
 

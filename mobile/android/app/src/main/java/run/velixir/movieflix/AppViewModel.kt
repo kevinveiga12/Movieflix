@@ -13,6 +13,7 @@ import run.velixir.movieflix.data.FavoriteRow
 import run.velixir.movieflix.data.HistoryRow
 import run.velixir.movieflix.data.MovieFlixApi
 import run.velixir.movieflix.data.Plan
+import run.velixir.movieflix.data.PlaybackSource
 import run.velixir.movieflix.data.Season
 import run.velixir.movieflix.data.SessionStore
 import run.velixir.movieflix.data.SubscriptionResponse
@@ -296,22 +297,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         tmdbId: Long,
         season: Int?,
         episode: Int?,
-        onResult: (url: String?, mode: String?, message: String?) -> Unit,
+        onResult: (sources: List<PlaybackSource>, message: String?) -> Unit,
     ) {
         if (!session.isLoggedIn) {
-            onResult(null, null, "Crie sua conta ou entre para assistir.")
+            onResult(emptyList(), "Crie sua conta ou entre para assistir.")
             return
         }
         viewModelScope.launch {
             try {
                 val r = api.authorizePlayback(tmdbId, season, episode)
-                if (r.allowed && r.source != null) {
-                    onResult(r.source.url, r.source.mode, null)
+                if (r.allowed) {
+                    // Cadeia multiprovedor: começa na primeira fonte e avança em
+                    // falha real. `source` continua aceito para compatibilidade.
+                    val chain = r.sources.ifEmpty {
+                        r.source?.let { listOf(it) } ?: emptyList()
+                    }
+                    onResult(chain, null)
                 } else {
-                    onResult(null, null, r.message ?: "Não foi possível liberar este título.")
+                    onResult(emptyList(), r.message ?: "Não foi possível liberar este título.")
                 }
             } catch (e: Exception) {
-                onResult(null, null, friendly(e))
+                onResult(emptyList(), friendly(e))
             }
         }
     }

@@ -13,6 +13,7 @@ import run.velixir.movieflix.tv.data.FavoriteRow
 import run.velixir.movieflix.tv.data.HistoryRow
 import run.velixir.movieflix.tv.data.MovieFlixApi
 import run.velixir.movieflix.tv.data.Plan
+import run.velixir.movieflix.tv.data.PlaybackSource
 import run.velixir.movieflix.tv.data.Season
 import run.velixir.movieflix.tv.data.SessionStore
 import run.velixir.movieflix.tv.data.SubscriptionResponse
@@ -417,20 +418,28 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         tmdbId: Long,
         season: Int?,
         episode: Int?,
-        onResult: (String?, String?, String?, String?) -> Unit,
+        onResult: (List<PlaybackSource>, String?, String?) -> Unit,
     ) {
         if (!session.isLoggedIn) {
-            // Sem sessão: NÃO é erro de reprodução — é falta de login. O 4º
+            // Sem sessão: NÃO é erro de reprodução — é falta de login. O 3º
             // argumento ("unauthenticated") faz a tela mandar ao login em vez
             // de mostrar a mensagem com "Voltar".
-            onResult(null, null, "Entre na sua conta para assistir.", "unauthenticated")
+            onResult(emptyList(), "Entre na sua conta para assistir.", "unauthenticated")
             return
         }
         viewModelScope.launch {
             try {
                 val r = api.authorizePlayback(tmdbId, season, episode)
-                if (r.allowed && r.source != null) onResult(r.source.url, r.source.mode, null, null)
-                else onResult(null, null, r.message ?: "Não foi possível liberar este título.", r.reason)
+                if (r.allowed) {
+                    // Cadeia multiprovedor: o servidor devolve TODAS as fontes
+                    // em ordem. O app começa na primeira e avança em falha real.
+                    val chain = r.sources.ifEmpty {
+                        r.source?.let { listOf(it) } ?: emptyList()
+                    }
+                    onResult(chain, null, null)
+                } else {
+                    onResult(emptyList(), r.message ?: "Não foi possível liberar este título.", r.reason)
+                }
             } catch (e: Exception) {
                 /*
                   Token expirado/inválido: a sessão guardada no aparelho não vale
@@ -451,10 +460,10 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                     // 401 = sessão inválida: manda ao login, não mostra erro.
-                    onResult(null, null, friendly(e), "unauthenticated")
+                    onResult(emptyList(), friendly(e), "unauthenticated")
                     return@launch
                 }
-                onResult(null, null, friendly(e), null)
+                onResult(emptyList(), friendly(e), null)
             }
         }
     }

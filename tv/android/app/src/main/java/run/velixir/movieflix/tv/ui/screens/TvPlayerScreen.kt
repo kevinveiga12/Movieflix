@@ -61,6 +61,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import run.velixir.movieflix.tv.TvViewModel
+import run.velixir.movieflix.tv.data.PlaybackSource
 import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.player.HoldDetector
 import run.velixir.movieflix.tv.player.PlayPauseController
@@ -136,6 +137,15 @@ fun TvPlayerScreen(
     var mode by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
+    /**
+     * Cadeia multiprovedor devolvida pelo servidor, em ordem de preferência.
+     * Começamos no índice 0 e só avançamos em falha real (erro de rede, página
+     * que não carrega, sem <video> depois do prazo) — nunca por pausa.
+     */
+    var chain by remember { mutableStateOf<List<PlaybackSource>>(emptyList()) }
+    var chainIndex by remember { mutableStateOf(0) }
+    /** Chave que força o WebView a remontar quando trocamos de fonte. */
+    var sourceKey by remember { mutableStateOf(0) }
 
     /*
       Trava de segurança do login obrigatório.
@@ -156,7 +166,7 @@ fun TvPlayerScreen(
             loading = false
             return@LaunchedEffect
         }
-        vm.authorize(title.tmdbId, season, episode) { u, m, msg, reason ->
+        vm.authorize(title.tmdbId, season, episode) { sources, msg, reason ->
             /*
               Falta de login NÃO é erro de reprodução.
 
@@ -174,9 +184,18 @@ fun TvPlayerScreen(
                 onLoginRequired()
                 return@authorize
             }
-            url = u
-            mode = m
-            message = msg
+            if (sources.isEmpty()) {
+                url = null
+                mode = null
+                message = msg
+                loading = false
+                return@authorize
+            }
+            chain = sources
+            chainIndex = 0
+            url = sources[0].url
+            mode = sources[0].mode
+            message = null
             loading = false
         }
     }
@@ -186,6 +205,28 @@ fun TvPlayerScreen(
         // trocar para o login.
         Box(Modifier.fillMaxSize().background(Color.Black))
         return
+    }
+
+    /**
+     * Avança para a próxima fonte da cadeia — SÓ em falha real.
+     *
+     * Chamado por: `onReceivedError` do frame principal (rede/404) e pelo aviso
+     * "sem <video> depois do prazo". NÃO é chamado por pausa, buffering normal
+     * nem troca de episódio. Se a cadeia acabar, mostra o aviso honesto.
+     */
+    fun advanceSource() {
+        val next = chainIndex + 1
+        if (next < chain.size) {
+            chainIndex = next
+            url = chain[next].url
+            mode = chain[next].mode
+            sourceKey++
+            return
+        }
+        // Fim da cadeia: é aqui que dizemos a verdade ao cliente.
+        url = null
+        mode = null
+        message = "Nenhuma fonte de reprodução está disponível agora. Tente novamente em instantes."
     }
 
     Box(
@@ -1046,6 +1087,8 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     var reloadKey by remember { mutableStateOf(0) }
     /** Última chave de recarga já aplicada ao WebView. */
     var lastReloadKey by remember { mutableStateOf(0) }
+    /** Última URL já carregada — troca de fonte recarrega o WebView. */
+    var lastLoadedUrl by remember { mutableStateOf(url) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
     var legacyBridge by remember { mutableStateOf(false) }
 
@@ -1160,10 +1203,17 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     }
 
     // Aviso honesto só depois de 12 s sem <video> (não é controle, é erro).
-    LaunchedEffect(pageReady) {
+    // Se ainda houver fonte na cadeia, avança; senão, mostra o aviso.
+    LaunchedEffect(pageReady, sourceKey) {
         if (pageReady) {
             delay(12_000)
-            waitedLong = true
+            if (!hasVideo && !failed) {
+                if (chainIndex + 1 < chain.size) {
+                    advanceSource()
+                } else {
+                    waitedLong = true
+                }
+            }
         }
     }
 
@@ -1418,7 +1468,15 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                             error: android.webkit.WebResourceError?,
                         ) {
                             super.onReceivedError(view, request, error)
-                            if (request?.isForMainFrame == true) failed = true
+                            // Falha real no frame principal (rede, 404, DNS):
+                            // tenta a próxima fonte da cadeia antes de desistir.
+                            if (request?.isForMainFrame == true) {
+                                if (chainIndex + 1 < chain.size) {
+                                    advanceSource()
+                                } else {
+                                    failed = true
+                                }
+                            }
                         }
                     }
 
@@ -1454,8 +1512,9 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
               chave aplicada para não recarregar em toda recomposição.
             */
             update = { view ->
-                if (reloadKey != lastReloadKey) {
+                if (reloadKey != lastReloadKey || url != lastLoadedUrl) {
                     lastReloadKey = reloadKey
+                    lastLoadedUrl = url
                     view.loadUrl(url, mapOf("Referer" to SITE_ORIGIN))
                 }
             },
@@ -1528,6 +1587,11 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                         waitedLong = false
                         pageReady = false
                         hasVideo = false
+                        // Recomeça a cadeia do topo: a falha pode ter sido passageira.
+                        chainIndex = 0
+                        url = chain.firstOrNull()?.url
+                        mode = chain.firstOrNull()?.mode
+                        sourceKey++
                         reloadKey++
                     }
                     TvActionButton("Voltar", primary = false) { onBack() }
