@@ -115,12 +115,47 @@ function cacheSet(key, value) {
 }
 
 /**
+ * DISJUNTOR do `playerflix.ink`.
+ *
+ * Medido em produção: quando o host está bloqueado, cada chamada a
+ * `fetchOptions` gasta ~6 s até estourar o timeout. Sem disjuntor, abrir um
+ * título custaria 6 s de espera ANTES de tentar a convenção — e o cliente
+ * veria o spinner parado.
+ *
+ * Depois de `BREAKER_THRESHOLD` falhas seguidas, o Ajax é pulado por
+ * `BREAKER_COOLDOWN_MS` e o resolvedor vai direto à convenção. Uma única
+ * resposta boa zera o contador, então quando o host volta o caminho completo
+ * volta sozinho.
+ */
+const BREAKER_THRESHOLD = 3
+const BREAKER_COOLDOWN_MS = 5 * 60_000
+let breakerFails = 0
+let breakerOpenUntil = 0
+
+function breakerOpen() {
+  return Date.now() < breakerOpenUntil
+}
+
+function breakerRecord(ok) {
+  if (ok) {
+    breakerFails = 0
+    breakerOpenUntil = 0
+    return
+  }
+  breakerFails += 1
+  if (breakerFails >= BREAKER_THRESHOLD) breakerOpenUntil = Date.now() + BREAKER_COOLDOWN_MS
+}
+
+/**
  * Pede ao `playerflix.ink` a lista de opções de reprodução do título.
  *
  * Devolve `[{ embed, label, id }]` ou `[]`. Nunca lança: qualquer falha vira
  * lista vazia, e quem chama cai no modo embed.
  */
 export async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }) {
+  // Host sabidamente fora: não gasta o timeout de novo.
+  if (breakerOpen()) return []
+
   const isEpisode = season != null && episode != null
   const qs = new URLSearchParams({
     type: isEpisode ? 'tv' : 'movie',
@@ -141,10 +176,17 @@ export async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }
         Accept: 'application/json',
       },
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      breakerRecord(false)
+      return []
+    }
     const json = await res.json()
     const options = json?.data?.options
-    if (!Array.isArray(options)) return []
+    if (!Array.isArray(options)) {
+      breakerRecord(false)
+      return []
+    }
+    breakerRecord(true)
     return options
       .filter((o) => typeof o?.embed === 'string' && /^https:\/\//.test(o.embed))
       .map((o) => ({
@@ -156,6 +198,7 @@ export async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }
         budget: String(o?.budget ?? ''),
       }))
   } catch {
+    breakerRecord(false)
     return []
   } finally {
     clearTimeout(timer)
@@ -208,6 +251,38 @@ async function extractStreamUrl(embedUrl, timeoutMs = 8000) {
  *
  * Devolve `{ url, referer, label }` ou `null`.
  */
+/**
+ * URL do player de verdade montada por CONVENÇÃO, sem passar pelo
+ * `playerflix.ink`.
+ *
+ * ── POR QUE ISTO EXISTE ────────────────────────────────────────────────────
+ *
+ * `fetchOptions` pergunta a lista de opções ao `playerflix.ink`. Medido em
+ * produção (2026-11-23): o pod da Velixir NÃO alcança esse host —
+ * `GET https://playerflix.ink/inc/Ajax.php?...` pelo nosso próprio proxy
+ * devolve conexão derrubada (HTTP 000, ~7 s), enquanto
+ * `https://v1.watchplay.shop/movie/550` responde 200 em 1,7 s pelo mesmo
+ * caminho. Ou seja: o bloqueio é do host do Ajax, não da rede do pod.
+ *
+ * Com `fetchOptions` devolvendo `[]`, o resolvedor desistia e TODO título caía
+ * no MegaEmbed — que responde a tela "Nenhuma fonte de reprodução funcional
+ * disponível". Era isso que o cliente via na maioria do catálogo.
+ *
+ * A convenção de URL do `watchplay` é estável e foi medida:
+ *
+ *     filme    → https://v1.watchplay.shop/movie/{tmdb}
+ *     episódio → https://v1.watchplay.shop/tvshow/{tmdb}/{temporada}/{episódio}
+ *
+ * Um id que não existe ali responde 404 — então tentar por convenção nunca
+ * inventa um título: ou o player devolve o m3u8, ou não devolve nada.
+ */
+function conventionEmbedUrl({ tmdbId, season, episode }) {
+  const isEpisode = season != null && episode != null
+  return isEpisode
+    ? `https://v1.watchplay.shop/tvshow/${tmdbId}/${season}/${episode}`
+    : `https://v1.watchplay.shop/movie/${tmdbId}`
+}
+
 export async function resolveDirectStream({ tmdbId, season = null, episode = null }) {
   const id = String(tmdbId ?? '').trim()
   if (!/^\d+$/.test(id)) return null
@@ -216,8 +291,25 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
   const cached = cacheGet(key)
   if (cached) return cached
 
-  const options = await fetchOptions({ tmdbId: id, season, episode })
-  if (!options.length) return null
+  /**
+   * Timeout curto de propósito: existe a convenção como plano B, então não
+   * vale segurar o cliente 6 s esperando um host que pode estar bloqueado.
+   * Quando o Ajax responde, ele responde em ~300 ms.
+   */
+  const options = await fetchOptions({ tmdbId: id, season, episode, timeoutMs: 2500 })
+
+  /**
+   * Sem lista de opções (host do Ajax inalcançável, ou título que ele não
+   * indexa), tenta a convenção direta antes de desistir. É o caminho que
+   * devolve o catálogo ao ar quando o `playerflix.ink` está bloqueado.
+   */
+  if (!options.length) {
+    const url = await extractStreamUrl(conventionEmbedUrl({ tmdbId: id, season, episode }))
+    if (!url) return null
+    const value = { url, referer: 'https://v2.watchplay.shop/', label: 'Servidor principal' }
+    cacheSet(key, value)
+    return value
+  }
 
   /**
    * Só opções com fonte REAL. O provedor marca cada opção com `budget`:
@@ -230,7 +322,6 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
    * RÁPIDO e ser tratado como tal, em vez de virar erro no player.
    */
   const usable = options.filter((o) => o.budget !== 'danger')
-  if (!usable.length) return null
 
   // `watchplay` primeiro: é o player de verdade, com HLS e sem UI de cima.
   const ordered = [
@@ -246,7 +337,19 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
     return value
   }
 
-  return null
+  /**
+   * Última tentativa: a convenção do `watchplay`.
+   *
+   * Cobre o caso em que a lista veio só com `danger` (o Ajax indexa o título
+   * mas não aponta fonte paga) e o caso em que as opções listadas não
+   * entregaram m3u8. Se o id não existir no `watchplay`, isto devolve 404 e
+   * o resultado continua `null` — nunca inventa fonte.
+   */
+  const fallback = await extractStreamUrl(conventionEmbedUrl({ tmdbId: id, season, episode }))
+  if (!fallback) return null
+  const value = { url: fallback, referer: 'https://v2.watchplay.shop/', label: 'Servidor principal' }
+  cacheSet(key, value)
+  return value
 }
 
 /**
