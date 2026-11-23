@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { loadCatalog, getById, backdropUrl, posterUrl } from '../lib/catalog'
 import { fetchSeriesEpisodes } from '../lib/access'
+import { enterFullscreenNow, requestAutoFullscreen } from '../lib/autoFullscreen'
 import { useAuth } from '../context/AuthContext'
 import { PlayIcon, ArrowLeft, InfoIcon, StarIcon } from '../components/Icons'
 import type { DbSeason, MediaType } from '../lib/types'
@@ -135,6 +136,13 @@ export function SeriesPage() {
                   to={watchTarget(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${season.episodes[0].episode_number}`)}
                   state={watchState(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${season.episodes[0].episode_number}`)}
                   className="btn btn--primary btn--lg"
+                  onClick={() => {
+                    /* Tela cheia já no clique — ver TitleDetailPage. */
+                    if (!user) return
+                    const href = `/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${season.episodes[0].episode_number}`
+                    enterFullscreenNow()
+                    requestAutoFullscreen(href)
+                  }}
                 >
                   <PlayIcon size={19} /> Assistir T{season.season_number} E
                   {season.episodes[0].episode_number}
@@ -201,6 +209,13 @@ export function SeriesPage() {
                   to={watchTarget(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${ep.episode_number}`)}
                   state={watchState(`/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${ep.episode_number}`)}
                   className="episode"
+                  onClick={() => {
+                    /* Tela cheia já no clique — ver TitleDetailPage. */
+                    if (!user) return
+                    const href = `/assistir/${title.tmdb_id}?type=tv&season=${season.season_number}&episode=${ep.episode_number}`
+                    enterFullscreenNow()
+                    requestAutoFullscreen(href)
+                  }}
                 >
                   <span className="episode-num">{ep.episode_number}</span>
                   <span className="episode-info">

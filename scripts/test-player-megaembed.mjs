@@ -202,7 +202,17 @@ console.log('DOM medido:', JSON.stringify(dom, null, 1))
 check('player montou (iframe presente)', dom.hasIframe, dom.iframeSrc ?? 'sem iframe')
 check('iframe e o MegaEmbed', /mgeb\.space/.test(dom.iframeSrc ?? ''), dom.iframeSrc ?? '')
 check('existe UMA barra nossa no rodape', dom.hasBar, dom.hasBar ? 'presente' : 'ausente')
-check('a barra tem o botao de tela cheia', dom.hasFsButton, dom.hasFsButton ? 'presente' : 'ausente')
+/*
+  O BOTAO BRANCO SAIU.
+
+  O proprietario pediu para remover o botao de tela cheia: o player ja entra em
+tela cheia sozinho ao clicar em "Assistir". Se ele voltar, este teste falha.
+*/
+check(
+  'NAO existe botao de tela cheia na barra (o branco foi removido)',
+  dom.hasFsButton === false,
+  dom.hasFsButton ? 'botao presente' : 'ausente, como pedido',
+)
 check('a barra mostra o tempo', Boolean(dom.timeText), dom.timeText ?? 'vazio')
 check(
   'o meio da tela continua sendo o iframe (video clicavel)',
@@ -235,26 +245,21 @@ check(
   [...requestedHosts].filter((h) => /myembed|playerflix|watchplay/i.test(h)).join(',') || 'nenhum',
 )
 
-// -- TELA CHEIA PELO NOSSO LADO -------------------------------------------
+// -- TELA CHEIA: ENTRADA AUTOMATICA ---------------------------------------
+/*
+  Sem botao de entrada, a tela cheia vem do gesto em "Assistir" (testado em
+test-tela-cheia-auto.mjs). Aqui, chegando direto na URL do player, o esperado e
+que ele NAO esteja em tela cheia — e que a SAIDA continue funcionando.
+
+Para exercitar a saida, entramos em tela cheia pelo `.player-stage` via API.
+*/
 const before = await page.evaluate(() => ({
   fs: Boolean(document.fullscreenElement),
   overlay: getComputedStyle(document.querySelector('.player-overlay')).display,
 }))
+check('chegando direto pela URL, NAO esta em tela cheia', before.fs === false, `fullscreenElement=${before.fs}`)
 
-// A barra se auto-esconde em 5s. Um usuario de celular toca na faixa do
-// rodape para trazer os controles de volta — o teste faz o mesmo antes de
-// clicar no botao de tela cheia.
-const barVisible = await page.evaluate(() => {
-  const ov = document.querySelector('.player-overlay')
-  return ov ? getComputedStyle(ov).opacity !== '0' : false
-})
-if (!barVisible) {
-  await page.click('.player-sensor--strip', { force: true })
-  await page.waitForTimeout(400)
-}
-check('a barra volta ao tocar na faixa do rodape', true, 'controles reexibidos')
-
-await page.click('.player-overlay .player-bottom .player-btn--main')
+await page.evaluate(() => document.querySelector('.player-stage').requestFullscreen())
 await page.waitForTimeout(900)
 
 const during = await page.evaluate(() => {
@@ -264,6 +269,8 @@ const during = await page.evaluate(() => {
   return {
     fs: Boolean(document.fullscreenElement),
     overlayDisplay: ov ? getComputedStyle(ov).display : null,
+    hasWhiteBtn: Boolean(document.querySelector('.player-overlay .player-btn--main')),
+    hasExitBtn: Boolean(document.querySelector('.player-exit')),
     stageW: Math.round(r.width),
     stageH: Math.round(r.height),
     vw: window.innerWidth,
@@ -281,6 +288,7 @@ check(
   during.overlayDisplay === 'none',
   `display=${during.overlayDisplay}`,
 )
+check('nao ha botao branco nem em tela cheia', during.hasWhiteBtn === false)
 check(
   'em tela cheia o video ocupa a tela inteira',
   during.stageW >= during.vw - 2 && during.stageH >= during.vh - 2,

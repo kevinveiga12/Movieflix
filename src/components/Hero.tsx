@@ -4,6 +4,7 @@ import type { Title } from '../lib/types'
 import { backdropUrl } from '../lib/catalog'
 import { useAuth } from '../context/AuthContext'
 import { PlayIcon, InfoIcon, StarIcon } from './Icons'
+import { enterFullscreenNow, requestAutoFullscreen } from '../lib/autoFullscreen'
 
 interface Props {
   items: Title[]
@@ -58,7 +59,17 @@ export function Hero({ items }: Props) {
         <p className="hero-desc">{t.description}</p>
 
         <div className="hero-actions">
-          <Link to={watchTo} state={watchState} className="btn btn--primary btn--lg">
+          <Link
+            to={watchTo}
+            state={watchState}
+            className="btn btn--primary btn--lg"
+            onClick={() => {
+              /* Tela cheia já no clique — ver TitleDetailPage. */
+              if (!user) return
+              enterFullscreenNow()
+              requestAutoFullscreen(watchHref)
+            }}
+          >
             <PlayIcon size={19} /> Assistir agora
           </Link>
           <Link to={`/titulo/${t.type}/${t.tmdb_id}`} className="btn btn--ghost btn--lg">

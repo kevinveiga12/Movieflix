@@ -69,19 +69,22 @@ fun PlayerScreen(
     var loading by remember { mutableStateOf(true) }
 
     /**
-     * TELA CHEIA PELO NOSSO LADO.
+     * TELA CHEIA PELO NOSSO LADO — LIGADA AO ABRIR.
      *
      * O botão de tela cheia do provedor chama `requestFullscreen()` de dentro
-     * de um iframe aninhado (myembed.biz → playerflix.ink → frame do vídeo).
-     * O navegador recusa esse pedido em silêncio quando algum elo da cadeia
-     * não delega `fullscreen` — e o `allow` dos iframes internos é do provedor,
-     * não nosso. Resultado: `onShowCustomView` nunca é chamado e nada acontece
-     * na tela.
+     * de um iframe aninhado. O navegador recusa esse pedido em silêncio quando
+     * algum elo da cadeia não delega `fullscreen` — e o `allow` dos iframes
+     * internos é do provedor, não nosso. Resultado: `onShowCustomView` nunca é
+     * chamado e nada acontece na tela.
      *
      * Por isso a tela cheia é nossa: escondemos a interface do app, tiramos as
      * barras do sistema e deixamos o WebView ocupando a tela inteira.
+     *
+     * COMEÇA LIGADA (`true`): o proprietário pediu que, ao abrir o player, ele
+     * já entre em tela cheia, sem um segundo toque — o mesmo comportamento do
+     * site. O botão de ENTRADA saiu; fica só o ✕ para sair.
      */
-    var immersive by remember { mutableStateOf(false) }
+    var immersive by remember { mutableStateOf(true) }
     val context = LocalContext.current
 
     // Barras do sistema somem enquanto `immersive` estiver ligado.
@@ -429,20 +432,16 @@ internal fun EmbedPlayer(
         }
 
         /*
-          BOTÃO DE TELA CHEIA — NOSSO.
+          BOTÃO DE SAIR DA TELA CHEIA.
 
-          O botão do provedor não funciona: o `requestFullscreen()` dele é
-          recusado em silêncio dentro da cadeia de iframes, e o único efeito
-          visível era o anel de foco. Este botão é nosso, sempre alcançável, e
-          aciona a tela cheia pelo nosso lado (esconde a interface do app e as
-          barras do sistema, deixando só o vídeo).
-
-          Em tela cheia ele vira o botão de SAIR, no mesmo canto — um toque
-          entra, um toque sai.
+          O player já abre em tela cheia, então NÃO existe botão de ENTRADA —
+          o proprietário pediu para tirar o botão branco de tela cheia. Fica só
+          o ✕, e só enquanto estiver em tela cheia: é a única forma de voltar
+          ao normal no celular, onde não existe tecla Escape.
         */
-        if (ready && !failed) {
+        if (ready && !failed && immersive) {
             Text(
-                if (immersive) "✕" else "⛶",
+                "✕",
                 color = Color.White,
                 fontSize = 20.sp,
                 modifier = Modifier

@@ -1315,11 +1315,57 @@ h4 {
   display: none !important;
 }
 
-/* O sensor de toque também sai: em tela cheia o toque vai direto ao vídeo. */
+/*
+  BOTÃO DE SAIR DA TELA CHEIA.
+
+  O player entra em tela cheia sozinho ao clicar em "Assistir", então não há
+  botão de ENTRADA — o proprietário pediu para tirar o botão branco. Mas sair
+  precisa continuar possível no celular, onde não existe tecla Escape.
+
+  Este botão só é montado em tela cheia, fica no canto superior direito, e
+  obedece ao mesmo auto-hide de 5 s da nossa barra: aparece no toque, some
+  sozinho. Discreto de propósito — não é o botão branco que saiu.
+*/
+.player-exit {
+  position: absolute;
+  top: clamp(10px, 1.6vw, 20px);
+  right: clamp(10px, 1.6vw, 20px);
+  z-index: 30;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+/* Só aparece com a UI visível (toque na tela); some no auto-hide. */
+.player-exit.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/*
+  EM TELA CHEIA O SENSOR CONTINUA, mas só como faixa no rodapé.
+
+  O overlay inteiro sai da pintura em tela cheia (é o requisito: só o vídeo).
+  Sem nenhum sensor, o toque não teria como trazer o ✕ de volta e a pessoa
+  ficaria presa em tela cheia no celular, onde não existe tecla Escape. A faixa
+  resolve isso sem cobrir o vídeo: o meio da tela continua indo para o player.
+*/
 .player-stage:fullscreen .player-sensor,
 .player-stage:-webkit-full-screen .player-sensor,
 .player-page.is-fullscreen .player-sensor {
-  display: none !important;
+  display: block !important;
+  inset: auto 0 0 0;
+  height: 64px;
 }
 
 /*

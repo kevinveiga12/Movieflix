@@ -6,6 +6,7 @@ import { CarouselRow } from '../components/CarouselRow'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites, useHistory, parseEpisodeId } from '../lib/userData'
 import { firstEpisode } from '../lib/player'
+import { enterFullscreenNow, requestAutoFullscreen } from '../lib/autoFullscreen'
 import { PlayIcon, HeartIcon, StarIcon, ArrowLeft, CheckIcon, InfoIcon } from '../components/Icons'
 import type { MediaType } from '../lib/types'
 
@@ -140,6 +141,23 @@ export function TitleDetailPage() {
                     to={watchTarget(resumeHref ?? watchHref())}
                     state={watchState(resumeHref ?? watchHref())}
                     className="btn btn--primary btn--lg"
+                    onClick={() => {
+                      /*
+                        TELA CHEIA JÁ NO CLIQUE.
+
+                        `enterFullscreenNow()` é chamado de forma SÍNCRONA,
+                        dentro do gesto — sem `await` antes, senão o navegador
+                        considera o gesto expirado e recusa em silêncio. Como a
+                        navegação do React Router não recarrega o documento, o
+                        player já nasce em tela cheia.
+
+                        Sem sessão o destino é o login: não entra em tela cheia.
+                      */
+                      if (!user) return
+                      const href = resumeHref ?? watchHref()
+                      enterFullscreenNow()
+                      requestAutoFullscreen(href)
+                    }}
                   >
                     <PlayIcon size={19} />
                     {resumeHref ? 'Continuar assistindo' : isSeries ? 'Assistir T1 E1' : 'Assistir'}
@@ -219,6 +237,13 @@ export function TitleDetailPage() {
                       `/assistir/${title.tmdb_id}?type=tv&season=${season}&episode=${ep}`,
                     )}
                     className="episode"
+                    onClick={() => {
+                      /* Tela cheia já no clique — ver o botão "Assistir". */
+                      if (!user) return
+                      const href = `/assistir/${title.tmdb_id}?type=tv&season=${season}&episode=${ep}`
+                      enterFullscreenNow()
+                      requestAutoFullscreen(href)
+                    }}
                   >
                     <span className="episode-num">{ep}</span>
                     <span className="episode-info">

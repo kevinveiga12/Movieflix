@@ -4,6 +4,11 @@ import Hls from 'hls.js'
 import { loadCatalog, getById } from '../lib/catalog'
 import { nextEpisode, formatTime } from '../lib/player'
 import { authorizePlayback } from '../lib/access'
+import {
+  consumeAutoFullscreen,
+  exitFullscreenNow,
+  isDocumentFullscreen,
+} from '../lib/autoFullscreen'
 import { PlaybackGate } from '../components/PlaybackGate'
 import type { PlaybackAuth, Title } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
@@ -404,8 +409,16 @@ export function PlayerPage() {
   // ── Tela cheia real ──────────────────────────────────────────────────────
   useEffect(() => {
     function onChange() {
-      const el = document.fullscreenElement as Element | null
-      setIsFullscreen(Boolean(el && stageRef.current && el === stageRef.current))
+      /*
+        O estado do botão tem de corresponder ao estado REAL da tela cheia.
+
+        A tela cheia pode estar em dois elementos diferentes: no
+        `document.documentElement` (quando o clique em "Assistir" já entrou em
+        tela cheia, antes do player montar) ou no nosso `.player-stage` (quando
+        acionada daqui). Antes só o segundo contava, então o player abria em
+        tela cheia e o estado dizia que não estava.
+      */
+      setIsFullscreen(isDocumentFullscreen())
     }
     document.addEventListener('fullscreenchange', onChange)
     document.addEventListener('webkitfullscreenchange', onChange as EventListener)
@@ -413,6 +426,26 @@ export function PlayerPage() {
       document.removeEventListener('fullscreenchange', onChange)
       document.removeEventListener('webkitfullscreenchange', onChange as EventListener)
     }
+  }, [])
+
+  /**
+   * TELA CHEIA AUTOMÁTICA AO ABRIR O PLAYER.
+   *
+   * O clique em "Assistir" já chamou `enterFullscreenNow()` de forma síncrona,
+   * dentro do gesto — e como a navegação do React Router não recarrega o
+   * documento, o player NASCE em tela cheia. Aqui só sincronizamos o estado.
+   *
+   * Se o navegador não tem tela cheia de elemento (iOS antigo) ou recusou, a
+   * intenção registrada em `sessionStorage` é consumida e caímos no modo
+   * imersivo por CSS: `.player-page` já é `position: fixed; inset: 0`, então o
+   * resultado visual é o mesmo — só o vídeo na tela, sem barra do site.
+   */
+  useEffect(() => {
+    const href = `${location.pathname}${location.search}`
+    if (!consumeAutoFullscreen(href)) return
+    setIsFullscreen(true)
+    setShowUi(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /**
@@ -425,29 +458,32 @@ export function PlayerPage() {
    * marcar o estado — o vídeo continua preenchendo a tela.
    */
   const toggleFullscreen = useCallback(async () => {
+    /*
+      SAIR é o caso que importa agora.
+
+      O player abre em tela cheia sozinho, então este botão só existe para
+      SAIR. A tela cheia pode estar no `documentElement` (entrada automática)
+      ou no `.player-stage` — os dois são encerrados aqui.
+    */
+    if (isDocumentFullscreen()) {
+      await exitFullscreenNow()
+      setIsFullscreen(false)
+      setShowUi(false)
+      return
+    }
+
     const el = stageRef.current
     if (!el) return
 
-    const doc = document as Document & {
-      webkitFullscreenElement?: Element | null
-      webkitExitFullscreen?: () => Promise<void> | void
-    }
-    const elAny = el as HTMLElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void
-    }
-
-    const active = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null
-
     try {
-      if (active) {
-        if (document.exitFullscreen) await document.exitFullscreen()
-        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen()
-        setIsFullscreen(false)
-      } else {
-        if (elAny.requestFullscreen) await elAny.requestFullscreen()
-        else if (elAny.webkitRequestFullscreen) await elAny.webkitRequestFullscreen()
-        setIsFullscreen(true)
+      if (el.requestFullscreen) await el.requestFullscreen()
+      else {
+        const elAny = el as HTMLElement & {
+          webkitRequestFullscreen?: () => Promise<void> | void
+        }
+        if (elAny.webkitRequestFullscreen) await elAny.webkitRequestFullscreen()
       }
+      setIsFullscreen(true)
     } catch {
       // API indisponível ou recusada: alterna o modo CSS.
       setIsFullscreen((v) => !v)
@@ -846,21 +882,44 @@ export function PlayerPage() {
                 <div className="progress-fill" style={{ width: '100%', opacity: 0.25 }} />
               </div>
 
-              <div className="player-controls" style={{ marginTop: 14 }}>
-                <button
-                  className="player-btn player-btn--main"
-                  onClick={() => void toggleFullscreen()}
-                  aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-                  title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-                >
-                  {isFullscreen ? <XIcon size={22} /> : <FullscreenIcon size={22} />}
-                </button>
+              {/*
+                SEM BOTÃO DE TELA CHEIA.
 
+                O proprietário pediu para tirar o botão branco: o player já
+                entra em tela cheia sozinho ao clicar em "Assistir", então o
+                botão não tem função de ENTRADA. Fica só o tempo decorrido.
+
+                A SAÍDA continua disponível: Escape, o botão Voltar do
+                navegador/aparelho, e o ✕ que aparece no canto quando a pessoa
+                toca a tela em tela cheia.
+              */}
+              <div className="player-controls" style={{ marginTop: 14 }}>
                 <span className="player-time">
                   {formatTime(embedTime)} / --:--
                 </span>
               </div>
             </div>
+          )}
+
+          {/*
+            BOTÃO DE SAIR DA TELA CHEIA.
+
+            Só existe em tela cheia, e só aparece quando a pessoa toca a tela
+            (o auto-hide de 5 s o esconde de novo). Não é o botão branco que o
+            proprietário pediu para remover: é discreto, no canto, e serve
+            apenas para SAIR — sem ele, quem está no celular não teria como
+            voltar ao modo normal.
+          */}
+          {isFullscreen && (
+            <button
+              type="button"
+              className={`player-exit ${showUi ? 'visible' : ''}`}
+              onClick={() => void toggleFullscreen()}
+              aria-label="Sair da tela cheia"
+              title="Sair da tela cheia"
+            >
+              <XIcon size={20} />
+            </button>
           )}
 
           {source?.mode === 'direct' && (
