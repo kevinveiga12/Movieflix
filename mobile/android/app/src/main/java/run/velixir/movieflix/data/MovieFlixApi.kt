@@ -164,8 +164,23 @@ class MovieFlixApi(
             if (episode != null) append(""","episode":$episode""")
             append("}")
         }
-        return json.decodeFromString(post("/api/playback/authorize", body, auth = true))
+        val r = json.decodeFromString<PlaybackResponse>(post("/api/playback/authorize", body, auth = true))
+        return r.copy(
+            source = r.source?.let { it.copy(url = absolute(it.url)) },
+            sources = r.sources.map { it.copy(url = absolute(it.url)) },
+        )
     }
+
+    /**
+     * Ancora no host da API uma URL que veio como caminho relativo.
+     *
+     * O servidor devolve o proxy como `/api/stream.m3u8?u=...` porque no
+     * navegador a origem da página já é a do site. No app NÃO existe origem:
+     * `MediaItem.fromUri("/api/...")` produz uma URI sem esquema, o ExoPlayer
+     * não consegue resolver e o player fica em 0:00 / 0:00 com a tela preta.
+     */
+    private fun absolute(url: String): String =
+        if (url.startsWith("/")) "$baseUrl$url" else url
 
     // ── Favoritos e histórico ───────────────────────────────────────────────
     //
