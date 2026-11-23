@@ -147,14 +147,44 @@ function breakerRecord(ok) {
 }
 
 /**
+ * Estado do disjuntor do host do Ajax — para o painel e para os testes.
+ *
+ * Antes este estado era invisível: descobrir que o `playerflix.ink` estava
+ * bloqueado exigiu medir de dentro do pod. Com isto, `/api/playback/diagnostics`
+ * responde na hora, e o teste de regressão consegue provar que um host
+ * inalcançável abre o disjuntor (e que um título ausente NÃO abre).
+ */
+export function ajaxBreakerStatus() {
+  return {
+    fails: breakerFails,
+    open: Date.now() < breakerOpenUntil,
+    retryInMs: Math.max(0, breakerOpenUntil - Date.now()),
+  }
+}
+
+/**
  * Pede ao `playerflix.ink` a lista de opções de reprodução do título.
  *
  * Devolve `[{ embed, label, id }]` ou `[]`. Nunca lança: qualquer falha vira
  * lista vazia, e quem chama cai no modo embed.
  */
 export async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }) {
+  const { options } = await fetchOptionsDetailed({ tmdbId, season, episode, timeoutMs })
+  return options
+}
+
+/**
+ * Igual a `fetchOptions`, mas diz se o host estava ALCANÇÁVEL.
+ *
+ * `reachable: false` só quando a requisição falhou de verdade (rede, timeout,
+ * 5xx). Um `{"status":false}` — título que o Ajax não indexa — é
+ * `reachable: true` com lista vazia: o host respondeu, apenas não tem o título.
+ * É essa distinção que impede o disjuntor de abrir por causa de títulos
+ * ausentes (bug de 2026-11-23).
+ */
+export async function fetchOptionsDetailed({ tmdbId, season, episode, timeoutMs = 6000 }) {
   // Host sabidamente fora: não gasta o timeout de novo.
-  if (breakerOpen()) return []
+  if (breakerOpen()) return { options: [], reachable: false }
 
   const isEpisode = season != null && episode != null
   const qs = new URLSearchParams({
@@ -177,29 +207,39 @@ export async function fetchOptions({ tmdbId, season, episode, timeoutMs = 6000 }
       },
     })
     if (!res.ok) {
-      breakerRecord(false)
-      return []
+      // 5xx = host com problema. 4xx = host respondeu; não é falha dele.
+      const reachable = res.status < 500
+      breakerRecord(reachable)
+      return { options: [], reachable }
     }
     const json = await res.json()
     const options = json?.data?.options
     if (!Array.isArray(options)) {
-      breakerRecord(false)
-      return []
+      /**
+       * `{"status":false}` = o Ajax RESPONDEU e não indexa este título. É falha
+       * do TÍTULO, não do host — penalizar aqui abria o disjuntor com três
+       * títulos ausentes e derrubava o caminho que funciona para todo mundo.
+       */
+      breakerRecord(true)
+      return { options: [], reachable: true }
     }
     breakerRecord(true)
-    return options
-      .filter((o) => typeof o?.embed === 'string' && /^https:\/\//.test(o.embed))
-      .map((o) => ({
-        embed: o.embed,
-        label: o.label ?? '',
-        id: o.id ?? '',
-        // `budget` é o sinal de fonte do provedor: "success" = tem vídeo,
-        // "danger" = só o plano pago, ou seja, NÃO reproduz.
-        budget: String(o?.budget ?? ''),
-      }))
+    return {
+      reachable: true,
+      options: options
+        .filter((o) => typeof o?.embed === 'string' && /^https:\/\//.test(o.embed))
+        .map((o) => ({
+          embed: o.embed,
+          label: o.label ?? '',
+          id: o.id ?? '',
+          // `budget` é o sinal de fonte do provedor: "success" = tem vídeo,
+          // "danger" = só o plano pago, ou seja, NÃO reproduz.
+          budget: String(o?.budget ?? ''),
+        })),
+    }
   } catch {
     breakerRecord(false)
-    return []
+    return { options: [], reachable: false }
   } finally {
     clearTimeout(timer)
   }
@@ -225,19 +265,30 @@ async function extractStreamUrl(embedUrl, timeoutMs = 8000) {
         'Accept-Language': 'pt-BR,pt;q=0.9',
       },
     })
-    if (!res.ok) return null
+
+    /**
+     * 404/410 = o provedor RESPONDEU e não tem este título. É falha do TÍTULO,
+     * não do provedor: `reachable: true`. Só 5xx (e erro de rede) contam como
+     * provedor fora do ar.
+     */
+    if (res.status === 404 || res.status === 410) return { url: null, reachable: true }
+    if (!res.ok) return { url: null, reachable: res.status < 500 }
+
     const html = await res.text()
 
     // `url:"https:\/\/host\/...\/playlist.m3u8?md5=...&expires=..."`
     const m = html.match(/url\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i)
-    if (!m) return null
+    // Página 200 sem m3u8: o provedor está no ar, só não tem fonte para este
+    // título. Continua sendo falha do título.
+    if (!m) return { url: null, reachable: true }
 
     const url = m[1].replace(/\\\//g, '/')
-    if (!/^https:\/\//.test(url)) return null
-    if (!isAllowedStreamHost(url)) return null
-    return url
+    if (!/^https:\/\//.test(url)) return { url: null, reachable: true }
+    if (!isAllowedStreamHost(url)) return { url: null, reachable: true }
+    return { url, reachable: true }
   } catch {
-    return null
+    // Timeout / DNS / conexão derrubada: aqui SIM o provedor está inalcançável.
+    return { url: null, reachable: false }
   } finally {
     clearTimeout(timer)
   }
@@ -283,13 +334,36 @@ function conventionEmbedUrl({ tmdbId, season, episode }) {
     : `https://v1.watchplay.shop/movie/${tmdbId}`
 }
 
-export async function resolveDirectStream({ tmdbId, season = null, episode = null }) {
+/**
+ * Resolve o stream direto E diz se o provedor estava ALCANÇÁVEL.
+ *
+ * ── POR QUE ISTO EXISTE (bug de 2026-11-23) ─────────────────────────────────
+ *
+ * `resolveDirectStream` devolvia `null` em dois casos MUITO diferentes:
+ *
+ *   a) o provedor está fora do ar / bloqueado  → falha DELE, vale abrir o
+ *      disjuntor;
+ *   b) o título simplesmente não existe lá (404) → falha DO TÍTULO, o provedor
+ *      está ótimo.
+ *
+ * O `playback-chain` tratava os dois como (a) e chamava `record('watchplay',
+ * false)`. Resultado medido: bastavam TRÊS títulos sem fonte — e o catálogo tem
+ * milhares — para o disjuntor abrir e o `watchplay` ser PULADO por 5 minutos em
+ * TODOS os títulos, inclusive nos que funcionam. Era essa a "falha generalizada":
+ * o cliente abria um filme que existe, o resolvedor nem tentava, e caía no
+ * MegaEmbed, que responde "Nenhuma fonte de reprodução funcional disponível".
+ *
+ * Agora o chamador sabe a diferença: `reachable: false` só quando a requisição
+ * ao provedor falhou de verdade (rede, timeout, 5xx). Um 404 é `reachable: true`
+ * com `stream: null` — o provedor respondeu, apenas não tem o título.
+ */
+export async function resolveDirectStreamDetailed({ tmdbId, season = null, episode = null }) {
   const id = String(tmdbId ?? '').trim()
-  if (!/^\d+$/.test(id)) return null
+  if (!/^\d+$/.test(id)) return { stream: null, reachable: true }
 
   const key = `${id}:${season ?? ''}:${episode ?? ''}`
   const cached = cacheGet(key)
-  if (cached) return cached
+  if (cached) return { stream: cached, reachable: true }
 
   /**
    * Timeout curto de propósito: existe a convenção como plano B, então não
@@ -304,11 +378,11 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
    * devolve o catálogo ao ar quando o `playerflix.ink` está bloqueado.
    */
   if (!options.length) {
-    const url = await extractStreamUrl(conventionEmbedUrl({ tmdbId: id, season, episode }))
-    if (!url) return null
-    const value = { url, referer: 'https://v2.watchplay.shop/', label: 'Servidor principal' }
+    const r = await extractStreamUrl(conventionEmbedUrl({ tmdbId: id, season, episode }))
+    if (!r.url) return { stream: null, reachable: r.reachable }
+    const value = { url: r.url, referer: 'https://v2.watchplay.shop/', label: 'Servidor principal' }
     cacheSet(key, value)
-    return value
+    return { stream: value, reachable: true }
   }
 
   /**
@@ -329,12 +403,14 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
     ...usable.filter((o) => o.id !== 'watchplay'),
   ]
 
+  let anyReachable = false
   for (const opt of ordered) {
-    const url = await extractStreamUrl(opt.embed)
-    if (!url) continue
-    const value = { url, referer: 'https://v2.watchplay.shop/', label: opt.label || 'Servidor principal' }
+    const r = await extractStreamUrl(opt.embed)
+    if (r.reachable) anyReachable = true
+    if (!r.url) continue
+    const value = { url: r.url, referer: 'https://v2.watchplay.shop/', label: opt.label || 'Servidor principal' }
     cacheSet(key, value)
-    return value
+    return { stream: value, reachable: true }
   }
 
   /**
@@ -346,10 +422,22 @@ export async function resolveDirectStream({ tmdbId, season = null, episode = nul
    * o resultado continua `null` — nunca inventa fonte.
    */
   const fallback = await extractStreamUrl(conventionEmbedUrl({ tmdbId: id, season, episode }))
-  if (!fallback) return null
-  const value = { url: fallback, referer: 'https://v2.watchplay.shop/', label: 'Servidor principal' }
+  if (!fallback.url) return { stream: null, reachable: anyReachable || fallback.reachable }
+  const value = { url: fallback.url, referer: 'https://v2.watchplay.shop/', label: 'Servidor principal' }
   cacheSet(key, value)
-  return value
+  return { stream: value, reachable: true }
+}
+
+/**
+ * Compatibilidade: a assinatura antiga devolvia só o stream (ou `null`).
+ *
+ * Os scripts de teste (`scripts/test-stream-*.mjs`) e qualquer chamador que só
+ * queira a URL continuam funcionando. O `playback-chain` usa a versão
+ * `Detailed`, que é a que sabe distinguir "provedor fora" de "título ausente".
+ */
+export async function resolveDirectStream({ tmdbId, season = null, episode = null }) {
+  const { stream } = await resolveDirectStreamDetailed({ tmdbId, season, episode })
+  return stream
 }
 
 /**

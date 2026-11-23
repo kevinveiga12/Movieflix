@@ -49,7 +49,7 @@
  * global, então uma falha do Ajax desligava também o caminho que funcionava.
  */
 
-import { resolveDirectStream, resolveCleanEmbed, fetchOptions } from './stream-resolver.js'
+import { resolveDirectStreamDetailed, resolveCleanEmbed, fetchOptions } from './stream-resolver.js'
 
 /**
  * Provedores que podem abrir anúncio.
@@ -155,21 +155,32 @@ export async function resolvePlaybackChain({ tmdbId, season = null, episode = nu
   // ── 1) HLS direto do watchplay ────────────────────────────────────────────
   // É o melhor caso e o único que entrega o player vermelho de verdade.
   if (!isOpen('watchplay')) {
-    const direct = await resolveDirectStream({ tmdbId: id, season, episode }).catch(() => null)
-    if (direct) {
+    const r = await resolveDirectStreamDetailed({ tmdbId: id, season, episode }).catch(() => ({
+      stream: null,
+      reachable: false,
+    }))
+    if (r.stream) {
       record('watchplay', true)
       tried.push({ provider: 'watchplay', result: 'hls' })
       sources.push({
         id: 'direct',
-        label: direct.label || 'Servidor principal',
-        url: `/api/stream.m3u8?u=${encodeURIComponent(direct.url)}&r=${encodeURIComponent(direct.referer)}`,
+        label: r.stream.label || 'Servidor principal',
+        url: `/api/stream.m3u8?u=${encodeURIComponent(r.stream.url)}&r=${encodeURIComponent(r.stream.referer)}`,
         mode: 'direct',
         verified: true,
         provider: 'watchplay',
       })
     } else {
-      record('watchplay', false)
-      tried.push({ provider: 'watchplay', result: 'no_hls' })
+      /**
+       * SÓ penaliza o provedor quando ele estava INALCANÇÁVEL.
+       *
+       * Um 404 (título que o provedor não tem) é falha do TÍTULO. Contá-lo como
+       * falha do provedor abria o disjuntor com três títulos ausentes e passava
+       * a PULAR o watchplay em todo o catálogo por 5 minutos — a causa da falha
+       * generalizada relatada em 2026-11-23.
+       */
+      if (!r.reachable) record('watchplay', false)
+      tried.push({ provider: 'watchplay', result: r.reachable ? 'no_hls' : 'unreachable' })
     }
   } else {
     tried.push({ provider: 'watchplay', result: 'breaker_open' })
@@ -191,7 +202,15 @@ export async function resolvePlaybackChain({ tmdbId, season = null, episode = nu
         provider: 'watchplay',
       })
     } else {
-      record('playerflix', false)
+      /**
+       * NÃO penaliza o host aqui.
+       *
+       * `resolveCleanEmbed` devolve `null` tanto para "host fora" quanto para
+       * "título sem embed limpo" — e o segundo caso é a maioria do catálogo.
+       * O disjuntor do host do Ajax já é tratado DENTRO do `fetchOptions`
+       * (que só conta falha quando a requisição realmente falha), então
+       * duplicar a contagem aqui só reintroduziria o bug de 2026-11-23.
+       */
       tried.push({ provider: 'playerflix', result: clean ? `embed_${clean.id}` : 'no_embed' })
     }
   }
