@@ -147,6 +147,7 @@ fun TvPlayerScreen(
     /** Chave que força o WebView a remontar quando trocamos de fonte. */
     var sourceKey by remember { mutableStateOf(0) }
 
+
     /*
       Trava de segurança do login obrigatório.
 
@@ -300,10 +301,29 @@ private fun TvDirectPlayer(
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
 
-    val player = remember {
+    val player = remember(url) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(url))
             prepare()
+            /*
+              RETOMADA — o que faltava na TV.
+
+              A tela JÁ gravava o progresso (bloco de saveProgress mais abaixo),
+              mas nunca lia de volta: quem saía no minuto 40 de um filme voltava
+              ao segundo 0 e tinha de procurar onde parou com o D-pad —
+              exatamente o que o pedido chama de "retomar de onde parou".
+
+              Lido aqui, no momento em que o player é criado, e não num estado
+              anterior: assim não há corrida contra o carregamento do histórico.
+              Só filmes; em série o `episode_id` já identifica o episódio.
+            */
+            val resumeAt = if (season == null && episode == null) {
+                vm.resumePositionFor(title.tmdbId)
+            } else {
+                0.0
+            }
+            val startMs = (resumeAt * 1000).toLong()
+            if (startMs > 5000) seekTo(startMs)
             // Começa tocando. Se o aparelho recusar, a retentativa abaixo resolve.
             playWhenReady = true
         }

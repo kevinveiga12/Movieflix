@@ -468,6 +468,28 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Onde este filme parou, em segundos, para a TV retomar de lá.
+     *
+     * Lê do `history` que já está em memória (mesma consulta que alimenta a
+     * fileira "Continuar assistindo") — nenhuma requisição nova ao abrir o
+     * player, nenhuma tabela ou campo novo.
+     *
+     * Devolve 0 quando não há registro ou quando o filme já está no fim: nos
+     * últimos 30 s ou acima de 95% do total, começar do início é o
+     * comportamento esperado, não voltar para os créditos.
+     */
+    fun resumePositionFor(tmdbId: Long): Double {
+        val row = _state.value.history.firstOrNull {
+            it.tmdbId == tmdbId && it.mediaType != "tv" && it.episodeId.isNullOrBlank()
+        } ?: return 0.0
+        val pos = row.positionSeconds
+        val dur = row.durationSeconds
+        if (pos <= 5) return 0.0
+        if (dur > 0 && (dur - pos < 30 || pos / dur > 0.95)) return 0.0
+        return pos
+    }
+
     fun saveProgress(t: Title, pos: Double, dur: Double, episodeId: String?) {
         if (!session.isLoggedIn) return
         viewModelScope.launch { runCatching { api.saveProgress(t, pos, dur, episodeId) } }
