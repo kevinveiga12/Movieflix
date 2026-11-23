@@ -1,5 +1,6 @@
 import { getAnonClient, hasDb } from './supabase-server.js'
 import { loadStatic, findStatic } from './static-catalog.js'
+import { hasGenre } from './genres.js'
 
 /**
  * Catálogo de reprodução — com DOIS backends.
@@ -143,14 +144,9 @@ export async function listMovies({ limit = 60, offset = 0, genre, q } = {}) {
 
   let list = await loadStatic('movie')
   if (genre && genre !== 'Todos') {
-    const wanted = String(genre).toLowerCase()
-    list = list.filter((t) =>
-      String(t.category ?? '')
-        .toLowerCase()
-        .split(',')
-        .map((s) => s.trim())
-        .includes(wanted),
-    )
+    // Compara por termo e desdobra os compostos em inglês do TMDB
+    // ("Action & Adventure" → Ação + Aventura), igual ao site.
+    list = list.filter((t) => hasGenre(t.category, genre))
   }
   if (q) {
     const needle = String(q).toLowerCase()

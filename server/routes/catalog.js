@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { readOverrides, applyOverrides } from '../lib/store.js'
 import { loadStatic, availabilityStats } from '../lib/static-catalog.js'
 import { shuffleWithSeed } from '../lib/shuffle.js'
+import { splitCategory, hasGenre } from '../lib/genres.js'
 
 const router = Router()
 
@@ -194,10 +195,9 @@ router.get('/genres', async (_req, res, next) => {
     for (const t of [...movies, ...series]) {
       if (!t.category) continue
       // Categorias vêm compostas ("Ação, Animação, Família") — separa em termos.
-      for (const g of String(t.category).split(',')) {
-        const clean = g.trim()
-        if (clean) set.add(clean)
-      }
+      // `splitCategory` desdobra os compostos em inglês do TMDB
+      // ("Action & Adventure" → Ação + Aventura) e esconde o duplicado.
+      for (const g of splitCategory(t.category)) set.add(g)
     }
     res.json({ genres: [...set].sort((a, b) => a.localeCompare(b, 'pt-BR')) })
   } catch (e) {
@@ -235,15 +235,9 @@ function filterAndSort(list, q) {
   let out = list
   if (q.genre && q.genre !== 'Todos') {
     // O catálogo guarda categorias compostas ("Ação, Animação, Família").
-    // Compara por termo, não pela string inteira.
-    const wanted = String(q.genre).toLowerCase()
-    out = out.filter((t) =>
-      String(t.category ?? '')
-        .toLowerCase()
-        .split(',')
-        .map((s) => s.trim())
-        .includes(wanted),
-    )
+    // Compara por termo, não pela string inteira — e desdobra os compostos
+    // em inglês do TMDB, para "Ação" achar os títulos de "Action & Adventure".
+    out = out.filter((t) => hasGenre(t.category, q.genre))
   }
   if (q.q) {
     const needle = String(q.q).toLowerCase()

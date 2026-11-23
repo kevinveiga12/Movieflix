@@ -1,5 +1,6 @@
 import type { Title, MediaType } from './types'
 import { sessionSeed, sampleWithSeed } from './variety'
+import { splitCategory, hasGenre } from './genres'
 
 /**
  * Catálogo estático servido de /filmes/*.json.
@@ -321,24 +322,16 @@ export function genresOf(list: Title[]): string[] {
   for (const t of list) {
     if (!t.category) continue
     // Categorias vêm compostas ("Ação, Animação, Família") — separa em termos.
-    for (const g of t.category.split(',')) {
-      const clean = g.trim()
-      if (clean) set.add(clean)
-    }
+    // `splitCategory` também desdobra os compostos em inglês do TMDB
+    // ("Action & Adventure" → Ação + Aventura) e esconde o duplicado.
+    for (const g of splitCategory(t.category)) set.add(g)
   }
   return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 }
 
 export function byGenre(list: Title[], genre: string): Title[] {
   if (!genre || genre === 'Todos') return list
-  const wanted = genre.toLowerCase()
-  return list.filter((t) =>
-    (t.category ?? '')
-      .toLowerCase()
-      .split(',')
-      .map((s) => s.trim())
-      .includes(wanted),
-  )
+  return list.filter((t) => hasGenre(t.category, genre))
 }
 
 export type SortKey = 'popular' | 'recent' | 'oldest' | 'az' | 'rating'
@@ -466,12 +459,36 @@ export function rowsForHome(seed: string = sessionSeed()): Array<{ title: string
   return rows
 }
 
+/**
+ * Títulos relacionados — mesma lógica para filme e série, mas SEMPRE dentro do
+ * próprio tipo (filme recomenda filme, série recomenda série).
+ *
+ * Antes comparava `x.category === t.category`, ou seja, a string INTEIRA tinha
+ * de ser idêntica. Como as categorias vêm compostas e em ordens diferentes
+ * ("Ação, Aventura" vs "Aventura, Ação"), quase nada casava e a seção saía
+ * vazia ou com poucos itens. Agora pontua por gênero em comum e desempata por
+ * popularidade.
+ */
 export function relatedTo(t: Title, count = 12): Title[] {
   const pool = t.type === 'movie' ? playableMovies() : playableSeries()
-  return pool
-    .filter((x) => x.tmdb_id !== t.tmdb_id && x.category === t.category)
-    .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
-    .slice(0, count)
+  const mine = new Set(splitCategory(t.category).map((g) => g.toLowerCase()))
+  if (mine.size === 0) {
+    return pool
+      .filter((x) => x.tmdb_id !== t.tmdb_id)
+      .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+      .slice(0, count)
+  }
+  const scored = pool
+    .filter((x) => x.tmdb_id !== t.tmdb_id)
+    .map((x) => {
+      const theirs = splitCategory(x.category).map((g) => g.toLowerCase())
+      let score = 0
+      for (const g of theirs) if (mine.has(g)) score += 1
+      return { x, score }
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score || (b.x.popularity ?? 0) - (a.x.popularity ?? 0))
+  return scored.slice(0, count).map((s) => s.x)
 }
 
 export function posterUrl(t: Title, size: 'w342' | 'w500' = 'w342'): string {

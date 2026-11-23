@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import QRCode from 'qrcode'
 import { loadPlans } from '../lib/entitlement.js'
 import { readAdminConfig } from '../lib/store.js'
 
@@ -242,6 +243,62 @@ router.get('/', async (req, res, next) => {
       whatsapp: { number: WHATSAPP_NUMBER, display: WHATSAPP_DISPLAY },
       source: fromDb.length > 0 ? 'database' : 'default',
     })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * GET /api/plans/qr?plan=<code>&period=<1m|3m|12m>&email=<opcional>
+ *
+ * Devolve o QR Code (PNG) do link de contratação pelo WhatsApp.
+ *
+ * Existe para a TV: o controle remoto não digita, então o app mostra o QR na
+ * tela e o cliente lê com o celular. O QR aponta para o MESMO `whatsapp_url`
+ * que o site usa — a mensagem (plano, duração, valor, e-mail) é montada aqui,
+ * uma vez, para o app não remontar o texto e divergir.
+ *
+ * Nada de preço é inventado: os valores vêm de `priceFor`, a mesma função da
+ * listagem de planos.
+ */
+router.get('/qr', async (req, res, next) => {
+  try {
+    const [fromDb, config] = await Promise.all([loadPlans(), readAdminConfig()])
+    const base = fromDb.length > 0 ? fromDb : DEFAULT_PLANS
+    const plans = applyAdminConfig(base, config)
+
+    const planCode = String(req.query.plan ?? '').trim()
+    const periodCode = String(req.query.period ?? '1m').trim()
+    const email = typeof req.query.email === 'string' ? req.query.email.trim() : ''
+
+    const plan = plans.find((p) => p.code === planCode || p.id === planCode)
+    if (!plan) {
+      res.status(404).json({ error: 'plan_not_found' })
+      return
+    }
+    const period = PERIODS.find((p) => p.code === periodCode) ?? PERIODS[0]
+    const { cents } = priceFor(plan, period)
+
+    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
+      whatsappMessage({
+        planName: plan.name,
+        periodLabel: period.label,
+        priceLabel: brl(cents),
+        email,
+      }),
+    )}`
+
+    const png = await QRCode.toBuffer(url, {
+      type: 'png',
+      width: 640,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    })
+
+    res.set('Content-Type', 'image/png')
+    res.set('Cache-Control', 'public, max-age=300')
+    res.send(png)
   } catch (e) {
     next(e)
   }

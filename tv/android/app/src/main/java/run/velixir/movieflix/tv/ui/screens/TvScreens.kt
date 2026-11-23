@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import run.velixir.movieflix.tv.BuildConfig
 import run.velixir.movieflix.tv.TvViewModel
 import run.velixir.movieflix.tv.data.Title
 import run.velixir.movieflix.tv.ui.theme.MfColors
@@ -584,6 +585,17 @@ fun TvPlansScreen(vm: TvViewModel) {
     // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
     var period by remember { mutableStateOf("1m") }
 
+    // QR Code de contratação. Na TV o controle remoto não digita, então em vez
+    // de abrir o WhatsApp direto mostramos o QR para o cliente ler com o
+    // celular. O PNG vem do servidor (`/api/plans/qr`), que monta a MESMA
+    // mensagem do site — o app não remonta o texto.
+    var qr by remember { mutableStateOf<QrTarget?>(null) }
+
+    qr?.let { target ->
+        TvQrScreen(target, onClose = { qr = null })
+        return
+    }
+
     Column(Modifier.fillMaxSize()) {
         TvPageTitle("Planos")
         Text(
@@ -741,7 +753,16 @@ fun TvPlansScreen(vm: TvViewModel) {
                             )
                             .onFocusChanged { btnFocused = it.isFocused }
                             .clickable(enabled = waUrl.isNotBlank()) {
-                                openExternal(context, waUrl)
+                                // Na TV mostramos o QR Code; o celular lê e abre
+                                // o WhatsApp já com a mensagem preenchida.
+                                qr = QrTarget(
+                                    planCode = plan.code,
+                                    planName = plan.name,
+                                    periodCode = chosen?.code ?: period,
+                                    periodLabel = chosen?.label ?: "",
+                                    priceLabel = chosen?.priceLabel ?: plan.priceLabel,
+                                    waUrl = waUrl,
+                                )
                             }
                             .padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
@@ -803,6 +824,149 @@ private fun openExternal(context: android.content.Context, url: String) {
             android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
         )
+    }
+}
+
+/** Plano/período escolhido para o QR Code de contratação. */
+private data class QrTarget(
+    val planCode: String,
+    val planName: String,
+    val periodCode: String,
+    val periodLabel: String,
+    val priceLabel: String,
+    val waUrl: String,
+)
+
+/**
+ * QR Code de contratação — a tela que a TV mostra ao tocar "Assinar pelo
+ * WhatsApp".
+ *
+ * O QR é gerado pelo SERVIDOR (`/api/plans/qr`), que monta a mesma mensagem do
+ * site. Aqui só exibimos a imagem e damos as saídas que o controle remoto
+ * precisa: VOLTAR fecha e devolve para os planos, e há um botão "Abrir no
+ * WhatsApp" para quem tiver o app instalado no próprio aparelho.
+ */
+@Composable
+private fun TvQrScreen(target: QrTarget, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val qrUrl = "${BuildConfig.API_BASE_URL}/api/plans/qr" +
+        "?plan=${java.net.URLEncoder.encode(target.planCode, "UTF-8")}" +
+        "&period=${java.net.URLEncoder.encode(target.periodCode, "UTF-8")}"
+
+    // VOLTAR fecha o QR e volta para os planos.
+    androidx.activity.compose.BackHandler(enabled = true) { onClose() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MfColors.Bg)
+            .clickable { onClose() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(MfColors.BgCard)
+                .border(1.dp, MfColors.Border, RoundedCornerShape(20.dp))
+                .padding(36.dp),
+        ) {
+            Text(
+                "Assine pelo celular",
+                color = MfColors.Text,
+                fontFamily = MfSans,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Aponte a câmera do celular para o código.",
+                color = MfColors.TextMuted,
+                fontFamily = MfSans,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(20.dp))
+
+            // Fundo branco: o QR precisa de contraste para a câmera ler.
+            Box(
+                modifier = Modifier
+                    .size(320.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .padding(12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = qrUrl,
+                    contentDescription = "QR Code para assinar o plano ${target.planName}",
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Text(
+                target.planName,
+                color = MfColors.Red,
+                fontFamily = MfSans,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black,
+            )
+            if (target.periodLabel.isNotBlank()) {
+                Text(
+                    "${target.periodLabel} · ${target.priceLabel}",
+                    color = MfColors.TextSoft,
+                    fontFamily = MfSans,
+                    fontSize = 14.sp,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                var openFocused by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (openFocused) MfColors.RedBright else MfColors.Red)
+                        .then(
+                            if (openFocused) Modifier.border(3.dp, Color.White, RoundedCornerShape(10.dp))
+                            else Modifier,
+                        )
+                        .onFocusChanged { openFocused = it.isFocused }
+                        .clickable { openExternal(context, target.waUrl) }
+                        .padding(horizontal = 24.dp, vertical = 14.dp),
+                ) {
+                    Text(
+                        "Abrir no WhatsApp",
+                        color = Color.White,
+                        fontFamily = MfSans,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                var backFocused by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MfColors.BgHover)
+                        .then(
+                            if (backFocused) Modifier.border(3.dp, MfColors.RedBright, RoundedCornerShape(10.dp))
+                            else Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(10.dp)),
+                        )
+                        .onFocusChanged { backFocused = it.isFocused }
+                        .clickable { onClose() }
+                        .padding(horizontal = 24.dp, vertical = 14.dp),
+                ) {
+                    Text(
+                        "Voltar aos planos",
+                        color = MfColors.TextSoft,
+                        fontFamily = MfSans,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
     }
 }
 
