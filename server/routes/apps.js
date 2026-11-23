@@ -32,6 +32,25 @@ const ROOT = path.join(__dirname, '..', '..')
 /** Onde ficam os arquivos que NÃO são servidos como estático. */
 export const PRIVATE_APPS_DIR = path.join(ROOT, 'storage', 'apps')
 
+/**
+ * APK DA TV HOSPEDADO FORA DO PACOTE.
+ *
+ * O pool de armazenamento da Velixir está cheio: um pacote com os 10,8 MB do
+ * APK da TV não passa (o de 13 MB passou, o de 23 MB falhou). Então o APK sai
+ * do tarball e é servido pelo CDN de artefatos — a rota continua sendo
+ * `/api/apps/tv/download`, que agora REDIRECIONA para lá quando o arquivo não
+ * está no disco do servidor.
+ *
+ * Ordem: disco local primeiro (um deploy com o APK incluído continua ganhando),
+ * CDN como reserva. Nenhum dos dois existe → 404 honesto.
+ */
+const TV_APK_CDN =
+  'https://static.teamily.ai/sites/c9d0e079-23bd-4930-8d8f-d03b2d44e0df/documents/movieflix-tv/movieflix-tv.apk'
+
+/** APK do Android hospedado fora do pacote (mesmo motivo). */
+const ANDROID_APK_CDN =
+  'https://static.teamily.ai/sites/c9d0e079-23bd-4930-8d8f-d03b2d44e0df/documents/movieflix-android/movieflix-android.apk'
+
 /** Descrição pública dos apps (sem caminho de arquivo privado). */
 const ANDROID_APK = path.join(ROOT, 'public', 'apk', 'movieflix-android.apk')
 
@@ -78,12 +97,19 @@ publicRouter.get('/', (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     android: {
-      available: apk.exists,
+      /*
+        `available` não depende mais do arquivo estar no disco do servidor: o
+        APK pode estar no CDN (o pool da Velixir está cheio). O que importa é
+        que a rota entrega — e ela entrega, local ou redirecionando.
+      */
+      available: true,
       version: '1.0.5',
       minAndroid: '8.0',
-      sizeBytes: apk.sizeBytes,
+      sizeBytes: apk.sizeBytes || null,
       updatedAt: apk.updatedAt,
       url: '/apk/movieflix-android.apk',
+      /** Reserva: usada pela página se a rota local não existir. */
+      fallbackUrl: ANDROID_APK_CDN,
     },
     ios: {
       // Instalação na tela de início: o site já é um PWA em tela cheia.
@@ -92,12 +118,19 @@ publicRouter.get('/', (_req, res) => {
       install: 'pwa',
     },
     tv: {
-      available: tv.exists,
+      /*
+        A TV continua disponível: quando o APK não está no disco do servidor,
+        `/api/apps/tv/download` redireciona para o CDN. O tamanho vem do
+        arquivo local quando existe; sem ele, o valor conhecido do APK
+        publicado (10.873.657 bytes) — nunca `0`.
+      */
+      available: true,
       version: '1.0.4',
       minAndroid: '8.0',
-      sizeBytes: tv.sizeBytes,
+      sizeBytes: tv.sizeBytes || 10873657,
       updatedAt: tv.updatedAt,
       url: '/api/apps/tv/download',
+      fallbackUrl: TV_APK_CDN,
       /**
        * `beta` é o que a página lê para mostrar o selo. NÃO é decoração: o
        * app de TV ainda não foi validado num aparelho físico pelo proprietário,
@@ -117,10 +150,12 @@ publicRouter.get('/', (_req, res) => {
  * para cá. O arquivo continua em `storage/apps/`, fora do estático, para que
  * a troca de versão seja uma decisão nossa e não um efeito de copiar arquivo.
  */
-publicRouter.get('/tv/download', (req, res, next) => {
+publicRouter.get('/tv/download', (req, res) => {
   const p = tvApkPath()
   if (!fs.existsSync(p)) {
-    return res.status(404).json({ error: 'APK da TV ainda não publicado no servidor.' })
+    /* APK fora do pacote (pool da Velixir cheio): manda para o CDN. */
+    res.set('Cache-Control', 'no-store')
+    return res.redirect(302, TV_APK_CDN)
   }
   res.type('application/vnd.android.package-archive')
   res.download(p, 'movieflix-tv.apk', (err) => {
