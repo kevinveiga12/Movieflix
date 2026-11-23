@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MovieFlix — Limpeza do Catálogo · Relatório Final</title>
+<style>
+  :root{
+    --bg:#0b0b0f; --panel:#14141b; --panel2:#1b1b25; --line:#262633;
+    --txt:#ececf1; --dim:#9a9aab; --red:#e50914; --green:#22c55e; --amber:#f59e0b; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 22px 80px}
+  header{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:34px}
+  .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.5px;font-size:22px}
+  .brand span{color:var(--red)}
+  h1{font-size:30px;margin:18px 0 6px;line-height:1.2}
+  .sub{color:var(--dim);font-size:14px}
+  h2{font-size:19px;margin:38px 0 14px;padding-left:12px;border-left:3px solid var(--red)}
+  h3{font-size:15px;margin:22px 0 8px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .card .n{font-size:28px;font-weight:800;line-height:1.1}
+  .card .l{color:var(--dim);font-size:13px;margin-top:4px}
+  .n.green{color:var(--green)} .n.red{color:var(--red)} .n.amber{color:var(--amber)} .n.blue{color:var(--blue)}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  code{background:var(--panel2);padding:2px 6px;border-radius:5px;font-size:13px;color:#ffd7d7}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;font-size:13px}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+  .pill.ok{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.35)}
+  .pill.no{background:rgba(229,9,20,.15);color:#ff6b73;border:1px solid rgba(229,9,20,.35)}
+  .pill.warn{background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.35)}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:8px;padding:14px 16px;margin:14px 0;color:#d6d6e2}
+  .note.warn{border-left-color:var(--amber)}
+  .note.ok{border-left-color:var(--green)}
+  ul{margin:8px 0 8px 18px;padding:0} li{margin:5px 0}
+  .muted{color:var(--dim)}
+  footer{margin-top:50px;padding-top:20px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">MOVIE<span>FLIX</span></div>
+  <h1>Limpeza do catálogo — remoção dos títulos que não reproduzem</h1>
+  <div class="sub">Executado em 23/11/2026 · produção <code>movieflix.velixir.run</code> · release <code>42bf663e</code> <span class="pill ok">Healthy</span></div>
+</header>
+
+<div class="note ok">
+  <strong>Resumo em uma linha:</strong> o catálogo inteiro (26.173 títulos) foi testado um por um contra o provedor que
+  responde de verdade. <strong>11.493 títulos sem fonte foram removidos</strong> e <strong>14.637 que reproduzem foram mantidos</strong>.
+  Os <strong>Bad Boys não foram removidos</strong> — eles funcionam; o que estava quebrado era o player do app, que apontava
+  todos os títulos para um provedor bloqueado. Isso também foi corrigido.
+</div>
+
+<h2>1. A falha mostrada nas imagens</h2>
+<p>As capturas enviadas mostram a tela de erro <strong>do próprio provedor de vídeo</strong>, não do MovieFlix:</p>
+<pre>Ops, ocorreu um problema
+Todas as fontes falharam. Nenhuma opção disponível.</pre>
+<p>O player do app apontava <strong>todo</strong> título para <code>https://mgeb.space/embed/{id}</code> (MegaEmbed).
+Medido neste ambiente e no de build: <strong>todos</strong> os domínios do MegaEmbed respondem
+<code>403 cf-mitigated: challenge</code> (Cloudflare Turnstile) — com <code>curl</code> e também com Chromium completo
+em Xvfb. O desafio nunca passa a partir de datacenter.</p>
+<div class="note warn">
+  <strong>Consequência:</strong> como <em>todo</em> título ia para esse domínio, <em>todo</em> título parecia quebrado —
+  inclusive os Bad Boys. Não era um problema de catálogo; era o endereço do player.
+</div>
+
+<h2>2. Critério exato de “não funcional”</h2>
+<p>O provedor que responde (<code>playerflix.ink</code>) publica, por título, a lista de fontes com um campo
+<code>budget</code>. O critério foi definido sobre esse sinal, e não sobre “abriu ou não abriu”:</p>
+<table>
+  <tr><th>Estado</th><th>Regra</th><th>Ação</th></tr>
+  <tr><td><span class="pill ok">FUNCIONA</span></td><td>ao menos uma fonte com <code>budget: success</code> (e, quando o embed publica, o <code>.m3u8</code> responde 200)</td><td>mantido</td></tr>
+  <tr><td><span class="pill no">SEM FONTE</span></td><td><code>status:false</code> (título desconhecido) <strong>ou</strong> somente fontes <code>budget: danger</code> (só o plano pago)</td><td><strong>removido</strong></td></tr>
+  <tr><td><span class="pill warn">INCERTO</span></td><td>erro de rede / timeout — sem sinal positivo</td><td>mantido (nunca removido sem evidência)</td></tr>
+</table>
+<p>Evidência de que o critério pega os casos certos — os quatro filmes Bad Boys do catálogo:</p>
+<table>
+  <tr><th>tmdb_id</th><th>Título</th><th>Ano</th><th>Fontes</th><th>Estado</th></tr>
+  <tr><td>9737</td><td>Os Bad Boys</td><td>1995</td><td><code>watchplay:success</code></td><td><span class="pill ok">FUNCIONA</span></td></tr>
+  <tr><td>8961</td><td>Bad Boys II</td><td>2003</td><td><code>watchplay:success</code></td><td><span class="pill ok">FUNCIONA</span></td></tr>
+  <tr><td>38700</td><td>Bad Boys para Sempre</td><td>2020</td><td><code>watchplay:success</code></td><td><span class="pill ok">FUNCIONA</span></td></tr>
+  <tr><td>573435</td><td>Bad Boys: Até o Fim</td><td>2024</td><td><code>watchplay:success</code></td><td><span class="pill ok">FUNCIONA</span></td></tr>
+</table>
+<p class="muted">O playlist HLS do 9737 respondeu 200 com 2.909 linhas e o segmento de vídeo 200 com bytes reais —
+ou seja, o filme toca. Ele não foi removido; o que foi corrigido foi o player que o apontava para o domínio bloqueado.</p>
+
+<h2>3. Números</h2>
+<div class="grid">
+  <div class="card"><div class="n">26.173</div><div class="l">títulos no catálogo</div></div>
+  <div class="card"><div class="n blue">26.173</div><div class="l">testados (100%)</div></div>
+  <div class="card"><div class="n green">14.637</div><div class="l">funcionam (mantidos)</div></div>
+  <div class="card"><div class="n red">11.493</div><div class="l">sem fonte (removidos)</div></div>
+  <div class="card"><div class="n amber">43</div><div class="l">incertos (mantidos)</div></div>
+</div>
+<table>
+  <tr><th>Tipo</th><th class="num">No catálogo</th><th class="num">Funcionam</th><th class="num">Sem fonte</th><th class="num">Incerto</th></tr>
+  <tr><td>Filmes</td><td class="num">18.080</td><td class="num">12.672</td><td class="num">5.373</td><td class="num">35</td></tr>
+  <tr><td>Séries</td><td class="num">8.093</td><td class="num">1.965</td><td class="num">6.120</td><td class="num">8</td></tr>
+  <tr><td><strong>Total</strong></td><td class="num"><strong>26.173</strong></td><td class="num"><strong>14.637</strong></td><td class="num"><strong>11.493</strong></td><td class="num"><strong>43</strong></td></tr>
+</table>
+<p class="muted">As séries foram testadas no primeiro episódio disponível; as marcadas como “sem fonte” foram
+reconferidas em S1E1–E3 e S2E1 e não têm fonte em nenhum episódio.</p>
+
+<h2>4. Como a remoção foi feita (sem apagar nada do banco)</h2>
+<ul>
+  <li><code>public/filmes/megaembed-disponibilidade.json</code> — a lista verificada (12.672 filmes + 1.965 séries).
+      O servidor e o site filtram por ela: <strong>home, catálogo, busca, gêneros, relacionados e paginação</strong>.</li>
+  <li><code>server/data/hidden-baseline.json</code> — os 11.493 removidos, com motivo e evidência. Comitado de propósito:
+      esconde também cards antigos de <strong>Favoritos</strong> e <strong>Continuar assistindo</strong>, que vivem no Supabase.</li>
+  <li>Nenhum registro foi apagado e nenhuma tabela ou política foi alterada.</li>
+</ul>
+<div class="note">
+  <strong>Por que cobre todos os apps:</strong> Android, iOS e MovieFlix TV não têm catálogo embutido — todos leem
+  <code>/api/catalog/movies</code>, <code>/api/catalog/series</code>, <code>/api/catalog/availability</code> e
+  <code>/api/catalog/posters</code> do servidor. Filtrando no servidor, a remoção vale para os quatro clientes sem
+  precisar regerar os aplicativos. Favoritos e histórico já eram filtrados por <code>avail.allows()</code> em cada app.
+</div>
+
+<h2>5. Correção do player (a causa raiz)</h2>
+<p>Além de remover o que não tem fonte, o player foi corrigido para usar a cadeia que reproduz de verdade:</p>
+<pre>1) HLS do watchplay  →  /api/stream.m3u8 (proxy que resolve CORS e Referer)
+2) embed direto do provedor (embedplay / embedplayer)
+3) MegaEmbed  →  só como último recurso</pre>
+<ul>
+  <li><code>server/routes/access.js</code> — a cadeia acima substitui o “tudo para o MegaEmbed”.</li>
+  <li><code>server/lib/stream-resolver.js</code> — passa a respeitar <code>budget</code>: <code>danger</code> nunca é oferecido como fonte.</li>
+  <li><code>scripts/verificar-no-build.mjs</code> — não sobrescreve mais a lista autoritativa.</li>
+  <li><strong>Rollback por variável:</strong> <code>PLAYER_CHAIN=megaembed</code> volta ao comportamento antigo sem reverter commit.</li>
+</ul>
+
+<h2>6. Arquivos modificados</h2>
+<table>
+  <tr><th>Arquivo</th><th>O que mudou</th></tr>
+  <tr><td><code>public/filmes/megaembed-disponibilidade.json</code></td><td>lista verificada de títulos que reproduzem (12.672 filmes + 1.965 séries)</td></tr>
+  <tr><td><code>server/data/hidden-baseline.json</code></td><td>11.493 removidos com motivo e evidência</td></tr>
+  <tr><td><code>server/routes/access.js</code></td><td>cadeia de reprodução corrigida (HLS → embed → MegaEmbed)</td></tr>
+  <tr><td><code>server/lib/stream-resolver.js</code></td><td>respeita <code>budget</code>; <code>danger</code> não é fonte</td></tr>
+  <tr><td><code>server/lib/megaembed.js</code></td><td><code>PLAYER_CHAIN</code> para rollback por variável</td></tr>
+  <tr><td><code>scripts/verificar-catalogo-real.mjs</code></td><td><strong>novo</strong> — verificação real, título por título</td></tr>
+  <tr><td><code>scripts/gerar-catalogo-verificado.mjs</code></td><td><strong>novo</strong> — gera a lista verificada e o baseline</td></tr>
+  <tr><td><code>scripts/verificar-no-build.mjs</code></td><td>não sobrescreve a lista autoritativa</td></tr>
+  <tr><td><code>documents/limpeza-catalogo/removidos.json</code> / <code>.csv</code></td><td>relatório completo dos removidos</td></tr>
+</table>
+
+<h2>7. Testes executados</h2>
+<table>
+  <tr><th>Teste</th><th>Resultado</th></tr>
+  <tr><td>Verificação real do catálogo (26.173 títulos)</td><td><span class="pill ok">concluída</span> 14.637 funcionam · 11.493 sem fonte · 43 incertos</td></tr>
+  <tr><td><code>npx tsc --noEmit</code></td><td><span class="pill ok">exit 0</span></td></tr>
+  <tr><td><code>npm run build</code></td><td><span class="pill ok">sucesso</span></td></tr>
+  <tr><td>Servidor local — filtro do catálogo</td><td><span class="pill ok">Bad Boys presentes · removidos ausentes</span></td></tr>
+  <tr><td>Produção — <code>/api/catalog/movies</code></td><td><span class="pill ok">12.672 filmes</span></td></tr>
+  <tr><td>Produção — <code>/api/catalog/series</code></td><td><span class="pill ok">1.965 séries</span></td></tr>
+  <tr><td>Produção — busca de título removido</td><td><span class="pill ok">ausente</span></td></tr>
+  <tr><td>Produção — página do Bad Boys (<code>/titulo/movie/9737</code>)</td><td><span class="pill ok">abre normalmente</span></td></tr>
+  <tr><td>Produção — página de título removido</td><td><span class="pill ok">“não está no catálogo”</span></td></tr>
+  <tr><td>Produção — reprodução real (proxy HLS)</td><td><span class="pill ok">playlist 200 (2.909 linhas) · segmento 200</span></td></tr>
+  <tr><td>Produção — home no navegador</td><td><span class="pill ok">221 cards · 0 erros JS</span></td></tr>
+  <tr><td>Autenticação preservada</td><td><span class="pill ok">401 sem token</span></td></tr>
+</table>
+
+<h2>8. Publicação</h2>
+<table>
+  <tr><th>Item</th><th>Valor</th></tr>
+  <tr><td>Commit</td><td><code>fix(catalogo): remove titulos sem fonte e corrige o player</code></td></tr>
+  <tr><td>Push</td><td><code>main</code> → github.com/kevinveiga12/Movieflix</td></tr>
+  <tr><td>Release Velixir</td><td><code>42bf663e</code> <span class="pill ok">Healthy</span></td></tr>
+  <tr><td>Rollback</td><td>releases anteriores preservadas (ex.: <code>991b2d44</code>, <code>5355a333</code>)</td></tr>
+  <tr><td>Produção</td><td><a href="https://movieflix.velixir.run/" style="color:#7db3ff">https://movieflix.velixir.run/</a></td></tr>
+</table>
+
+<h2>9. O que NÃO foi alterado</h2>
+<ul>
+  <li>Supabase: nenhuma tabela, coluna ou política tocada.</li>
+  <li>Autenticação, planos e pagamentos: intactos (verificado: <code>/api/playback/authorize</code> segue exigindo login).</li>
+  <li>Favoritos, histórico e progresso: preservados; os títulos removidos apenas deixam de aparecer nas listas.</li>
+  <li>Design e player: mantidos; o player ganhou a cadeia que reproduz.</li>
+</ul>
+
+<h2>10. Limitações declaradas</h2>
+<ul>
+  <li><strong>43 títulos “incertos”</strong> (35 filmes, 8 séries) não foram removidos: o embed respondeu 400/500 no momento do teste,
+      o que é falha de rede/servidor, não prova de ausência de fonte. Removê-los seria remover sem evidência.</li>
+  <li>A reprodução foi validada por HTTP (playlist + segmento) e no navegador; <strong>não</strong> foi testada em aparelho
+      físico Android/iOS/TV — os apps leem o mesmo catálogo do servidor, então a remoção vale para eles, mas a
+      confirmação em dispositivo não foi feita aqui.</li>
+  <li>O MegaEmbed permanece no código apenas como último recurso; ele continua bloqueado a partir de datacenter.</li>
+</ul>
+
+<footer>
+  Relatório gerado automaticamente · MovieFlix · 23/11/2026 ·
+  lista completa dos removidos em <code>removidos.csv</code> / <code>removidos.json</code>
+</footer>
+
+</div>
+</body>
+</html>
