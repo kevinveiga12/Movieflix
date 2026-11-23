@@ -13,8 +13,14 @@ android {
         applicationId = "run.velixir.movieflix.tv"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.3"
+        /*
+          1.0.4 — primeira versão que COMPILA de fato depois da falha de escopo
+          do `TvEmbedPlayer` (referências a `chain`/`chainIndex`/`sourceKey`
+          fora do composable). O versionName só é anunciado na página de
+          downloads depois que este APK for gerado pelo workflow.
+        */
+        versionCode = 5
+        versionName = "1.0.4"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

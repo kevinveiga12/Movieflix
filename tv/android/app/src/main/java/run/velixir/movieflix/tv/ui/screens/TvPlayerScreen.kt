@@ -258,9 +258,29 @@ fun TvPlayerScreen(
                 Text("Voltar", color = MfColors.Red, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
 
-            url != null && mode == "direct" -> TvDirectPlayer(url!!, title, season, episode, vm)
+            url != null && mode == "direct" -> TvDirectPlayer(
+                url = url!!,
+                title = title,
+                season = season,
+                episode = episode,
+                vm = vm,
+                onFailed = { advanceSource() },
+            )
 
-            url != null -> TvEmbedPlayer(url!!, onBack)
+            url != null -> TvEmbedPlayer(
+                url = url!!,
+                sourceKey = sourceKey,
+                hasNext = chainIndex + 1 < chain.size,
+                onAdvanceSource = { advanceSource() },
+                onRestartChain = {
+                    // Recomeça a cadeia do topo: a falha pode ter sido passageira.
+                    chainIndex = 0
+                    url = chain.firstOrNull()?.url
+                    mode = chain.firstOrNull()?.mode
+                    sourceKey++
+                },
+                onBack = onBack,
+            )
         }
     }
 }
@@ -274,6 +294,8 @@ private fun TvDirectPlayer(
     season: Int?,
     episode: Int?,
     vm: TvViewModel,
+    /** Fim das tentativas neste aparelho: a cadeia deve tentar a próxima fonte. */
+    onFailed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
@@ -312,6 +334,38 @@ private fun TvDirectPlayer(
     var isFullscreen by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) { onDispose { player.release() } }
+
+    /*
+      RECUPERAÇÃO DE FALHAS NO MODO DIRETO.
+
+      Antes, qualquer erro do ExoPlayer (segmento que caiu, timeout de rede,
+      decoder que não abriu) virava TELA PRETA PARA SEMPRE: o player ficava
+      montado e a cadeia multiprovedor, que existe exatamente para isso, nunca
+      era consultada. Não havia nem mensagem, nem nova tentativa.
+
+      Aqui: até 2 novas tentativas na MESMA fonte (cobre falha transitória de
+      rede) e, se falhar de novo, avisa a cadeia para tentar a próxima fonte.
+      Número finito de propósito — tentativa infinita trava o aparelho.
+    */
+    var errorRetries by remember { mutableStateOf(0) }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                if (errorRetries < 2) {
+                    errorRetries += 1
+                    runCatching {
+                        player.setMediaItem(MediaItem.fromUri(url))
+                        player.prepare()
+                        player.playWhenReady = true
+                    }
+                } else {
+                    onFailed()
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { runCatching { player.removeListener(listener) } }
+    }
 
     // Foco: sem isto o Compose não recebe as teclas do controle.
     LaunchedEffect(Unit) {
@@ -1070,7 +1124,18 @@ private fun showSystemBars(activity: android.app.Activity) {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
+internal fun TvEmbedPlayer(
+    url: String,
+    /** Muda quando o pai troca de fonte — reinicia o prazo do "sem vídeo". */
+    sourceKey: Int = 0,
+    /** Ainda existe outra fonte na cadeia multiprovedor. */
+    hasNext: Boolean = false,
+    /** Pede ao pai que avance para a próxima fonte da cadeia. */
+    onAdvanceSource: () -> Unit = {},
+    /** Pede ao pai que recomece a cadeia do topo. */
+    onRestartChain: () -> Unit = {},
+    onBack: () -> Unit,
+) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var failed by remember { mutableStateOf(false) }
     var pageReady by remember { mutableStateOf(false) }
@@ -1082,7 +1147,6 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     var hasVideo by remember { mutableStateOf(false) }
     /** Só avisa "sem vídeo" depois de dar tempo real ao provedor. */
     var waitedLong by remember { mutableStateOf(false) }
-    var hint by remember { mutableStateOf<String?>(null) }
     /** Recarrega a página do provedor (o "Tentar novamente" do aviso). */
     var reloadKey by remember { mutableStateOf(0) }
     /** Última chave de recarga já aplicada ao WebView. */
@@ -1208,8 +1272,8 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
         if (pageReady) {
             delay(12_000)
             if (!hasVideo && !failed) {
-                if (chainIndex + 1 < chain.size) {
-                    advanceSource()
+                if (hasNext) {
+                    onAdvanceSource()
                 } else {
                     waitedLong = true
                 }
@@ -1471,8 +1535,8 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                             // Falha real no frame principal (rede, 404, DNS):
                             // tenta a próxima fonte da cadeia antes de desistir.
                             if (request?.isForMainFrame == true) {
-                                if (chainIndex + 1 < chain.size) {
-                                    advanceSource()
+                                if (hasNext) {
+                                    onAdvanceSource()
                                 } else {
                                     failed = true
                                 }
@@ -1588,10 +1652,7 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                         pageReady = false
                         hasVideo = false
                         // Recomeça a cadeia do topo: a falha pode ter sido passageira.
-                        chainIndex = 0
-                        url = chain.firstOrNull()?.url
-                        mode = chain.firstOrNull()?.mode
-                        sourceKey++
+                        onRestartChain()
                         reloadKey++
                     }
                     TvActionButton("Voltar", primary = false) { onBack() }
