@@ -67,6 +67,7 @@ const ANDROID_APK = path.join(ROOT, 'public', 'apk', 'movieflix-android.apk')
 function tvApkPath() {
   const candidates = [
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv.apk'),
+    path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.4.apk'),
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.3.apk'),
   ]
   return candidates.find((p) => fs.existsSync(p)) ?? candidates[0]
@@ -135,15 +136,17 @@ publicRouter.get('/', (_req, res) => {
       */
       available: true,
       /*
-        A versão anunciada é a do APK QUE EXISTE em disco — conferida lendo o
-        AndroidManifest do arquivo publicado (1.0.3). Antes dizia 1.0.4, que
-        nunca foi compilado: a página oferecia uma versão que não existe.
-        Quando um APK novo for realmente gerado, atualize aqui E o
-        versionName em tv/android/app/build.gradle.kts.
+        A versão anunciada é a do APK QUE EXISTE — conferida lendo o
+        AndroidManifest do arquivo publicado. 1.0.4 é o primeiro build que
+        inclui o player que COMPILA (o `TvEmbedPlayer` referenciava estado do
+        pai e o APK 1.0.3 vinha de um código que não passava do compilador) e a
+        retomada de filme de onde parou.
+        Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
+        versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.3',
+      version: '1.0.4',
       minAndroid: '8.0',
-      sizeBytes: tv.sizeBytes || 10873657,
+      sizeBytes: tv.sizeBytes || 10890041,
       updatedAt: tv.updatedAt,
       url: '/api/apps/tv/download',
       fallbackUrl: TV_APK_CDN,
@@ -189,7 +192,7 @@ router.get('/tv', requireAdmin, (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     name: 'MovieFlix TV',
-    version: '1.0.3',
+    version: '1.0.4',
     available: info.exists,
     sizeBytes: info.sizeBytes,
     updatedAt: info.updatedAt,
@@ -213,7 +216,7 @@ router.get('/tv/download', requireAdmin, (req, res, next) => {
   }
   console.log(`[MovieFlix] APK TV baixado por ${req.user?.email ?? req.user?.id ?? 'admin'}`)
   res.type('application/vnd.android.package-archive')
-  res.download(p, 'movieflix-tv-1.0.3.apk', (err) => {
+  res.download(p, 'movieflix-tv-1.0.4.apk', (err) => {
     if (err && !res.headersSent) next(err)
   })
 })
