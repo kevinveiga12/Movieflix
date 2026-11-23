@@ -122,4 +122,31 @@ function gzipCatalog() {
 
 gzipCatalog()
 
+/**
+ * 4. Verificação de reprodução.
+ *
+ * Roda AQUI (infra da Velixir, outro datacenter) porque o provedor barra o
+ * sandbox de desenvolvimento com o desafio do Cloudflare. Grava
+ * `public/filmes/quebrados.json` — a lista de títulos que o provedor respondeu
+ * como "sem fonte", que é a tela de erro em vez do player.
+ *
+ * O script é à prova de falha: se o ambiente estiver bloqueado, ou se o tempo
+ * estourar, ele não oculta nada e o build continua. Uma falha de rede não pode
+ * impedir o site de subir.
+ */
+if (process.env.SKIP_EMBED_VERIFY === '1') {
+  console.log('[build] verificação de reprodução desligada (SKIP_EMBED_VERIFY=1)')
+} else {
+  const verify = spawnSync('node', ['scripts/verificar-no-build.mjs'], {
+    stdio: 'inherit',
+    env: process.env,
+    timeout: Number(process.env.VERIFY_BUDGET_MS ?? 480_000) + 60_000,
+  })
+  if (verify.status !== 0) {
+    console.log('[build] verificação não concluída — lista de quebrados mantida como está')
+  }
+  // Recalcula o gzip para incluir o quebrados.json recém-gerado.
+  gzipCatalog()
+}
+
 console.log('\n[build] concluído')

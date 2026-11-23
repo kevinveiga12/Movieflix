@@ -40,6 +40,9 @@ const ADMIN_CONFIG = path.join(DATA_DIR, 'admin-config.json')
  * Assim o que foi ocultado por verificação sobrevive a todo deploy, e o que o
  * painel ocultar depois vive no arquivo de runtime.
  */
+/** Arquivo gerado pelo build com os títulos quebrados (ver scripts/verificar-no-build.mjs). */
+const BROKEN_REPORT = path.join(__dirname, '..', '..', 'public', 'filmes', 'quebrados.json')
+
 const BASELINE = path.join(__dirname, '..', 'data', 'hidden-baseline.json')
 
 const EMPTY = { movies: {}, series: {}, hidden: [], updatedAt: null }
@@ -137,10 +140,11 @@ function normalizeHidden(raw) {
 }
 
 export async function readOverrides() {
+  let base
   try {
     const raw = await fs.readFile(OVERRIDES, 'utf8')
     const parsed = JSON.parse(raw)
-    return {
+    base = {
       ...EMPTY,
       ...parsed,
       movies: { ...(parsed.movies ?? {}) },
@@ -151,6 +155,11 @@ export async function readOverrides() {
     // Sem arquivo de runtime: semeia a partir do baseline versionado.
     return readBaseline()
   }
+
+  // O relatório do build vale SEMPRE, mesmo com arquivo de runtime presente:
+  // ele é refeito a cada build e representa a verificação mais recente.
+  base.hidden = normalizeHidden([...base.hidden, ...(await readBrokenReport())])
+  return base
 }
 
 /**
@@ -161,10 +170,11 @@ export async function readOverrides() {
  * vez de quebrar.
  */
 async function readBaseline() {
+  let base = { ...EMPTY, hidden: [] }
   try {
     const raw = await fs.readFile(BASELINE, 'utf8')
     const parsed = JSON.parse(raw)
-    return {
+    base = {
       ...EMPTY,
       ...parsed,
       movies: { ...(parsed.movies ?? {}) },
@@ -172,7 +182,36 @@ async function readBaseline() {
       hidden: normalizeHidden(parsed.hidden),
     }
   } catch {
-    return { ...EMPTY, hidden: [] }
+    /* sem baseline: começa vazio */
+  }
+
+  // Soma o que o build verificou e marcou como quebrado.
+  //
+  // `public/filmes/quebrados.json` é gerado por scripts/verificar-no-build.mjs
+  // durante o build. Ele existe porque o plano Free não tem volume persistente:
+  // o que o build descobre precisa viajar com o código, não com o disco.
+  //
+  // As duas fontes convivem: baseline (comitado) + relatório do build.
+  base.hidden = normalizeHidden([...base.hidden, ...(await readBrokenReport())])
+  return base
+}
+
+/** Lê a lista de quebrados que o build gerou. Ausente = lista vazia. */
+async function readBrokenReport() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(BROKEN_REPORT, 'utf8'))
+    const itens = Array.isArray(parsed?.itens) ? parsed.itens : []
+    return itens.map((i) => ({
+      tmdb_id: String(i.tmdb_id ?? ''),
+      type: i.type === 'tv' || i.type === 'series' ? 'tv' : 'movie',
+      title: i.title ?? '',
+      poster_url: i.poster_url ?? '',
+      motivo: i.motivo ?? 'embed sem fonte (verificação do build)',
+      origem: 'verificacao',
+      em: parsed.gerado_em ?? null,
+    }))
+  } catch {
+    return []
   }
 }
 
