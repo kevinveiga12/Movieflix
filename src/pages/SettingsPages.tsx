@@ -165,7 +165,7 @@ interface AppInfo {
 const FALLBACK: AppInfo = {
   android: {
     available: true,
-    version: '1.0.4',
+    version: '1.0.3',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/apk/movieflix-android.apk',
@@ -173,7 +173,7 @@ const FALLBACK: AppInfo = {
   ios: { available: true, minIos: '16.0', install: 'pwa' },
   tv: {
     available: true,
-    version: '1.0.4',
+    version: '1.0.3',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',

@@ -134,7 +134,14 @@ publicRouter.get('/', (_req, res) => {
         publicado (10.873.657 bytes) — nunca `0`.
       */
       available: true,
-      version: '1.0.4',
+      /*
+        A versão anunciada é a do APK QUE EXISTE em disco — conferida lendo o
+        AndroidManifest do arquivo publicado (1.0.3). Antes dizia 1.0.4, que
+        nunca foi compilado: a página oferecia uma versão que não existe.
+        Quando um APK novo for realmente gerado, atualize aqui E o
+        versionName em tv/android/app/build.gradle.kts.
+      */
+      version: '1.0.3',
       minAndroid: '8.0',
       sizeBytes: tv.sizeBytes || 10873657,
       updatedAt: tv.updatedAt,
