@@ -897,6 +897,63 @@ h4 {
   border-color: var(--danger);
 }
 
+/* ── Campo de senha com botão de olho ──────────────────────────────────────
+   O wrapper é `position: relative` e o botão fica ancorado à direita, dentro
+   do campo. O padding-right do input abre espaço para o ícone, de modo que o
+   texto digitado nunca fica embaixo dele. Nada disso altera a altura, a borda
+   ou o raio do `.input` — o layout das telas de login/cadastro continua igual.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input--password {
+  padding-right: 46px;
+}
+
+.password-eye {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Semitransparente em repouso, como pedido; opaco no foco/hover. */
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.password-eye:hover,
+.password-eye:focus-visible {
+  opacity: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.password-eye.is-visible {
+  opacity: 0.9;
+  color: var(--mf-red-bright);
+}
+
+.field-hint {
+  margin: 6px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+
 .alert {
   padding: 12px 16px;
   border-radius: var(--radius);

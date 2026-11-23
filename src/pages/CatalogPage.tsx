@@ -14,6 +14,7 @@ import {
   SORT_LABELS,
   type SortKey,
 } from '../lib/catalog'
+import { sessionSeed, applyVariety } from '../lib/variety'
 
 interface Props {
   kind: 'movie' | 'tv'
@@ -73,7 +74,22 @@ export function CatalogPage({ kind }: Props) {
     return searchTitles(q, kind === 'movie' ? 'movie' : 'tv')
   }, [all, debounced, kind])
 
-  const filtered = useMemo(() => sortTitles(byGenre(searched, genre), sort), [searched, genre, sort])
+  /**
+   * Lista filtrada e ordenada.
+   *
+   * A variedade por sessão só se aplica à ordem PADRÃO ("Mais populares").
+   * Quando a pessoa escolhe A–Z, Mais recentes, Mais antigos ou Melhor
+   * avaliados, a ordem pedida é respeitada ao pé da letra — variar ali seria
+   * quebrar a própria escolha dela.
+   *
+   * A busca também não é embaralhada: quem procura um título quer o resultado
+   * mais relevante primeiro, não uma combinação diferente a cada acesso.
+   */
+  const filtered = useMemo(() => {
+    const sorted = sortTitles(byGenre(searched, genre), sort)
+    const canVary = sort === 'popular' && !debounced.trim()
+    return canVary ? applyVariety(sorted, sessionSeed()) : sorted
+  }, [searched, genre, sort, debounced])
 
   function setParam(key: string, value: string) {
     const next = new URLSearchParams(params)

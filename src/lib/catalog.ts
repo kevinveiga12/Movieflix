@@ -1,4 +1,5 @@
 import type { Title, MediaType } from './types'
+import { sessionSeed, sampleWithSeed } from './variety'
 
 /**
  * Catálogo estático servido de /filmes/*.json.
@@ -336,32 +337,66 @@ export function searchTitles(query: string, type?: MediaType): Title[] {
   return scored.sort((a, b) => b.score - a.score).map((s) => s.t)
 }
 
-/** Destaques da home: os mais populares que realmente tocam. */
-export function featured(count = 5): Title[] {
-  return sortTitles(playableMovies(), 'popular').slice(0, count)
+/**
+ * Destaques da home: os mais populares que realmente tocam.
+ *
+ * Com `seed`, sorteia 5 entre os 40 mais populares — o herói da home também
+ * muda a cada acesso, sem trazer um título irrelevante para a primeira dobra.
+ */
+export function featured(count = 5, seed?: string): Title[] {
+  const pool = sortTitles(playableMovies(), 'popular').slice(0, 40)
+  if (!seed) return pool.slice(0, count)
+  return sampleWithSeed(pool, count, `${seed}:hero`)
 }
 
-export function rowsForHome(): Array<{ title: string; items: Title[] }> {
+/**
+ * Fileiras da home, com variedade por sessão.
+ *
+ * ── O que mudou e por quê ───────────────────────────────────────────────────
+ *
+ * Antes cada fileira era `sortTitles(...).slice(0, 20)` — os MESMOS 20 títulos
+ * em todo acesso, sempre na mesma ordem. Agora cada fileira monta um pool
+ * maior (os 200 melhores segundo o critério da fileira) e SORTEIA 20 dele com
+ * a semente da sessão.
+ *
+ * O critério da fileira é preservado: "Lançamentos" continua trazendo títulos
+ * recentes, "Em alta" continua trazendo populares, cada gênero continua sendo
+ * aquele gênero. O que varia é QUAIS títulos do pool aparecem.
+ *
+ * A semente é a mesma durante toda a sessão, então a home não se reorganiza
+ * enquanto a pessoa navega — e muda por completo no próximo acesso.
+ */
+export function rowsForHome(seed: string = sessionSeed()): Array<{ title: string; items: Title[] }> {
   const movies = playableMovies()
   const series = playableSeries()
   const rows: Array<{ title: string; items: Title[] }> = []
 
-  const recent = sortTitles(movies, 'recent').slice(0, 20)
+  /** Pool de 200 + amostra de 20: variedade sem perder o critério da fileira. */
+  const pick = (list: Title[], key: SortKey, tag: string) =>
+    sampleWithSeed(sortTitles(list, key).slice(0, 200), 20, `${seed}:${tag}`)
+
+  const recent = pick(movies, 'recent', 'recent')
   if (recent.length) rows.push({ title: 'Lançamentos', items: recent })
 
-  const popular = sortTitles(movies, 'popular').slice(0, 20)
+  const popular = pick(movies, 'popular', 'popular')
   if (popular.length) rows.push({ title: 'Em alta', items: popular })
 
-  const seriesRow = sortTitles(series, 'popular').slice(0, 20)
+  const seriesRow = pick(series, 'popular', 'series')
   if (seriesRow.length) rows.push({ title: 'Séries', items: seriesRow })
 
-  const topRated = sortTitles(movies, 'rating')
-    .filter((t) => (t.vote_average ?? 0) >= 6)
-    .slice(0, 20)
+  const topRated = sampleWithSeed(
+    sortTitles(movies, 'rating').filter((t) => (t.vote_average ?? 0) >= 6).slice(0, 200),
+    20,
+    `${seed}:top`,
+  )
   if (topRated.length) rows.push({ title: 'Aclamados pela crítica', items: topRated })
 
   for (const genre of ['Ação', 'Comédia', 'Terror', 'Drama', 'Suspense', 'Animação', 'Romance']) {
-    const items = sortTitles(byGenre(movies, genre), 'popular').slice(0, 20)
+    const items = sampleWithSeed(
+      sortTitles(byGenre(movies, genre), 'popular').slice(0, 200),
+      20,
+      `${seed}:g:${genre}`,
+    )
     if (items.length >= 6) rows.push({ title: genre, items })
   }
 

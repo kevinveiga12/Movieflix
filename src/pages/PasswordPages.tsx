@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { PasswordField } from '../components/PasswordField'
 
 /**
  * Recuperação de senha por CÓDIGO de 6 dígitos.
@@ -236,31 +237,21 @@ export function ResetPasswordPage() {
                 style={{ letterSpacing: 8, fontSize: 22, textAlign: 'center' }}
               />
             </div>
-            <div className="field">
-              <label htmlFor="password">Nova senha</label>
-              <input
-                id="password"
-                className="input"
-                type="password"
-                required
-                minLength={6}
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="confirm">Confirmar nova senha</label>
-              <input
-                id="confirm"
-                className="input"
-                type="password"
-                required
-                autoComplete="new-password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-              />
-            </div>
+            <PasswordField
+              id="password"
+              label="Nova senha"
+              value={password}
+              onChange={setPassword}
+              autoComplete="new-password"
+              hint="Use pelo menos 6 caracteres."
+            />
+            <PasswordField
+              id="confirm"
+              label="Confirmar nova senha"
+              value={confirm}
+              onChange={setConfirm}
+              autoComplete="new-password"
+            />
             <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={busy}>
               {busy ? 'Salvando…' : 'Salvar nova senha'}
             </button>

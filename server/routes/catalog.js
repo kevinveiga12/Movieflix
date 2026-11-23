@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { readOverrides, applyOverrides } from '../lib/store.js'
 import { loadStatic, availabilityStats } from '../lib/static-catalog.js'
+import { shuffleWithSeed } from '../lib/shuffle.js'
 
 const router = Router()
 
@@ -15,12 +16,19 @@ async function loadBase(kind) {
   return loadStatic(kind)
 }
 
-/** GET /api/catalog/movies?genre=&sort=&q=&limit=&offset= */
+/**
+ * GET /api/catalog/movies?genre=&sort=&q=&limit=&offset=&seed=
+ *
+ * `seed` é opcional e NÃO altera o contrato: sem ele a resposta é idêntica à
+ * de antes (ordem por popularidade). Com ele, a ordem do topo é permutada de
+ * forma determinística — a mesma semente devolve sempre a mesma sequência, o
+ * que mantém a paginação coerente entre páginas e sessões.
+ */
 router.get('/movies', async (req, res, next) => {
   try {
     const overrides = await readOverrides()
     let list = applyOverrides(await loadBase('movie'), overrides, 'movie')
-    list = filterAndSort(list, req.query)
+    list = applyVariety(filterAndSort(list, req.query), req.query.seed)
     res.json({ total: list.length, items: paginate(list, req.query) })
   } catch (e) {
     next(e)
@@ -31,7 +39,7 @@ router.get('/series', async (req, res, next) => {
   try {
     const overrides = await readOverrides()
     let list = applyOverrides(await loadBase('tv'), overrides, 'series')
-    list = filterAndSort(list, req.query)
+    list = applyVariety(filterAndSort(list, req.query), req.query.seed)
     res.json({ total: list.length, items: paginate(list, req.query) })
   } catch (e) {
     next(e)
@@ -196,6 +204,32 @@ router.get('/genres', async (_req, res, next) => {
     next(e)
   }
 })
+
+/**
+ * Tamanho do "pool" que recebe a variação.
+ *
+ * A ordenação pedida (popular/recente/nota) continua sendo a base — o que muda
+ * é a ordem DENTRO do topo. Embaralhar os 500 primeiros dá combinações
+ * diferentes a cada acesso sem jogar um título obscuro na primeira fileira, e
+ * como a permutação é determinística por semente a paginação continua coerente.
+ *
+ * O restante da lista segue na ordem original, então TODO título continua
+ * alcançável descendo pelo catálogo — nada é removido nem escondido.
+ */
+const VARIETY_POOL = 500
+
+/**
+ * Aplica a variação por sessão sobre uma lista JÁ ordenada.
+ *
+ * Sem `seed` devolve a lista intacta (comportamento antigo, usado por quem não
+ * pediu variedade — busca, painel administrativo, testes).
+ */
+function applyVariety(sorted, seed) {
+  if (!seed || sorted.length < 2) return sorted
+  const poolSize = Math.min(VARIETY_POOL, sorted.length)
+  const pool = shuffleWithSeed(sorted.slice(0, poolSize), seed)
+  return pool.concat(sorted.slice(poolSize))
+}
 
 function filterAndSort(list, q) {
   let out = list

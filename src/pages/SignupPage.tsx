@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { PasswordField } from '../components/PasswordField'
 
 export function SignupPage() {
   const { signUp } = useAuth()
@@ -108,33 +109,23 @@ export function SignupPage() {
               placeholder="voce@email.com"
             />
           </div>
-          <div className="field">
-            <label htmlFor="password">Senha</label>
-            <input
-              id="password"
-              className="input"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mínimo 6 caracteres"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="confirm">Confirmar senha</label>
-            <input
-              id="confirm"
-              className="input"
-              type="password"
-              autoComplete="new-password"
-              required
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Repita a senha"
-            />
-          </div>
+          <PasswordField
+            id="password"
+            label="Senha"
+            value={password}
+            onChange={setPassword}
+            autoComplete="new-password"
+            placeholder="Mínimo 6 caracteres"
+            hint="Use pelo menos 6 caracteres."
+          />
+          <PasswordField
+            id="confirm"
+            label="Confirmar senha"
+            value={confirm}
+            onChange={setConfirm}
+            autoComplete="new-password"
+            placeholder="Repita a senha"
+          />
           <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={busy}>
             {busy ? 'Criando…' : 'Criar conta'}
           </button>

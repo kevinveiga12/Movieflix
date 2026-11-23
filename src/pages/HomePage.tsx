@@ -4,6 +4,7 @@ import { Hero } from '../components/Hero'
 import { CarouselRow } from '../components/CarouselRow'
 import { PosterCard } from '../components/PosterCard'
 import { loadCatalog, featured, rowsForHome, getById } from '../lib/catalog'
+import { sessionSeed } from '../lib/variety'
 import { useAuth } from '../context/AuthContext'
 import { useHistory, parseEpisodeId } from '../lib/userData'
 import { PlayIcon } from '../components/Icons'
@@ -36,8 +37,8 @@ export function HomePage() {
     }
   }, [])
 
-  const heroes = useMemo(() => (ready ? featured(5) : []), [ready])
-  const rows = useMemo(() => (ready ? rowsForHome() : []), [ready])
+  const heroes = useMemo(() => (ready ? featured(5, sessionSeed()) : []), [ready])
+  const rows = useMemo(() => (ready ? rowsForHome(sessionSeed()) : []), [ready])
   const resume = useMemo(() => {
     if (!ready || !user) return []
     return continueWatching()

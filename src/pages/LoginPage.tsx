@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { PasswordField } from '../components/PasswordField'
 
 export function LoginPage() {
   const { signIn } = useAuth()
@@ -49,19 +50,13 @@ export function LoginPage() {
               placeholder="voce@email.com"
             />
           </div>
-          <div className="field">
-            <label htmlFor="password">Senha</label>
-            <input
-              id="password"
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-            />
-          </div>
+          <PasswordField
+            id="password"
+            label="Senha"
+            value={password}
+            onChange={setPassword}
+            autoComplete="current-password"
+          />
           <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={busy}>
             {busy ? 'Entrando…' : 'Entrar'}
           </button>

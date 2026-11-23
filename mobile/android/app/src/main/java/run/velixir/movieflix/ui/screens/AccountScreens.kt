@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -39,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import run.velixir.movieflix.AppViewModel
@@ -63,14 +66,38 @@ private fun MfField(
     password: Boolean = false,
     keyboard: KeyboardType = KeyboardType.Text,
 ) {
+    /*
+      Campo de senha com botão de olho.
+
+      A senha começa escondida (PasswordVisualTransformation). O ícone só aparece
+      depois que a pessoa começa a digitar — antes disso não há nada para
+      conferir. Tocar no olho alterna entre escondida e visível.
+
+      Nada muda na autenticação: o valor continua sendo enviado exatamente como
+      antes. O que muda é só a transformação visual do campo, e o estado do
+      olho vive na memória do composable (nunca é persistido).
+    */
+    var visible by remember { mutableStateOf(false) }
+
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(label, color = MfColors.TextDim, fontSize = 13.sp) },
         singleLine = true,
-        visualTransformation = if (password) PasswordVisualTransformation()
-        else androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation = if (password && !visible) PasswordVisualTransformation()
+        else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        trailingIcon = if (password && value.isNotEmpty()) {
+            {
+                IconButton(onClick = { visible = !visible }) {
+                    Text(
+                        if (visible) "\uD83D\uDE48" else "\uD83D\uDC41",
+                        fontSize = 17.sp,
+                        color = if (visible) MfColors.Red else MfColors.TextDim,
+                    )
+                }
+            }
+        } else null,
         shape = RoundedCornerShape(10.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MfColors.Red,

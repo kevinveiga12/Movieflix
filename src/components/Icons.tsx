@@ -241,3 +241,32 @@ export function NextEpisodeIcon({ size = 20, className }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * Olho aberto — "mostrar senha".
+ *
+ * Usado no botão que revela o que foi digitado no campo de senha. O traço é
+ * fino e a cor vem de `currentColor`, então o botão pode ficar semitransparente
+ * em repouso e opaco no foco/hover sem precisar de outra variante.
+ */
+export function EyeIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+/** Olho cortado — "esconder senha". */
+export function EyeOffIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M10.6 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a18.6 18.6 0 0 1-3.2 4.1" />
+      <path d="M6.6 6.6A18.5 18.5 0 0 0 2 12s3.6 7 10 7a10.7 10.7 0 0 0 5.4-1.4" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+      <path d="M2 2l20 20" />
+    </svg>
+  )
+}
+

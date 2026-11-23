@@ -65,18 +65,30 @@ class MovieFlixApi(
 
     // ── Catálogo ────────────────────────────────────────────────────────────
 
-    suspend fun movies(limit: Int = 60, offset: Int = 0, genre: String? = null): CatalogResponse {
+    suspend fun movies(
+        limit: Int = 60,
+        offset: Int = 0,
+        genre: String? = null,
+        seed: String? = null,
+    ): CatalogResponse {
         val q = buildString {
             append("/api/catalog/movies?limit=$limit&offset=$offset")
             if (!genre.isNullOrBlank()) append("&genre=${enc(genre)}")
+            if (!seed.isNullOrBlank()) append("&seed=${enc(seed)}")
         }
         return json.decodeFromString(get(q))
     }
 
-    suspend fun series(limit: Int = 60, offset: Int = 0, genre: String? = null): CatalogResponse {
+    suspend fun series(
+        limit: Int = 60,
+        offset: Int = 0,
+        genre: String? = null,
+        seed: String? = null,
+    ): CatalogResponse {
         val q = buildString {
             append("/api/catalog/series?limit=$limit&offset=$offset")
             if (!genre.isNullOrBlank()) append("&genre=${enc(genre)}")
+            if (!seed.isNullOrBlank()) append("&seed=${enc(seed)}")
         }
         return json.decodeFromString(get(q))
     }

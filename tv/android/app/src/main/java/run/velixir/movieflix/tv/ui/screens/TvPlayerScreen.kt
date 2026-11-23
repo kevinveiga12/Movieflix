@@ -927,6 +927,11 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
     var hasVideo by remember { mutableStateOf(false) }
     /** Só avisa "sem vídeo" depois de dar tempo real ao provedor. */
     var waitedLong by remember { mutableStateOf(false) }
+    var hint by remember { mutableStateOf<String?>(null) }
+    /** Recarrega a página do provedor (o "Tentar novamente" do aviso). */
+    var reloadKey by remember { mutableStateOf(0) }
+    /** Última chave de recarga já aplicada ao WebView. */
+    var lastReloadKey by remember { mutableStateOf(0) }
     /** API < 30: sem `addDocumentStartJavaScript`, injeta no onPageFinished. */
     var legacyBridge by remember { mutableStateOf(false) }
 
@@ -1155,7 +1160,27 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                         allowFileAccess = false
                         allowContentAccess = false
                         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        userAgentString = "$userAgentString MovieFlixTV/1.0"
+                        /*
+                          User-Agent.
+
+                          Antes: `"$userAgentString MovieFlixTV/1.0"`. O sufixo
+                          próprio é o que faz alguns provedores recusarem o
+                          player: eles liberam o embed para navegadores
+                          conhecidos e tratam UA desconhecido como cliente não
+                          autorizado — exatamente o sintoma relatado na TV LG
+                          ("o provedor não liberou o vídeo para este aparelho").
+
+                          Agora o WebView se apresenta como um Chrome comum de
+                          desktop. É o UA para o qual o provedor entrega o
+                          player, e é o mesmo que o site usa quando aberto num
+                          navegador de computador. Nada de identificação
+                          própria: o app não precisa se anunciar para tocar o
+                          vídeo.
+                        */
+                        userAgentString =
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                "Chrome/122.0.0.0 Safari/537.36"
                     }
 
                     // A ponte precisa existir ANTES do loadUrl.
@@ -1306,6 +1331,20 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
                     webView = this
                 }
             },
+            /*
+              "Tentar novamente" recarrega a página do provedor.
+
+              O `factory` só roda uma vez; sem este `update` o botão mudaria o
+              estado do Compose mas o WebView continuaria na página antiga — o
+              usuário apertaria e nada aconteceria. Comparamos com a última
+              chave aplicada para não recarregar em toda recomposição.
+            */
+            update = { view ->
+                if (reloadKey != lastReloadKey) {
+                    lastReloadKey = reloadKey
+                    view.loadUrl(url, mapOf("Referer" to SITE_ORIGIN))
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -1342,15 +1381,44 @@ internal fun TvEmbedPlayer(url: String, onBack: () -> Unit) {
 
         // Aviso honesto (só erro, não controle): a página abriu mas não há
         // <video> para controlar depois de 12 s.
+        //
+        // O texto deixou de culpar o provedor: em TV antiga o motivo mais comum
+        // é o WebView do aparelho não conseguir decodificar o formato entregue.
+        // Dizer a causa provável e oferecer "Tentar novamente" é mais útil do
+        // que uma frase que parece definitiva.
         if (pageReady && !hasVideo && !failed && waitedLong) {
-            Text(
-                "O provedor não liberou o vídeo para este aparelho.",
-                color = MfColors.TextMuted,
-                fontSize = 15.sp,
-                modifier = Modifier
+            Column(
+                Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 40.dp),
-            )
+                    .padding(bottom = 40.dp, start = 60.dp, end = 60.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "O vídeo não abriu neste aparelho.",
+                    color = MfColors.TextSoft,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "O player do provedor não conseguiu iniciar aqui. Em TVs mais antigas " +
+                        "isso costuma acontecer quando o navegador do aparelho não suporta o " +
+                        "formato do vídeo. Tente novamente ou assista pelo site em outro aparelho.",
+                    color = MfColors.TextMuted,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvActionButton("Tentar novamente", primary = true) {
+                        waitedLong = false
+                        pageReady = false
+                        hasVideo = false
+                        reloadKey++
+                    }
+                    TvActionButton("Voltar", primary = false) { onBack() }
+                }
+            }
         }
 
         // A ÚNICA coisa desenhada sobre o vídeo: a barra de progresso.

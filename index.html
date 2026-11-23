@@ -61,6 +61,52 @@
         }
       })()
     </script>
+    <!--
+      Aviso para navegadores antigos de TV.
+
+      TVs "não-smart" e Smart TVs antigas (LG NetCast, Samsung Orsay, etc.) usam
+      motores WebKit de 2012–2015 que não conseguem executar o bundle moderno do
+      app. Sem este aviso a tela fica PRETA e o usuário conclui que "o site não
+      funciona" — sem saber que o problema é o navegador do aparelho.
+
+      O teste é conservador: só dispara quando o motor realmente não tem o que o
+      app precisa (sem `Promise`, sem `fetch`, sem `class`). Navegadores atuais,
+      inclusive os de Smart TV de 2018 em diante, passam direto e nunca veem
+      esta mensagem.
+
+      O texto é escrito em HTML puro (sem JS moderno) justamente porque roda
+      nesses motores antigos.
+    -->
+    <div id="legacy-notice" style="display:none;position:fixed;inset:0;z-index:99999;background:#0a0a0f;color:#e8e8ef;font-family:Arial,Helvetica,sans-serif;padding:8% 6%;text-align:center;line-height:1.6">
+      <h1 style="color:#e50914;font-size:26px;margin:0 0 14px">MovieFlix</h1>
+      <p style="font-size:17px;margin:0 0 12px"><b>O navegador deste aparelho é antigo demais para abrir o MovieFlix.</b></p>
+      <p style="font-size:15px;color:#a8a8b8;margin:0 0 18px">
+        O site precisa de um navegador com suporte a JavaScript moderno. TVs e
+        aparelhos de 2015 ou anteriores normalmente não têm esse suporte.
+      </p>
+      <p style="font-size:15px;color:#a8a8b8;margin:0 0 8px"><b>Como assistir:</b></p>
+      <p style="font-size:15px;color:#a8a8b8;margin:0 0 6px">• Use o aplicativo MovieFlix TV em um TV Box, Fire TV ou Android TV;</p>
+      <p style="font-size:15px;color:#a8a8b8;margin:0 0 6px">• Ou abra <b>movieflix.velixir.run</b> no celular, tablet ou computador.</p>
+    </div>
+    <script>
+      (function () {
+        // Só os motores realmente incapazes caem aqui.
+        var ok = true;
+        try {
+          ok = typeof Promise === 'function' && typeof fetch === 'function';
+          // `class` e arrow function: se o parser não aceitar, o try quebra.
+          eval('class __mfT{}; var __mfA=()=>1;');
+        } catch (e) {
+          ok = false;
+        }
+        if (!ok) {
+          var n = document.getElementById('legacy-notice');
+          if (n) n.style.display = 'block';
+          var r = document.getElementById('root');
+          if (r) r.style.display = 'none';
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

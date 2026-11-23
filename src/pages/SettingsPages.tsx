@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { DownloadIcon, CheckIcon, InfoIcon } from '../components/Icons'
 import { detectAppEnv, rememberAppEnv } from '../lib/appEnv'
+import { PasswordField } from '../components/PasswordField'
 
 export function SettingsPage() {
   const { user, updatePassword, signOut } = useAuth()
@@ -61,29 +62,21 @@ export function SettingsPage() {
             <p className="panel-sub">Use uma senha com pelo menos 6 caracteres.</p>
             {msg && <div className={`alert alert--${msg.type}`}>{msg.text}</div>}
             <form onSubmit={changePassword}>
-              <div className="field">
-                <label htmlFor="newpass">Nova senha</label>
-                <input
-                  id="newpass"
-                  className="input"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  minLength={6}
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="confpass">Confirmar senha</label>
-                <input
-                  id="confpass"
-                  className="input"
-                  type="password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  required
-                />
-              </div>
+              <PasswordField
+                id="newpass"
+                label="Nova senha"
+                value={password}
+                onChange={setPassword}
+                autoComplete="new-password"
+                hint="Use pelo menos 6 caracteres."
+              />
+              <PasswordField
+                id="confpass"
+                label="Confirmar senha"
+                value={confirm}
+                onChange={setConfirm}
+                autoComplete="new-password"
+              />
               <button className="btn btn--primary" type="submit" disabled={busy}>
                 {busy ? 'Salvando…' : 'Alterar senha'}
               </button>

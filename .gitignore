@@ -25,6 +25,7 @@ tv/android/build/
 tv/android/local.properties
 .velixir.json
 
+<<<<<<< HEAD
 # Casca Android (mobile/shell) — build local, nunca versionar
 mobile/shell/android/.gradle/
 mobile/shell/android/app/build/
@@ -32,3 +33,7 @@ mobile/shell/android/build/
 mobile/shell/android/local.properties
 mobile/shell/ios/build/
 mobile/shell/ios/DerivedData/
+=======
+# Build antigo de TV (artefatos gerados, nunca versionar)
+movieflix-tv/
+>>>>>>> e8dba3c (feat: navegação de séries na TV, olho na senha, scroll infinito e variedade por sessão)

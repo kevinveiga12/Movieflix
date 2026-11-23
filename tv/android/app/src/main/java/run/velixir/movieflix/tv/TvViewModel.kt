@@ -36,6 +36,19 @@ data class TvState(
     val adminStats: AdminStats? = null,
     val adminError: String? = null,
     val toast: String? = null,
+    /**
+     * Paginação do catálogo (item 3).
+     *
+     * `total` é o que o servidor diz existir para o filtro atual; `hasMore`
+     * compara o que já está em memória com esse total. `loadingMore` é separado
+     * de `loading` de propósito: o indicador discreto do rodapé não pode
+     * substituir a grade inteira por um spinner.
+     */
+    val catalogTotal: Int = 0,
+    val hasMore: Boolean = false,
+    val loadingMore: Boolean = false,
+    /** Semente da sessão — mantém a ordem estável entre páginas. */
+    val seed: String = "",
 )
 
 /**
@@ -60,9 +73,35 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             loggedIn = session.isLoggedIn,
             email = session.email,
             isAdmin = session.isLoggedIn && session.isAdmin,
+            // Semente da sessão: a ordem do catálogo fica estável enquanto a
+            // pessoa navega e muda por completo no próximo acesso.
+            seed = newSeed(),
         ),
     )
     val state: StateFlow<TvState> = _state.asStateFlow()
+
+    /**
+     * Estado da paginação por tipo de catálogo.
+     *
+     * Fica fora do `TvState` porque é controle interno: a UI só precisa saber
+     * `hasMore` e `loadingMore`. Guardar aqui evita que uma recomposição
+     * dispare uma segunda busca da mesma página.
+     */
+    private data class PageCursor(
+        val kind: String,
+        val genre: String?,
+        val offset: Int,
+        val total: Int,
+        val loading: Boolean,
+    )
+
+    private var cursor: PageCursor? = null
+
+    /** Tamanho de cada bloco. 60 é o que o servidor devolve por padrão. */
+    private val pageSize = 60
+
+    private fun newSeed(): String =
+        "${System.currentTimeMillis().toString(36)}-${(0..0xFFFFFF).random().toString(36)}"
 
     init {
         loadHome()
@@ -82,8 +121,9 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             update { it.copy(loading = true, error = null) }
             try {
-                val m = api.movies(limit = 40)
-                val s = api.series(limit = 40)
+                val seed = _state.value.seed
+                val m = api.movies(limit = 40, seed = seed)
+                val s = api.series(limit = 40, seed = seed)
                 val g = runCatching { api.genres() }.getOrNull()
                 update {
                     it.copy(
@@ -99,18 +139,106 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Carrega a PRIMEIRA página de um catálogo (Filmes ou Séries).
+     *
+     * Substitui a lista e reinicia o cursor. Chamado ao entrar na tela e ao
+     * trocar de gênero.
+     */
     fun loadCatalog(kind: String, genre: String? = null) {
+        cursor = PageCursor(kind = kind, genre = genre, offset = 0, total = 0, loading = true)
         viewModelScope.launch {
-            update { it.copy(loading = true, error = null) }
+            update { it.copy(loading = true, error = null, loadingMore = false) }
             try {
-                val r = if (kind == "tv") api.series(limit = 60, genre = genre)
-                else api.movies(limit = 60, genre = genre)
+                val seed = _state.value.seed
+                val r = if (kind == "tv") api.series(limit = pageSize, offset = 0, genre = genre, seed = seed)
+                else api.movies(limit = pageSize, offset = 0, genre = genre, seed = seed)
+
+                cursor = PageCursor(
+                    kind = kind,
+                    genre = genre,
+                    offset = r.items.size,
+                    total = r.total,
+                    loading = false,
+                )
                 update {
-                    if (kind == "tv") it.copy(loading = false, series = r.items)
-                    else it.copy(loading = false, movies = r.items)
+                    it.copy(
+                        loading = false,
+                        movies = if (kind == "tv") it.movies else r.items,
+                        series = if (kind == "tv") r.items else it.series,
+                        catalogTotal = r.total,
+                        hasMore = r.items.size < r.total,
+                    )
                 }
             } catch (e: Exception) {
-                update { it.copy(loading = false, error = friendly(e)) }
+                cursor = null
+                update { it.copy(loading = false, error = friendly(e), hasMore = false) }
+            }
+        }
+    }
+
+    /**
+     * Carrega o PRÓXIMO bloco do catálogo atual (item 3 — carregamento
+     * automático).
+     *
+     * Regras que evitam os problemas clássicos de scroll infinito:
+     *
+     *  • Uma requisição por vez: se `cursor.loading` já é verdadeiro, sai. Sem
+     *    isso, o LazyGrid dispara vários pedidos ao chegar perto do fim e a
+     *    mesma página é buscada 3–4 vezes.
+     *  • Sem duplicatas: os itens novos são filtrados por `tmdb_id` contra o que
+     *    já está em memória. Mesmo que o servidor devolva um item repetido (por
+     *    causa de uma alteração no catálogo entre páginas), ele não aparece
+     *    duas vezes.
+     *  • Sem buracos: o offset avança pelo tamanho REAL recebido, não pelo
+     *    tamanho pedido. Se o servidor devolver menos que `pageSize`, a próxima
+     *    chamada continua de onde parou.
+     *  • Para no fim: quando o que está em memória alcança `total`, `hasMore`
+     *    vira falso e a UI para de pedir.
+     */
+    fun loadMore() {
+        val c = cursor ?: return
+        if (c.loading) return
+        val current = _state.value
+        val loaded = if (c.kind == "tv") current.series.size else current.movies.size
+        if (loaded >= c.total && c.total > 0) {
+            update { it.copy(hasMore = false) }
+            return
+        }
+
+        cursor = c.copy(loading = true)
+        update { it.copy(loadingMore = true) }
+
+        viewModelScope.launch {
+            try {
+                val seed = _state.value.seed
+                val r = if (c.kind == "tv")
+                    api.series(limit = pageSize, offset = c.offset, genre = c.genre, seed = seed)
+                else
+                    api.movies(limit = pageSize, offset = c.offset, genre = c.genre, seed = seed)
+
+                update { st ->
+                    val existing = if (c.kind == "tv") st.series else st.movies
+                    val seen = existing.map { it.tmdbId }.toHashSet()
+                    val fresh = r.items.filter { seen.add(it.tmdbId) }
+                    val merged = existing + fresh
+                    st.copy(
+                        series = if (c.kind == "tv") merged else st.series,
+                        movies = if (c.kind == "tv") st.movies else merged,
+                        catalogTotal = r.total,
+                        hasMore = merged.size < r.total,
+                        loadingMore = false,
+                    )
+                }
+
+                cursor = c.copy(
+                    offset = c.offset + r.items.size,
+                    total = r.total,
+                    loading = false,
+                )
+            } catch (e: Exception) {
+                cursor = c.copy(loading = false)
+                update { it.copy(loadingMore = false, toast = friendly(e)) }
             }
         }
     }

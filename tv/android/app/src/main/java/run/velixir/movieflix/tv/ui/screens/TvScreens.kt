@@ -13,11 +13,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -28,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -251,8 +256,48 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
     val s by vm.state.collectAsState()
     val list = if (kind == "tv") s.series else s.movies
     var genre by remember { mutableStateOf<String?>(null) }
+    val gridState = rememberLazyGridState()
 
     LaunchedEffect(kind) { vm.loadCatalog(kind) }
+
+    /*
+      ── Carregamento automático (item 3) ──────────────────────────────────────
+
+      Antes a tela pedia 60 itens e parava: a navegação terminava no fim da
+      grade mesmo existindo centenas de títulos cadastrados.
+
+      Agora, quando o foco chega perto do último item carregado, o próximo bloco
+      é buscado sozinho. O gatilho é a POSIÇÃO DO FOCO, não o scroll: na TV quem
+      rola é o D-pad, e `layoutInfo.visibleItemsInfo` só reflete o que está na
+      tela. Usar o índice do item focado garante que o carregamento acontece
+      exatamente quando a pessoa está chegando ao fim — e não antes.
+
+      `loadMore()` já se protege contra pedidos simultâneos e duplicatas, então
+      este efeito pode disparar sem medo de consultas repetidas.
+
+      O foco NÃO é movido por este efeito: só pedimos dados. A grade continua
+      com o mesmo `LazyGridState`, então a posição e o item focado permanecem
+      onde estavam quando os novos cards chegam.
+    */
+    LaunchedEffect(gridState, list.size) {
+        snapshotFlow {
+            val info = gridState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            lastVisible to list.size
+        }.collect { (lastVisible, size) ->
+            /*
+              Lemos `hasMore` do ViewModel a cada emissão, e não do `s` capturado
+              na composição: o valor do estado do Compose dentro do efeito fica
+              congelado no instante em que ele começou, e depois do primeiro
+              bloco carregado ele continuaria dizendo "não há mais" — o
+              carregamento pararia na segunda página.
+            */
+            val live = vm.state.value
+            if (live.hasMore && size > 0 && lastVisible >= size - 12) {
+                vm.loadMore()
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         TvPageTitle(if (kind == "tv") "Séries" else "Filmes")
@@ -282,6 +327,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             s.loading && list.isEmpty() -> TvLoading()
             list.isEmpty() -> TvEmpty("Nada por aqui ainda.")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                state = gridState,
                 columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
                 contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -289,6 +335,52 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             ) {
                 items(list.size, key = { "${list[it].type}-${list[it].tmdbId}" }) { i ->
                     TvPosterCard(list[i], { onOpen(list[i]) }, width = 200)
+                }
+                /*
+                  Rodapé discreto: um spinner pequeno enquanto o próximo bloco
+                  chega, e o total quando o catálogo termina. Não bloqueia a
+                  grade nem rouba o foco — é apenas um item a mais no fim.
+                */
+                if (s.hasMore) {
+                    item(key = "loading-more") {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = MfColors.Red,
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    "Carregando mais títulos…",
+                                    color = MfColors.TextDim,
+                                    fontFamily = MfSans,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                    }
+                } else if (list.size > 60) {
+                    item(key = "end-of-catalog") {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "Você chegou ao fim · ${list.size} títulos",
+                                color = MfColors.TextDim,
+                                fontFamily = MfSans,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -723,9 +815,46 @@ fun TvDetailScreen(
 ) {
     val s by vm.state.collectAsState()
     val isSeries = title.isSeries
-    var selectedSeason by remember { mutableStateOf(1) }
+
+    /*
+      ── Navegação de séries ──────────────────────────────────────────────────
+
+      Antes: `selectedSeason` começava fixo em 1. Se a série não tivesse
+      temporada 1 (ou se as temporadas ainda não tivessem carregado), a lista de
+      episódios ficava VAZIA e não havia como chegar aos episódios — a tela
+      parecia quebrada. Além disso o botão "Assistir" lia
+      `title.episodesAvailable`, campo que NÃO existe quando o título vem do
+      Histórico ou dos Favoritos (lá o Title é montado na mão), então o botão
+      caía sempre em T1E1 mesmo quando a série começava em outra temporada.
+
+      Agora:
+        • `selectedSeason` é nulo até as temporadas chegarem e passa a apontar
+          para a PRIMEIRA temporada real da série (respeitando a ordem que o
+          servidor devolve, já ordenada por season_number).
+        • O botão principal mostra "Assistir — Temporada X, Episódio Y" com os
+          números reais, e usa a temporada selecionada.
+        • Trocar de temporada troca a lista de episódios; episódios de
+          temporadas diferentes nunca se misturam, porque a lista vem de
+          `season.episodes` daquela temporada.
+        • Cada episódio é um item focável do LazyColumn: o D-pad desce por eles
+          e OK abre o player. O foco é preservado porque a lista é a mesma
+          instância enquanto a temporada não muda.
+    */
+    var selectedSeason by remember(title.tmdbId) { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(title.tmdbId) { if (isSeries) vm.loadSeasons(title.tmdbId) }
+
+    // Assim que as temporadas chegam, aponta para a primeira de verdade.
+    LaunchedEffect(s.seasons, title.tmdbId) {
+        if (!isSeries) return@LaunchedEffect
+        val first = s.seasons.firstOrNull()?.seasonNumber
+        if (first != null && s.seasons.none { it.seasonNumber == selectedSeason }) {
+            selectedSeason = first
+        }
+    }
+
+    val season = s.seasons.firstOrNull { it.seasonNumber == selectedSeason } ?: s.seasons.firstOrNull()
+    val firstEpisode = season?.episodes?.firstOrNull()
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
@@ -779,10 +908,10 @@ fun TvDetailScreen(
                         Spacer(Modifier.width(14.dp))
                         Text(title.quality, color = MfColors.TextMuted, fontFamily = MfSans, fontSize = 14.sp)
                     }
-                    if (isSeries && title.seasons != null) {
+                    if (isSeries && s.seasons.isNotEmpty()) {
                         Spacer(Modifier.width(14.dp))
                         Text(
-                            "${title.seasons} temporadas",
+                            "${s.seasons.size} temporada(s)",
                             color = MfColors.TextMuted,
                             fontFamily = MfSans,
                             fontSize = 14.sp,
@@ -791,12 +920,25 @@ fun TvDetailScreen(
                 }
                 Spacer(Modifier.height(20.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    TvActionButton("▶  Assistir", primary = true) {
-                        if (isSeries) {
-                            val parts = title.episodesAvailable?.firstOrNull()
-                                ?.split("/")?.mapNotNull { it.toIntOrNull() }
-                            onPlay(parts?.getOrNull(0) ?: 1, parts?.getOrNull(1) ?: 1)
-                        } else onPlay(null, null)
+                    if (isSeries) {
+                        /*
+                          Opção principal: "Assistir — Temporada X, Episódio Y".
+
+                          Usa a temporada selecionada e o primeiro episódio dela.
+                          Enquanto as temporadas carregam, cai para o primeiro
+                          par de `episodes_available` (que o catálogo já traz) —
+                          assim o botão nunca fica sem destino.
+                        */
+                        val fallback = title.episodesAvailable?.firstOrNull()
+                            ?.split("/")?.mapNotNull { it.toIntOrNull() }
+                        val playSeason = season?.seasonNumber ?: fallback?.getOrNull(0) ?: 1
+                        val playEpisode = firstEpisode?.episodeNumber ?: fallback?.getOrNull(1) ?: 1
+                        TvActionButton(
+                            "▶  Assistir — Temporada $playSeason, Episódio $playEpisode",
+                            primary = true,
+                        ) { onPlay(playSeason, playEpisode) }
+                    } else {
+                        TvActionButton("▶  Assistir", primary = true) { onPlay(null, null) }
                     }
                     TvActionButton(
                         if (vm.isFavorite(title.tmdbId)) "♥ Favorito" else "♡ Favoritar",
@@ -828,9 +970,9 @@ fun TvDetailScreen(
                     contentPadding = PaddingValues(horizontal = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(s.seasons) { season ->
+                    items(s.seasons, key = { "season-${it.seasonNumber}" }) { seasonItem ->
                         var focused by remember { mutableStateOf(false) }
-                        val sel = season.seasonNumber == selectedSeason
+                        val sel = seasonItem.seasonNumber == selectedSeason
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
@@ -841,12 +983,16 @@ fun TvDetailScreen(
                                         else -> MfColors.BgCard
                                     },
                                 )
+                                .then(
+                                    if (focused) Modifier.border(2.dp, Color.White, RoundedCornerShape(20.dp))
+                                    else Modifier,
+                                )
                                 .onFocusChanged { focused = it.isFocused }
-                                .clickable { selectedSeason = season.seasonNumber }
+                                .clickable { selectedSeason = seasonItem.seasonNumber }
                                 .padding(horizontal = 18.dp, vertical = 9.dp),
                         ) {
                             Text(
-                                "Temporada ${season.seasonNumber}",
+                                "Temporada ${seasonItem.seasonNumber}",
                                 color = Color.White,
                                 fontFamily = MfSans,
                                 fontSize = 13.sp,
@@ -858,8 +1004,26 @@ fun TvDetailScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            val season = s.seasons.firstOrNull { it.seasonNumber == selectedSeason }
-            items(season?.episodes ?: emptyList()) { ep ->
+            /*
+              Episódios da temporada selecionada.
+
+              A chave inclui a temporada, então trocar de temporada reconstrói a
+              lista com os episódios CERTOS — nunca mistura temporadas. Cada
+              linha mostra número, título e imagem quando o provedor as tem.
+            */
+            val episodes = season?.episodes ?: emptyList()
+            if (episodes.isEmpty()) {
+                item {
+                    Text(
+                        "Esta temporada não tem episódios disponíveis.",
+                        color = MfColors.TextMuted,
+                        fontFamily = MfSans,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 48.dp, vertical = 12.dp),
+                    )
+                }
+            }
+            items(episodes, key = { "s${season?.seasonNumber ?: 0}e${it.episodeNumber}" }) { ep ->
                 var focused by remember { mutableStateOf(false) }
                 Row(
                     modifier = Modifier
@@ -872,7 +1036,7 @@ fun TvDetailScreen(
                             else Modifier,
                         )
                         .onFocusChanged { focused = it.isFocused }
-                        .clickable { onPlay(selectedSeason, ep.episodeNumber) }
+                        .clickable { onPlay(season?.seasonNumber ?: 1, ep.episodeNumber) }
                         .padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -882,31 +1046,44 @@ fun TvDetailScreen(
                             .height(74.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(MfColors.BgCard),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        AsyncImage(
-                            model = ep.thumbnailUrl,
-                            contentDescription = ep.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
+                        // Sem thumbnail do provedor, mostra o número em vez de um
+                        // retângulo cinza vazio.
+                        Text(
+                            "${ep.episodeNumber}",
+                            color = MfColors.TextDim,
+                            fontFamily = MfSans,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
                         )
+                        if (!ep.thumbnailUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = ep.thumbnailUrl,
+                                contentDescription = ep.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "${ep.episodeNumber}. ${ep.title}",
+                            "${ep.episodeNumber}. ${ep.title.ifBlank { "Episódio ${ep.episodeNumber}" }}",
                             color = if (focused) MfColors.Text else MfColors.TextSoft,
                             fontFamily = MfSans,
                             fontSize = 15.sp,
                             fontWeight = if (focused) FontWeight.Bold else FontWeight.Medium,
                         )
-                        if (ep.durationSeconds != null) {
-                            Text(
-                                "${ep.durationSeconds / 60} min",
-                                color = MfColors.TextDim,
-                                fontFamily = MfSans,
-                                fontSize = 12.sp,
-                            )
-                        }
+                        Text(
+                            buildString {
+                                append("T${season?.seasonNumber ?: 1} E${ep.episodeNumber}")
+                                if (ep.durationSeconds != null) append(" · ${ep.durationSeconds / 60} min")
+                            },
+                            color = MfColors.TextDim,
+                            fontFamily = MfSans,
+                            fontSize = 12.sp,
+                        )
                     }
                     if (focused) Text("▶", color = MfColors.Red, fontSize = 18.sp)
                 }
@@ -950,6 +1127,20 @@ fun TvLoginScreen(vm: TvViewModel, onDone: () -> Unit) {
     var pass by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    /*
+      Botão de olho da senha.
+
+      Na TV não existe toque: o controle remoto navega por FOCO. Por isso o olho
+      é um elemento focável de verdade (um Box com onFocusChanged + clickable),
+      e não um ícone decorativo dentro do campo. Com o D-pad a pessoa desce do
+      campo de senha até o olho, aperta OK e a senha aparece; aperta OK de novo
+      e volta a esconder.
+
+      A senha começa escondida e o olho só aparece depois que algo foi digitado.
+      Nada muda na autenticação — o valor enviado é o mesmo de antes.
+    */
+    var showPass by remember { mutableStateOf(false) }
+    var eyeFocused by remember { mutableStateOf(false) }
     val emailFocus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { runCatching { emailFocus.requestFocus() } }
@@ -999,25 +1190,60 @@ fun TvLoginScreen(vm: TvViewModel, onDone: () -> Unit) {
                 .focusRequester(emailFocus)
                 .padding(bottom = 14.dp),
         )
-        OutlinedTextField(
-            value = pass,
-            onValueChange = { pass = it },
-            label = { Text("Senha") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            shape = RoundedCornerShape(10.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MfColors.Red,
-                unfocusedBorderColor = MfColors.Border,
-                focusedContainerColor = MfColors.BgCard,
-                unfocusedContainerColor = MfColors.BgCard,
-                focusedTextColor = MfColors.Text,
-                unfocusedTextColor = MfColors.Text,
-            ),
-            modifier = Modifier
-                .width(520.dp)
-                .padding(bottom = 22.dp),
-        )
+
+        Row(
+            modifier = Modifier.width(520.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = pass,
+                onValueChange = { pass = it },
+                label = { Text("Senha") },
+                singleLine = true,
+                visualTransformation = if (showPass) VisualTransformation.None
+                else PasswordVisualTransformation(),
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MfColors.Red,
+                    unfocusedBorderColor = MfColors.Border,
+                    focusedContainerColor = MfColors.BgCard,
+                    unfocusedContainerColor = MfColors.BgCard,
+                    focusedTextColor = MfColors.Text,
+                    unfocusedTextColor = MfColors.Text,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+
+            if (pass.isNotEmpty()) {
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            when {
+                                eyeFocused -> MfColors.Red
+                                showPass -> MfColors.RedDark
+                                else -> MfColors.BgCard
+                            },
+                        )
+                        .then(
+                            if (eyeFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                            else Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(10.dp)),
+                        )
+                        .onFocusChanged { eyeFocused = it.isFocused }
+                        .clickable { showPass = !showPass },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (showPass) "\uD83D\uDE48" else "\uD83D\uDC41",
+                        fontSize = 20.sp,
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(22.dp))
 
         TvActionButton(if (busy) "Entrando…" else "Entrar", primary = true) {
             if (busy) return@TvActionButton
