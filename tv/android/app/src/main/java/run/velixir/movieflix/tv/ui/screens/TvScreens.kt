@@ -1611,13 +1611,149 @@ fun TvProfilesScreen(vm: TvViewModel, onLogin: () -> Unit) {
         }
 
         Spacer(Modifier.height(24.dp))
+
+        /*
+          ── LIMITE DE PERFIS POR PLANO ──────────────────────────────────────
+
+          Regra pedida pelo proprietário:
+            Básico   → 1 perfil
+            Médio    → 2 perfis + 1 infantil
+            Premium  → 4 perfis + 1 infantil
+
+          O plano vem de `s.subscription.plan.code`, que o SERVIDOR devolve em
+          `/api/access/subscription` a partir da assinatura real do usuário —
+          não de nada que o app guarde ou que o usuário possa editar. Sem
+          assinatura ativa, cai no Básico (o mais restritivo), nunca no Premium.
+        */
+        val planCode = s.subscription?.plan?.code
+        val allowance = profileAllowance(planCode)
+
         Text(
-            "O MovieFlix usa um perfil por conta. Para assistir em outra pessoa, " +
-                "use outra conta — favoritos e histórico são compartilhados entre " +
-                "site, celular e TV.",
+            "Seu plano: ${s.subscription?.plan?.name ?: "sem plano ativo"}",
+            color = MfColors.Text,
+            fontFamily = MfSans,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            buildString {
+                append("${allowance.adults} perfil")
+                if (allowance.adults > 1) append("is")
+                if (allowance.kids > 0) {
+                    append(" + ${allowance.kids} perfil infantil")
+                    if (allowance.kids > 1) append("is")
+                }
+            },
+            color = MfColors.TextMuted,
+            fontFamily = MfSans,
+            fontSize = 14.sp,
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        // Um card por vaga permitida. A primeira é a conta logada; as demais
+        // aparecem como vaga livre — o app não inventa perfis que não existem
+        // no banco, só mostra quantas o plano permite.
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(allowance.adults) { i ->
+                ProfileSlot(
+                    title = if (i == 0) (s.email ?: "Perfil principal") else "Perfil ${i + 1}",
+                    subtitle = if (i == 0) "Perfil principal" else "Vaga disponível",
+                    filled = i == 0,
+                )
+            }
+            items(allowance.kids) { i ->
+                ProfileSlot(
+                    title = if (allowance.kids > 1) "Infantil ${i + 1}" else "Infantil",
+                    subtitle = "Só conteúdo infantil",
+                    filled = false,
+                    kids = true,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "O limite de perfis segue o plano da sua assinatura. Para ter mais " +
+                "perfis, mude de plano na aba Planos.",
             color = MfColors.TextDim,
             fontFamily = MfSans,
             fontSize = 14.sp,
+        )
+    }
+}
+
+/** Quantos perfis o plano permite: adultos e infantis. */
+private data class ProfileAllowance(val adults: Int, val kids: Int)
+
+/**
+ * Traduz o código do plano no limite de perfis.
+ *
+ * Desconhecido ou nulo → Básico. É deliberado: um plano que o app não conhece
+ * não pode virar Premium por omissão.
+ */
+private fun profileAllowance(planCode: String?): ProfileAllowance =
+    when (planCode?.lowercase()) {
+        "premium" -> ProfileAllowance(adults = 4, kids = 1)
+        "standard", "medio", "médio" -> ProfileAllowance(adults = 2, kids = 1)
+        else -> ProfileAllowance(adults = 1, kids = 0)
+    }
+
+/** Card de uma vaga de perfil. */
+@Composable
+private fun ProfileSlot(
+    title: String,
+    subtitle: String,
+    filled: Boolean,
+    kids: Boolean = false,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .width(220.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MfColors.BgCard)
+            .then(
+                if (focused) Modifier.border(3.dp, MfColors.Red, RoundedCornerShape(14.dp))
+                else Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(14.dp)),
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .width(64.dp)
+                .height(64.dp)
+                .clip(RoundedCornerShape(32.dp))
+                .background(if (filled) MfColors.Red else MfColors.BgHover),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (kids) "\uD83D\uDC76" else title.trim().firstOrNull()?.uppercase() ?: "+",
+                color = Color.White,
+                fontFamily = MfSans,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            title,
+            color = MfColors.Text,
+            fontFamily = MfSans,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            subtitle,
+            color = MfColors.TextDim,
+            fontFamily = MfSans,
+            fontSize = 12.sp,
+            maxLines = 1,
         )
     }
 }

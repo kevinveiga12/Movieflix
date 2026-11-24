@@ -157,6 +157,7 @@ interface AppInfo {
     url: string
     status?: string
     notice?: string
+    updateNote?: string
     platforms?: string[]
   }
 }
@@ -173,12 +174,13 @@ const FALLBACK: AppInfo = {
   ios: { available: true, minIos: '16.0', install: 'pwa' },
   tv: {
     available: true,
-    version: '1.0.4',
+    version: '1.0.5',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',
     status: 'beta',
-    notice: 'Em desenvolvimento',
+    notice: 'Atualização 1.0.5',
+    updateNote: 'escolha de temporadas e episódios',
     platforms: ['Android TV', 'Google TV', 'TV Box'],
   },
 }
@@ -325,6 +327,17 @@ export function DownloadPage() {
                     versão {info.tv.version}
                     {mb(info.tv.sizeBytes) ? ` · ${mb(info.tv.sizeBytes)}` : ''}
                   </p>
+                  {/*
+                    O que a atualização traz. O proprietário pediu que a página
+                    deixasse claro que é uma ATUALIZAÇÃO e qual é a novidade —
+                    quem já tem o app instalado precisa saber por que baixar de
+                    novo.
+                  */}
+                  {info.tv.updateNote && (
+                    <p style={{ margin: '6px 0 0', fontSize: '0.82rem', color: 'var(--accent)', fontWeight: 600 }}>
+                      Atualização: {info.tv.updateNote}
+                    </p>
+                  )}
                 </div>
                 <span className="badge badge--warn">{info.tv.notice ?? 'Em desenvolvimento'}</span>
               </div>

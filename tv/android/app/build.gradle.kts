@@ -14,18 +14,20 @@ android {
         minSdk = 26
         targetSdk = 35
         /*
-          1.0.5 — retomada de EPISÓDIO na TV.
+          1.0.5 — escolha de TEMPORADA e EPISÓDIO na tela da série.
 
-          A tela já gravava o progresso do episódio, mas o player só lia de
-          volta para FILME: sair no minuto 20 de um episódio e voltar recomeçava
-          do zero. Agora `resumePositionForEpisode` lê a linha do par
-          temporada/episódio (a mesma chave que o `saveProgress` grava), então
-          dois episódios da mesma série não compartilham posição.
+          O seletor já existia no código, mas nunca aparecia: a API devolve
+          `"description": null` em cada episódio e o modelo `Episode` declara
+          `description: String` (não anulável). O kotlinx.serialization estourava
+          SerializationException, o `loadSeasons` engolia com runCatching e
+          `seasons` ficava vazio — a tela escondia a seção inteira. Corrigido com
+          `coerceInputValues = true` em MovieFlixApi.
 
-          O versionName só é anunciado na página de downloads depois que este
-          APK for gerado pelo workflow.
+          versionCode 7: build novo sobre o 6, para a atualização instalar por
+          cima. O versionName continua 1.0.5, que é o número anunciado na
+          página de downloads.
         */
-        versionCode = 6
+        versionCode = 7
         versionName = "1.0.5"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"

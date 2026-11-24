@@ -29,7 +29,16 @@ export function PlansPage() {
   const [access, setAccess] = useState<{ daysLeft: number | null; trialEndsAt: string | null; reason: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [period, setPeriod] = useState<PlanPeriod['code']>('1m')
+  /*
+    Período escolhido POR PLANO.
+
+    Antes havia um seletor único acima da grade e um `period` global. O
+    proprietário pediu que a escolha de 1 mês / 3 meses / 1 ano ficasse DENTRO
+    de cada card, junto do preço que ela muda — e que o seletor solto saísse.
+    Um mapa por código de plano mantém cada card independente: trocar o período
+    do Básico não mexe no do Premium.
+  */
+  const [periodByPlan, setPeriodByPlan] = useState<Record<string, PlanPeriod['code']>>({})
 
   useEffect(() => {
     let active = true
@@ -128,23 +137,6 @@ export function PlansPage() {
         </div>
       ) : (
         <>
-          {/* Seletor de período */}
-          <div className="inline" style={{ marginBottom: 18, gap: 8 }}>
-            {PERIOD_ORDER.map((code) => {
-              const label = code === '1m' ? '1 mês' : code === '3m' ? '3 meses' : '1 ano'
-              const isOn = period === code
-              return (
-                <button
-                  key={code}
-                  className={`btn ${isOn ? 'btn--primary' : 'btn--outline'} btn--sm`}
-                  onClick={() => setPeriod(code)}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-
           <div
             style={{
               display: 'grid',
@@ -155,6 +147,7 @@ export function PlansPage() {
             {plans.map((p) => {
               const isCurrent = active && sub?.plan_code === p.code
               const periods = p.periods ?? []
+              const period = periodByPlan[p.code] ?? '1m'
               const chosen = periods.find((x) => x.code === period) ?? periods[0]
 
               return (
@@ -172,6 +165,31 @@ export function PlansPage() {
                       {p.name}
                     </div>
                     {isCurrent && <span className="badge badge--purple">Seu plano</span>}
+                  </div>
+
+                  {/*
+                    Escolha do período DENTRO do card.
+
+                    Substitui o seletor que ficava solto acima da grade — era ele
+                    que aparecia como um retângulo vermelho isolado, sem relação
+                    visual com o preço que alterava. Aqui o botão fica ao lado do
+                    valor que ele muda.
+                  */}
+                  <div className="inline" style={{ gap: 6, margin: '10px 0 4px', flexWrap: 'wrap' }}>
+                    {PERIOD_ORDER.map((code) => {
+                      const label = code === '1m' ? '1 mês' : code === '3m' ? '3 meses' : '1 ano'
+                      const isOn = period === code
+                      return (
+                        <button
+                          key={code}
+                          className={`btn ${isOn ? 'btn--primary' : 'btn--outline'} btn--sm`}
+                          onClick={() => setPeriodByPlan((prev) => ({ ...prev, [p.code]: code }))}
+                          aria-pressed={isOn}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
                   </div>
 
                   <div style={{ fontSize: '1.9rem', fontWeight: 800, margin: '6px 0 2px' }}>

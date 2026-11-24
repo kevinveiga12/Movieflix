@@ -144,9 +144,9 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.4',
+      version: '1.0.5',
       minAndroid: '8.0',
-      sizeBytes: tv.sizeBytes || 10890041,
+      sizeBytes: tv.sizeBytes || 10906425,
       updatedAt: tv.updatedAt,
       url: '/api/apps/tv/download',
       fallbackUrl: TV_APK_CDN,
@@ -156,7 +156,13 @@ publicRouter.get('/', (_req, res) => {
        * e o aviso existe para que ninguém o trate como pronto.
        */
       status: 'beta',
-      notice: 'Em desenvolvimento',
+      notice: 'Atualização 1.0.5',
+      /*
+        O que mudou nesta versão, em uma linha. A página de downloads mostra
+        isto ao lado do número da versão — é o que o proprietário pediu: que
+        quem já tem o app saiba que é uma ATUALIZAÇÃO e o que ela traz.
+      */
+      updateNote: 'escolha de temporadas e episódios',
       platforms: ['Android TV', 'Google TV', 'TV Box'],
     },
   })
@@ -192,7 +198,7 @@ router.get('/tv', requireAdmin, (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     name: 'MovieFlix TV',
-    version: '1.0.4',
+    version: '1.0.5',
     available: info.exists,
     sizeBytes: info.sizeBytes,
     updatedAt: info.updatedAt,
@@ -216,7 +222,7 @@ router.get('/tv/download', requireAdmin, (req, res, next) => {
   }
   console.log(`[MovieFlix] APK TV baixado por ${req.user?.email ?? req.user?.id ?? 'admin'}`)
   res.type('application/vnd.android.package-archive')
-  res.download(p, 'movieflix-tv-1.0.4.apk', (err) => {
+  res.download(p, 'movieflix-tv-1.0.5.apk', (err) => {
     if (err && !res.headersSent) next(err)
   })
 })

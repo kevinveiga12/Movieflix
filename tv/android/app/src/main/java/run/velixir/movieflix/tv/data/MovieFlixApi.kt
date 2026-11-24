@@ -30,6 +30,25 @@ class MovieFlixApi(
         ignoreUnknownKeys = true
         isLenient = true
         explicitNulls = false
+        /*
+          ── POR QUE ISTO EXISTE (causa do seletor de temporadas não aparecer) ──
+
+          `/api/db/series/{id}/episodes` devolve `"description": null` em todo
+          episódio (verificado em produção: 200, 1484 bytes, description null).
+          O modelo `Episode` declara `description: String = ""` — NÃO anulável.
+
+          Sem `coerceInputValues`, o kotlinx.serialization lança
+          SerializationException ao encontrar null num campo não anulável. O
+          `loadSeasons` engolia a exceção com `runCatching{}.getOrNull()`, então
+          `seasons` ficava VAZIO e a tela inteira de temporadas/episódios era
+          escondida pelo `if (isSeries && s.seasons.isNotEmpty())` — o usuário
+          via só "Assistir Temporada 1, Episódio 1" e nada mais.
+
+          `coerceInputValues` faz o null cair no valor padrão do campo em vez de
+          estourar. É a correção certa: o dado do servidor é válido, o modelo é
+          que era rígido demais.
+        */
+        coerceInputValues = true
     }
 
     private val client = OkHttpClient.Builder()
