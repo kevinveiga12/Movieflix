@@ -63,6 +63,17 @@ done
 sleep 2
 bash scripts/shot.sh "$OUT/tv-detail-series-seasons.png" "tv serie temporadas"
 
+# ── TROCA DE TEMPORADA ───────────────────────────────────────────────────────
+# Prova que escolher outra temporada troca a LISTA DE EPISÓDIOS, e não só o
+# rótulo do botão. O foco está na fileira de temporadas depois das descidas
+# acima; uma seta à direita seleciona a Temporada 2 e OK confirma.
+echo "=== Detalhes de SERIE: trocando para a Temporada 2 ==="
+adb shell input keyevent KEYCODE_DPAD_RIGHT >/dev/null 2>&1 || true
+sleep 1
+adb shell input keyevent KEYCODE_DPAD_CENTER >/dev/null 2>&1 || true
+sleep 3
+bash scripts/shot.sh "$OUT/tv-detail-series-season2.png" "tv serie temporada 2"
+
 echo "=== Detalhes de SERIE: rolando ate os relacionados ==="
 scroll_to_bottom
 bash scripts/shot.sh "$OUT/tv-detail-series-related.png" "tv serie relacionados"
