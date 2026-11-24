@@ -49,7 +49,14 @@
  * global, então uma falha do Ajax desligava também o caminho que funcionava.
  */
 
-import { resolveDirectStreamDetailed, resolveCleanEmbed, resolveEmbedPlayerStream, fetchOptions } from './stream-resolver.js'
+import {
+  resolveDirectStreamDetailed,
+  resolveCleanEmbed,
+  resolveEmbedPlayerStream,
+  resolveBloggerStream,
+  resolveMp4Stream,
+  fetchOptions,
+} from './stream-resolver.js'
 
 /**
  * Provedores que podem abrir anúncio.
@@ -248,6 +255,65 @@ export async function resolvePlaybackChain({ tmdbId, season = null, episode = nu
       }
     } else {
       tried.push({ provider: 'embedplayer', result: 'not_listed' })
+    }
+  }
+
+  // ── 3b) blogger e mp4 — MP4 direto, sem iframe ─────────────────────────────
+  //
+  // Medido em 2026-11-23: eram a maior fatia das falhas de SÉRIE que não eram
+  // fonte morta. O episódio tinha fonte listada (`budget: success`), mas a
+  // camada só sabia dizer "somente_iframe" e o cliente ficava sem nada.
+  //
+  //   blogger → `video.g?token=` publica uma URL `videoplayback` do CDN do
+  //             Google (MP4 progressivo, itag 18). Medido: 206 video/mp4.
+  //   mp4     → embed base64 que decodifica para um MP4 direto. Medido: 206
+  //             quando o host responde.
+  //
+  // Ambos tocam no NOSSO <video>: sem iframe, sem anúncio, com retomada.
+  // Entram DEPOIS do embedplayer (HLS é mais estável) e ANTES dos embeds de
+  // terceiro. Só são tentados quando ainda não há fonte.
+  if (!sources.length) {
+    const opts = await fetchOptions({ tmdbId: id, season, episode }).catch(() => [])
+    const usable = opts.filter((o) => o.budget !== 'danger')
+
+    const blogger = usable.find((o) => o.id === 'blogger')
+    if (blogger && !isOpen('blogger')) {
+      const s = await resolveBloggerStream({ embedUrl: blogger.embed }).catch(() => null)
+      if (s) {
+        record('blogger', true)
+        tried.push({ provider: 'blogger', result: 'mp4' })
+        sources.push({
+          id: 'blogger-mp4',
+          label: s.label || 'Servidor alternativo',
+          url: `/api/stream/video.mp4?u=${encodeURIComponent(s.url)}&r=${encodeURIComponent(s.referer)}`,
+          mode: 'direct',
+          verified: true,
+          provider: 'blogger',
+        })
+      } else {
+        tried.push({ provider: 'blogger', result: 'no_mp4' })
+      }
+    }
+
+    if (!sources.length) {
+      const mp4 = usable.find((o) => o.id === 'mp4')
+      if (mp4 && !isOpen('mp4')) {
+        const s = await resolveMp4Stream({ embedUrl: mp4.embed }).catch(() => null)
+        if (s) {
+          record('mp4', true)
+          tried.push({ provider: 'mp4', result: 'mp4' })
+          sources.push({
+            id: 'mp4-direct',
+            label: s.label || 'Servidor alternativo',
+            url: `/api/stream/video.mp4?u=${encodeURIComponent(s.url)}&r=${encodeURIComponent(s.referer)}`,
+            mode: 'direct',
+            verified: true,
+            provider: 'mp4',
+          })
+        } else {
+          tried.push({ provider: 'mp4', result: 'no_mp4' })
+        }
+      }
     }
   }
 

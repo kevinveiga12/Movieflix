@@ -87,6 +87,22 @@ const STREAM_HOSTS = [
   /(^|\.)playersl\.xyz$/i,
   /(^|\.)eloialu\d*\.xyz$/i,
   /(^|\.)embedplayer2\.xyz$/i,
+  /**
+   * CDNs das camadas `blogger` e `mp4` (medidos em 2026-11-23).
+   *
+   * `blogger` → o embed do Google Blogger publica uma URL `videoplayback` em
+   * `*.googlevideo.com` (MP4 progressivo, itag 18). É mídia do próprio Google,
+   * servida por CDN público — o proxy só repassa com o Referer do Blogger.
+   *
+   * `mp4` → o embed é um base64 que decodifica para um MP4 direto (Wix Static
+   * ou o proxy `playtop.online`). Quando o host responde, é vídeo progressivo.
+   *
+   * Ambos são hosts de CDN de vídeo, não endereços internos: o allowlist
+   * continua fechado contra SSRF.
+   */
+  /(^|\.)googlevideo\.com$/i,
+  /(^|\.)wixstatic\.com$/i,
+  /(^|\.)playtop\.online$/i,
 ]
 
 /** O stream só é servido para estes Referers (os do próprio provedor). */
@@ -97,6 +113,10 @@ const STREAM_REFERERS = [
   'https://myembed.biz/',
   // CDNs do embedplayer: o Referer que eles aceitam é o do próprio player.
   'https://embedplayer2.xyz/',
+  // Camadas blogger/mp4: o CDN do Google exige o Referer do Blogger; o MP4
+  // direto é servido sem Referer específico (usamos o do playerflix).
+  'https://www.blogger.com/',
+  'https://playerflix.ink/',
 ]
 
 export function isAllowedStreamHost(url) {
@@ -584,6 +604,184 @@ export async function resolveCleanEmbed({ tmdbId, season = null, episode = null 
   if (!clean) return null
 
   return { id: clean.id, url: clean.embed, label: clean.label || 'Servidor principal' }
+}
+
+/**
+ * QUARTA CAMADA — `blogger` (embed do Google Blogger).
+ *
+ * ── O QUE É ──────────────────────────────────────────────────────────────────
+ *
+ * O `playerflix.ink` lista, para parte do catálogo, uma opção `id: "blogger"`
+ * cujo embed é `https://www.blogger.com/video.g?token=...`. A página do Blogger
+ * NÃO é um iframe de terceiro com anúncio: é o player de vídeo do próprio
+ * Google, e ele publica no HTML a URL `videoplayback` do CDN `googlevideo.com`
+ * (MP4 progressivo, itag 18 — 360p com áudio).
+ *
+ * Medido em 2026-11-23: `GET` da URL `videoplayback` com `Range: bytes=0-2047`
+ * devolve `206 video/mp4` e magic bytes `ftypmp42`. É vídeo de verdade, servido
+ * por CDN público do Google — não é conteúdo protegido por DRM nem paywall.
+ *
+ * ── POR QUE ENTRA NA CADEIA ──────────────────────────────────────────────────
+ *
+ * Era a maior fatia das falhas de série que NÃO eram fonte morta: o episódio
+ * tinha fonte listada (`budget: success`), mas a camada só sabia dizer
+ * "somente_iframe" e o cliente ficava sem nada. Tocando o MP4 no NOSSO
+ * `<video>`, não há iframe, não há anúncio, e a retomada funciona.
+ *
+ * ── O QUE NÃO FAZ ────────────────────────────────────────────────────────────
+ *
+ * Não contorna CAPTCHA, DRM nem paywall. Se o token não render uma URL
+ * `videoplayback`, devolve `null` e a cadeia segue. Nunca inventa fonte.
+ */
+const BLOGGER_ORIGIN = 'https://www.blogger.com'
+
+/** Desescapa as entidades que o HTML do Blogger usa nas URLs. */
+function unescapeBloggerHtml(html) {
+  return String(html)
+    .replace(/\\u003d/gi, '=')
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\u002F/gi, '/')
+    .replace(/\\x3d/gi, '=')
+    .replace(/\\x26/gi, '&')
+    .replace(/\\\//g, '/')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+}
+
+/**
+ * Resolve o MP4 do `blogger` a partir do embed (`video.g?token=...`).
+ *
+ * Devolve `{ url, referer, label }` ou `null`. Nunca lança.
+ */
+export async function resolveBloggerStream({ embedUrl, timeoutMs = 9000 }) {
+  let token = null
+  try {
+    token = new URL(embedUrl).searchParams.get('token')
+  } catch {
+    return null
+  }
+  if (!token || !/^[\w-]{20,}$/.test(token)) return null
+
+  const cacheKey = `blogger:${token}`
+  const hit = cache.get(cacheKey)
+  if (hit) return hit
+
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${BLOGGER_ORIGIN}/video.g?token=${encodeURIComponent(token)}`, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: {
+        'User-Agent': UA,
+        Referer: `${BLOGGER_ORIGIN}/`,
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+      },
+    })
+    if (!res.ok) return null
+
+    const html = unescapeBloggerHtml(await res.text())
+    const urls = html.match(/https:\/\/[^"'\s\\]*videoplayback[^"'\s\\]*/g)
+    if (!urls || !urls.length) return null
+
+    // Prefere o itag 18 (MP4 progressivo com áudio). Se não houver, usa o
+    // primeiro que seja de um host permitido.
+    const pick =
+      urls.find((u) => /[?&]itag=18(&|$)/.test(u) && isAllowedStreamHost(u)) ||
+      urls.find((u) => isAllowedStreamHost(u))
+    if (!pick) return null
+
+    const value = { url: pick, referer: `${BLOGGER_ORIGIN}/`, label: 'Servidor alternativo' }
+    cacheSet(cacheKey, value)
+    return value
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * QUINTA CAMADA — `mp4` (embed base64 → arquivo MP4 direto).
+ *
+ * O `playerflix.ink` lista, para parte do catálogo, uma opção `id: "mp4"` cujo
+ * embed é `https://playerflix.ink/players/native/index.php?video_url=<base64>`.
+ * O base64 decodifica para uma URL de MP4 (às vezes embrulhada num proxy
+ * `playtop.online` com `?u=<mp4 real>`).
+ *
+ * Medido em 2026-11-23: quando o host de destino responde, é MP4 progressivo
+ * com `Range` (206). Quando o host está fora (o `playtop.online` esteve
+ * inalcançável na medição), devolve `null` — a cadeia segue, sem inventar.
+ *
+ * Não segue `downloadLinks`, não carrega o iframe do player nativo.
+ */
+export async function resolveMp4Stream({ embedUrl, timeoutMs = 9000 }) {
+  let b64 = null
+  try {
+    b64 = new URL(embedUrl).searchParams.get('video_url')
+  } catch {
+    return null
+  }
+  if (!b64 || !/^[A-Za-z0-9+/=_-]{20,}$/.test(b64)) return null
+
+  let decoded = null
+  try {
+    decoded = Buffer.from(b64, 'base64').toString('utf8')
+  } catch {
+    return null
+  }
+  if (!/^https:\/\//.test(decoded)) return null
+
+  // Se for um proxy com `?u=<mp4>`, desembrulha para o arquivo real.
+  let target = decoded
+  try {
+    const inner = new URL(decoded).searchParams.get('u')
+    if (inner && /^https:\/\//.test(inner)) target = inner
+  } catch {
+    /* mantém decoded */
+  }
+
+  if (!isAllowedStreamHost(target)) return null
+
+  const cacheKey = `mp4:${target}`
+  const hit = cache.get(cacheKey)
+  if (hit) return hit
+
+  /**
+   * Sonda com `Range` curto: prova que o host entrega bytes de vídeo antes de
+   * oferecer a fonte ao cliente. Um 403/404 aqui é fonte morta — devolve null.
+   */
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(target, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: {
+        'User-Agent': UA,
+        Referer: PLAYERFLIX_REFERER,
+        Range: 'bytes=0-2047',
+        Accept: '*/*',
+      },
+    })
+    if (res.status !== 200 && res.status !== 206) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length < 12) return null
+    const head = buf.slice(0, 12).toString('latin1')
+    const isVideo =
+      head.includes('ftyp') || head.includes('styp') || buf[0] === 0x47 ||
+      (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3)
+    if (!isVideo) return null
+
+    const value = { url: target, referer: PLAYERFLIX_REFERER, label: 'Servidor alternativo' }
+    cacheSet(cacheKey, value)
+    return value
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
