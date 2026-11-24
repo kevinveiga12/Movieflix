@@ -490,6 +490,36 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         return pos
     }
 
+    /**
+     * Onde ESTE EPISÓDIO parou, em segundos, para a TV retomar de lá.
+     *
+     * ── POR QUE ISTO EXISTE ──────────────────────────────────────────────────
+     *
+     * A tela já GRAVAVA o progresso do episódio (`saveProgress` com
+     * `episodeId = "T/E"`), mas nunca lia de volta: `resumePositionFor` só
+     * aceitava filme (`mediaType != "tv"` e `episodeId` vazio). Resultado: quem
+     * saía no minuto 20 de um episódio voltava ao segundo 0 — o item 9 do
+     * pedido ("retomada de episódios na Android TV") não estava cumprido.
+     *
+     * A chave é o par temporada/episódio, exatamente o mesmo formato que o
+     * `saveProgress` grava. Sem isso, dois episódios da mesma série
+     * compartilhariam a posição — o que o pedido proíbe explicitamente.
+     *
+     * Mesma regra de borda do filme: nos últimos 30 s ou acima de 95% do
+     * total, começar do início é o esperado (não voltar para os créditos).
+     */
+    fun resumePositionForEpisode(tmdbId: Long, season: Int, episode: Int): Double {
+        val key = "$season/$episode"
+        val row = _state.value.history.firstOrNull {
+            it.tmdbId == tmdbId && it.episodeId == key
+        } ?: return 0.0
+        val pos = row.positionSeconds
+        val dur = row.durationSeconds
+        if (pos <= 5) return 0.0
+        if (dur > 0 && (dur - pos < 30 || pos / dur > 0.95)) return 0.0
+        return pos
+    }
+
     fun saveProgress(t: Title, pos: Double, dur: Double, episodeId: String?) {
         if (!session.isLoggedIn) return
         viewModelScope.launch { runCatching { api.saveProgress(t, pos, dur, episodeId) } }

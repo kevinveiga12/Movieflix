@@ -319,6 +319,17 @@ private fun TvDirectPlayer(
             */
             val resumeAt = if (season == null && episode == null) {
                 vm.resumePositionFor(title.tmdbId)
+            } else if (season != null && episode != null) {
+                /*
+                  RETOMADA DE EPISÓDIO.
+
+                  Antes este ramo devolvia 0.0 fixo: a TV gravava o progresso do
+                  episódio mas nunca lia de volta, então sair no minuto 20 e
+                  voltar significava recomeçar do zero. A chave é o par
+                  temporada/episódio — o mesmo que o `saveProgress` grava — para
+                  que dois episódios da mesma série não compartilhem posição.
+                */
+                vm.resumePositionForEpisode(title.tmdbId, season, episode)
             } else {
                 0.0
             }

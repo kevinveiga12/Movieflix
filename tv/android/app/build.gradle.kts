@@ -14,13 +14,19 @@ android {
         minSdk = 26
         targetSdk = 35
         /*
-          1.0.4 — primeira versão que COMPILA de fato depois da falha de escopo
-          do `TvEmbedPlayer` (referências a `chain`/`chainIndex`/`sourceKey`
-          fora do composable). O versionName só é anunciado na página de
-          downloads depois que este APK for gerado pelo workflow.
+          1.0.5 — retomada de EPISÓDIO na TV.
+
+          A tela já gravava o progresso do episódio, mas o player só lia de
+          volta para FILME: sair no minuto 20 de um episódio e voltar recomeçava
+          do zero. Agora `resumePositionForEpisode` lê a linha do par
+          temporada/episódio (a mesma chave que o `saveProgress` grava), então
+          dois episódios da mesma série não compartilham posição.
+
+          O versionName só é anunciado na página de downloads depois que este
+          APK for gerado pelo workflow.
         */
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")
