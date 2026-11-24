@@ -28,6 +28,7 @@ data class TvState(
     val favorites: List<FavoriteRow> = emptyList(),
     val history: List<HistoryRow> = emptyList(),
     val seasons: List<Season> = emptyList(),
+    val related: List<Title> = emptyList(),
     val genres: List<String> = emptyList(),
     val plans: List<Plan> = emptyList(),
     val subscription: SubscriptionResponse? = null,
@@ -264,6 +265,61 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val r = runCatching { api.seasons(tmdbId) }.getOrNull()
             update { it.copy(seasons = r?.seasons ?: emptyList()) }
+        }
+    }
+
+    /**
+     * Carrega um título pelo tmdb_id e o coloca no catálogo em memória.
+     *
+     * Usado pela rota de diagnóstico `mf_route detail` (captura no CI), que
+     * precisa abrir a tela de detalhes de um id específico sem navegar pela
+     * home. A busca usa o `q` do catálogo e casa pelo tmdb_id exato.
+     */
+    fun loadTitle(tmdbId: Long, isSeries: Boolean) {
+        viewModelScope.launch {
+            val r = runCatching {
+                if (isSeries) api.series(limit = 200) else api.movies(limit = 200)
+            }.getOrNull()
+            val hit = r?.items?.firstOrNull { it.tmdbId == tmdbId } ?: return@launch
+            update {
+                if (isSeries) it.copy(series = (it.series + hit).distinctBy { t -> t.tmdbId })
+                else it.copy(movies = (it.movies + hit).distinctBy { t -> t.tmdbId })
+            }
+        }
+    }
+
+    /**
+     * Títulos relacionados — o mesmo critério de `relatedTo()` em
+     * src/lib/catalog.ts: mesmo tipo (filme com filme, série com série) e
+     * mesma categoria, ordenado por popularidade.
+     *
+     * A API não tem endpoint de relacionados, então a busca usa o filtro
+     * `genre` com o primeiro termo da categoria (o catálogo guarda categorias
+     * compostas, tipo "Ação, Animação, Família") e depois ordena no cliente
+     * pondo na frente quem tem a categoria idêntica à do título aberto — que
+     * é exatamente o que o site faz. Máximo de 20 cards.
+     */
+    fun loadRelated(t: Title) {
+        viewModelScope.launch {
+            update { it.copy(related = emptyList()) }
+            val firstGenre = t.category
+                .split(",")
+                .map { it.trim() }
+                .firstOrNull { it.isNotBlank() }
+            val pool = runCatching {
+                if (t.isSeries) api.series(limit = 60, genre = firstGenre)
+                else api.movies(limit = 60, genre = firstGenre)
+            }.getOrNull()?.items ?: emptyList()
+
+            val out = pool
+                .filter { it.tmdbId != t.tmdbId }
+                .sortedWith(
+                    compareByDescending<Title> {
+                        it.category.trim().equals(t.category.trim(), ignoreCase = true)
+                    }.thenByDescending { it.popularity },
+                )
+                .take(20)
+            update { it.copy(related = out) }
         }
     }
 

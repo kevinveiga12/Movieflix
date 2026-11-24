@@ -976,6 +976,7 @@ fun TvDetailScreen(
     title: Title,
     onPlay: (Int?, Int?) -> Unit,
     onBack: () -> Unit,
+    onOpen: (Title) -> Unit = {},
 ) {
     val s by vm.state.collectAsState()
     val isSeries = title.isSeries
@@ -1006,7 +1007,10 @@ fun TvDetailScreen(
     */
     var selectedSeason by remember(title.tmdbId) { mutableStateOf<Int?>(null) }
 
-    LaunchedEffect(title.tmdbId) { if (isSeries) vm.loadSeasons(title.tmdbId) }
+    LaunchedEffect(title.tmdbId) {
+        if (isSeries) vm.loadSeasons(title.tmdbId)
+        vm.loadRelated(title)
+    }
 
     // Assim que as temporadas chegam, aponta para a primeira de verdade.
     LaunchedEffect(s.seasons, title.tmdbId) {
@@ -1251,6 +1255,19 @@ fun TvDetailScreen(
                     }
                     if (focused) Text("▶", color = MfColors.Red, fontSize = 18.sp)
                 }
+            }
+        }
+
+        // Relacionados — carrossel horizontal no fim da tela, igual ao
+        // "Títulos relacionados" do site. Até 20 cards, D-pad com foco
+        // visível (o mesmo TvPosterCard das outras fileiras).
+        if (s.related.isNotEmpty()) {
+            item {
+                TvRow(
+                    heading = if (isSeries) "Séries relacionadas" else "Filmes relacionados",
+                    items = s.related,
+                    onItemClick = onOpen,
+                )
             }
         }
 

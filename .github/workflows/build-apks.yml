@@ -30,6 +30,7 @@ on:
       - 'scripts/check-screenshot.py'
       - 'scripts/find-menu-rows.py'
       - 'scripts/capture-tv-tabs.sh'
+      - 'scripts/capture-tv-detail.sh'
       - 'scripts/capture-mobile-tabs.sh'
       - 'scripts/shot.sh'
       - '.github/workflows/build-apks.yml'
@@ -323,6 +324,12 @@ jobs:
 
             # ── Cada aba do menu lateral, uma captura por tela ───────────
             bash scripts/capture-tv-tabs.sh screenshots
+
+            # ── Detalhes: carrossel de relacionados + temporadas/episodios ───────
+            # A tela de detalhes e longa: o carrossel fica no fim e o seletor de
+            # temporadas logo abaixo da sinopse. A captura abre a tela por id
+            # (rota de diagnostico) e rola ate o fim.
+            bash scripts/capture-tv-detail.sh screenshots
 
             # ── Player: barrinha, OK (play/pause) e seta direita (avanço) ───────
             #

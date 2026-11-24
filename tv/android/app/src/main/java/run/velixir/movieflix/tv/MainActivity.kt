@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
         val initialRoute = intent?.getStringExtra("mf_route")
         // URL opcional para a rota de diagnóstico do player (captura no CI).
         val intentUrl = intent?.getStringExtra("mf_url")
+        // Tipo do título na rota de diagnóstico de detalhes (captura no CI).
+        val intentSeries = intent?.getStringExtra("mf_type") == "tv"
         setContent {
             MovieFlixTheme {
                 Box(
@@ -61,7 +63,11 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(MfColors.Bg),
                 ) {
-                    MovieFlixTvApp(initialRoute = initialRoute, intentUrl = intentUrl)
+                    MovieFlixTvApp(
+                        initialRoute = initialRoute,
+                        intentUrl = intentUrl,
+                        intentSeries = intentSeries,
+                    )
                 }
             }
         }
@@ -90,7 +96,12 @@ sealed interface TvRoute {
 }
 
 @Composable
-fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, intentUrl: String? = null) {
+fun MovieFlixTvApp(
+    vm: TvViewModel = viewModel(),
+    initialRoute: String? = null,
+    intentUrl: String? = null,
+    intentSeries: Boolean = false,
+) {
     var route by remember { mutableStateOf<TvRoute>(TvRoute.Home) }
     val s by vm.state.collectAsState()
     /**
@@ -101,6 +112,13 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
      * pessoa tinha escolhido.
      */
     var afterLogin by remember { mutableStateOf<TvRoute?>(null) }
+    // Detalhe pedido pela rota de diagnóstico (captura no CI). O título é
+    // resolvido no catálogo e a navegação segue pela rota REAL (TvRoute.Detail),
+    // com o menu lateral — igual ao que o usuário vê ao clicar num card.
+    var pendingDetail by remember { mutableStateOf<Pair<Long, Boolean>?>(null) }
+    // Evita repetir a busca na API a cada recomposição quando o id não está no
+    // primeiro lote do catálogo (a rota é só para captura no CI).
+    var detailTried by remember { mutableStateOf(false) }
 
     // Rota inicial vinda do intent (captura no CI).
     LaunchedEffect(initialRoute, s.movies.isNotEmpty()) {
@@ -112,6 +130,24 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
             "embed" -> route = TvRoute.EmbedDiag(
                 intentUrl ?: "https://myembed.biz/filme/1292035",
             )
+            "detail" -> {
+                val id = intentUrl?.toLongOrNull()
+                if (id != null) pendingDetail = id to intentSeries
+            }
+        }
+    }
+
+    // Resolve o detalhe pedido: procura no catálogo em memória; se não achar,
+    // busca na API e tenta de novo quando o catálogo crescer.
+    LaunchedEffect(pendingDetail, s.movies, s.series) {
+        val p = pendingDetail ?: return@LaunchedEffect
+        val found = (s.movies + s.series).firstOrNull { it.tmdbId == p.first }
+        if (found != null) {
+            route = TvRoute.Detail(found)
+            pendingDetail = null
+        } else if (!detailTried) {
+            detailTried = true
+            vm.loadTitle(p.first, p.second)
         }
     }
 
@@ -251,6 +287,7 @@ fun MovieFlixTvApp(vm: TvViewModel = viewModel(), initialRoute: String? = null, 
                                 }
                             },
                             onBack = { route = TvRoute.Home },
+                            onOpen = { route = TvRoute.Detail(it) },
                         )
                         else -> {}
                     }
