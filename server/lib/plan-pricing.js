@@ -1,4 +1,3 @@
-import { loadPlans } from './entitlement.js'
 import { readAdminConfig } from './store.js'
 
 /**
@@ -113,7 +112,23 @@ export function applyAdminConfig(plans, config) {
 
 /** Lista de planos já com a configuração do painel aplicada. */
 export async function resolvePlans() {
-  const [fromDb, config] = await Promise.all([loadPlans(), readAdminConfig()])
+  /**
+   * Import dinâmico de propósito.
+   *
+   * `entitlement.js` puxa `supabase-server.js`, que exige `@supabase/supabase-js`.
+   * Com import estático, este módulo não carrega sem `node_modules` — e o teste
+   * de preços roda no CI antes do `npm ci`. Aqui o preço é lógica pura; só a
+   * leitura do banco precisa do SDK, e ela acontece quando há banco.
+   */
+  let fromDb = []
+  try {
+    const { loadPlans } = await import('./entitlement.js')
+    fromDb = (await loadPlans()) ?? []
+  } catch {
+    // Sem SDK/banco (ex.: teste de preço no CI antes do npm ci): usa o padrão.
+    fromDb = []
+  }
+  const config = await readAdminConfig()
   const base = fromDb.length > 0 ? fromDb : DEFAULT_PLANS
   return applyAdminConfig(base, config)
 }

@@ -1,4 +1,3 @@
-import { supabaseAdmin } from './auth.js'
 import { getPayment } from './mercadopago.js'
 import { getPaymentRecord, markApplied, upsertPayment } from './payments-store.js'
 import { PLAN_DAYS } from './plan-pricing.js'
@@ -107,6 +106,15 @@ export function validatePayment(record, official) {
  *   { activated: false, reason }                → não ativou (e por quê)
  */
 export async function activateFromPayment(paymentId) {
+  /**
+   * Import dinâmico de propósito.
+   *
+   * `auth.js` puxa `supabase-server.js`, que exige `@supabase/supabase-js`. Com
+   * import estático, este módulo não carrega sem `node_modules` — e o teste das
+   * regras anti-fraude roda no CI antes do `npm ci`. As regras de validação são
+   * lógica pura; só a escrita no Auth precisa do SDK.
+   */
+  const { supabaseAdmin } = await import('./auth.js')
   const admin = supabaseAdmin
   if (!admin) {
     return { activated: false, reason: 'no_service_role' }
