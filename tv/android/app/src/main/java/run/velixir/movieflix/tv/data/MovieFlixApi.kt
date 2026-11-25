@@ -84,18 +84,33 @@ class MovieFlixApi(
 
     // ── Catálogo ────────────────────────────────────────────────────────────
 
+    /**
+     * Lista de filmes.
+     *
+     * `sort` é o mesmo contrato do site (`popular`, `recent`, `oldest`, `az`,
+     * `rating`) — a ordenação é feita no SERVIDOR sobre o catálogo inteiro,
+     * não sobre a página já carregada. Sem isso, "A–Z" só ordenaria os 60
+     * itens em memória e o resto do catálogo ficaria de fora.
+     *
+     * `q` permite a pesquisa direta na tela de Filmes, combinada com gênero e
+     * ordenação — a mesma rota que a aba Buscar já usa.
+     */
     suspend fun movies(
         limit: Int = 60,
         offset: Int = 0,
         genre: String? = null,
         seed: String? = null,
+        sort: String? = null,
+        q: String? = null,
     ): CatalogResponse {
-        val q = buildString {
+        val query = buildString {
             append("/api/catalog/movies?limit=$limit&offset=$offset")
             if (!genre.isNullOrBlank()) append("&genre=${enc(genre)}")
             if (!seed.isNullOrBlank()) append("&seed=${enc(seed)}")
+            if (!sort.isNullOrBlank()) append("&sort=${enc(sort)}")
+            if (!q.isNullOrBlank()) append("&q=${enc(q)}")
         }
-        return json.decodeFromString(get(q))
+        return json.decodeFromString(get(query))
     }
 
     suspend fun series(
@@ -103,15 +118,26 @@ class MovieFlixApi(
         offset: Int = 0,
         genre: String? = null,
         seed: String? = null,
+        sort: String? = null,
+        q: String? = null,
     ): CatalogResponse {
-        val q = buildString {
+        val query = buildString {
             append("/api/catalog/series?limit=$limit&offset=$offset")
             if (!genre.isNullOrBlank()) append("&genre=${enc(genre)}")
             if (!seed.isNullOrBlank()) append("&seed=${enc(seed)}")
+            if (!sort.isNullOrBlank()) append("&sort=${enc(sort)}")
+            if (!q.isNullOrBlank()) append("&q=${enc(q)}")
         }
-        return json.decodeFromString(get(q))
+        return json.decodeFromString(get(query))
     }
 
+    /**
+     * Pesquisa na aba Buscar — filmes E séries.
+     *
+     * Mantida exatamente como estava: a aba Buscar continua sendo a pesquisa
+     * geral. As pesquisas das telas Filmes e Séries usam [movies]/[series] com
+     * `q`, e não esta função, para não misturar tipos.
+     */
     suspend fun search(term: String, limit: Int = 40): CatalogResponse {
         val movies = json.decodeFromString<CatalogResponse>(
             get("/api/catalog/movies?q=${enc(term)}&limit=$limit"),

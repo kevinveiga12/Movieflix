@@ -47,6 +47,8 @@ import run.velixir.movieflix.tv.ui.screens.TvSettingsScreen
 import run.velixir.movieflix.tv.ui.screens.TvSidebar
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MovieFlixTheme
+import run.velixir.movieflix.tv.update.UpdateDialog
+import run.velixir.movieflix.tv.update.UpdateManager
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -121,6 +123,30 @@ fun MovieFlixTvApp(
     // Evita repetir a busca na API a cada recomposição quando o id não está no
     // primeiro lote do catálogo (a rota é só para captura no CI).
     var detailTried by remember { mutableStateOf(false) }
+
+    /*
+      ── ATUALIZADOR INTEGRADO (item 12) ──────────────────────────────────────
+
+      Ao abrir o app, consultamos o manifesto de versões. Se houver uma versão
+      mais nova, mostramos a janela por cima de tudo.
+
+      A checagem é silenciosa em caso de falha: sem rede, o app abre normalmente
+      e o usuário assiste. Nunca bloqueia o catálogo por causa de uma consulta
+      de versão.
+
+      `BuildConfig.VERSION_CODE` é o versionCode REAL do APK instalado — é o que
+      o Android usa para aceitar (ou recusar) a instalação por cima. Comparar
+      por ele evita o bug clássico de "1.0.10 < 1.0.9" em comparação de string.
+    */
+    var updateManifest by remember { mutableStateOf<UpdateManager.Manifest?>(null) }
+    var updateDismissed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val m = UpdateManager.check(BuildConfig.API_BASE_URL)
+        if (UpdateManager.isNewer(m, BuildConfig.VERSION_CODE)) {
+            updateManifest = m
+        }
+    }
 
     // Rota inicial vinda do intent (captura no CI).
     LaunchedEffect(initialRoute, s.movies.isNotEmpty()) {
@@ -308,6 +334,20 @@ fun MovieFlixTvApp(
                     }
                 }
             }
+        }
+
+        /*
+          A janela de atualização fica ACIMA de qualquer rota — inclusive do
+          player. Se o usuário estiver assistindo quando a checagem termina, a
+          janela aparece por cima; ele pode adiar (quando opcional) e continuar.
+        */
+        val m = updateManifest
+        if (m != null && !updateDismissed) {
+            UpdateDialog(
+                manifest = m,
+                installedVersion = BuildConfig.VERSION_NAME,
+                onDismiss = { updateDismissed = true },
+            )
         }
     }
 }

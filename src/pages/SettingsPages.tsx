@@ -174,13 +174,10 @@ const FALLBACK: AppInfo = {
   ios: { available: true, minIos: '16.0', install: 'pwa' },
   tv: {
     available: true,
-    version: '1.0.5',
+    version: '1.0.6',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',
-    status: 'beta',
-    notice: 'Atualização 1.0.5',
-    updateNote: 'escolha de temporadas e episódios',
     platforms: ['Android TV', 'Google TV', 'TV Box'],
   },
 }
@@ -306,12 +303,12 @@ export function DownloadPage() {
           </div>
 
           {/*
-            APP DE TV — EM DESENVOLVIMENTO.
+            APP DE TV — PRONTO.
 
-            O selo não é decoração: o app de TV ainda não foi validado num
-            aparelho físico pelo proprietário. O aviso fica visível no card e
-            repetido no rodapé dele, para que ninguém baixe esperando algo
-            acabado.
+            O selo "Em desenvolvimento" e o quadro de aviso foram removidos a
+            pedido do proprietário: o app está publicado e não deve mais ser
+            apresentado como beta. O botão vermelho "Baixar para TV" continua
+            apontando para /api/apps/tv/download, que entrega o APK 1.0.6.
           */}
           {info.tv && (
             <div className="panel">
@@ -327,19 +324,11 @@ export function DownloadPage() {
                     versão {info.tv.version}
                     {mb(info.tv.sizeBytes) ? ` · ${mb(info.tv.sizeBytes)}` : ''}
                   </p>
-                  {/*
-                    O que a atualização traz. O proprietário pediu que a página
-                    deixasse claro que é uma ATUALIZAÇÃO e qual é a novidade —
-                    quem já tem o app instalado precisa saber por que baixar de
-                    novo.
-                  */}
-                  {info.tv.updateNote && (
-                    <p style={{ margin: '6px 0 0', fontSize: '0.82rem', color: 'var(--accent)', fontWeight: 600 }}>
-                      Atualização: {info.tv.updateNote}
-                    </p>
-                  )}
+                  <p className="muted" style={{ margin: '6px 0 0', fontSize: '0.82rem' }}>
+                    Atualização: escolha de categorias como populares, recentes, mais antigos,
+                    A–Z e melhor avaliados.
+                  </p>
                 </div>
-                <span className="badge badge--warn">{info.tv.notice ?? 'Em desenvolvimento'}</span>
               </div>
 
               <div className="inline" style={{ marginTop: 14 }}>
@@ -353,15 +342,6 @@ export function DownloadPage() {
                 </a>
                 <span className="muted" style={{ fontSize: '0.82rem' }}>
                   Instale pelo pendrive ou pelo navegador da TV
-                </span>
-              </div>
-
-              <div className="alert alert--info" style={{ marginTop: 14, marginBottom: 0 }}>
-                <InfoIcon size={18} />
-                <span>
-                  <strong>Em desenvolvimento.</strong> O aplicativo de TV está em fase de testes
-                  e pode apresentar falhas. Se algo não funcionar, use o site no navegador da TV
-                  enquanto publicamos a versão final.
                 </span>
               </div>
             </div>

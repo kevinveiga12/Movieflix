@@ -14,21 +14,23 @@ android {
         minSdk = 26
         targetSdk = 35
         /*
-          1.0.5 — escolha de TEMPORADA e EPISÓDIO na tela da série.
+          1.0.6 — ordenação, pesquisa direta, proteção de tela e atualizador.
 
-          O seletor já existia no código, mas nunca aparecia: a API devolve
-          `"description": null` em cada episódio e o modelo `Episode` declara
-          `description: String` (não anulável). O kotlinx.serialization estourava
-          SerializationException, o `loadSeasons` engolia com runCatching e
-          `seasons` ficava vazio — a tela escondia a seção inteira. Corrigido com
-          `coerceInputValues = true` em MovieFlixApi.
+          • Filmes e Séries ganharam as cinco ordenações (populares, recentes,
+            mais antigos, A–Z, melhor avaliados), aplicadas no SERVIDOR sobre o
+            catálogo inteiro — não só sobre a página carregada.
+          • Pesquisa direta nas telas de Filmes e Séries, combinável com
+            categoria e ordenação. A aba Buscar continua intacta.
+          • FLAG_KEEP_SCREEN_ON ligada/desligada pelo estado REAL do player:
+            a TV não entra mais em descanso com filme ou episódio tocando.
+          • Atualizador integrado: consulta /api/apps/tv/version, baixa o APK,
+            valida SHA-256 e abre o instalador do Android.
 
-          versionCode 7: build novo sobre o 6, para a atualização instalar por
-          cima. O versionName continua 1.0.5, que é o número anunciado na
-          página de downloads.
+          versionCode 8 (o 1.0.5 saiu como 7). Instalar por cima preserva login e
+          dados porque o applicationId e a chave de assinatura são os mesmos.
         */
-        versionCode = 7
-        versionName = "1.0.5"
+        versionCode = 8
+        versionName = "1.0.6"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

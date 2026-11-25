@@ -156,17 +156,27 @@ fun TvHomeScreen(vm: TvViewModel, onOpen: (Title) -> Unit, onLoginRequired: () -
     }
 }
 
-/** Chip de gênero com foco visível — o .chip do site. */
+/** Chip de gênero/ordenação com foco visível — o .chip do site. */
 @Composable
-fun TvChip(label: String, onClick: () -> Unit) {
+fun TvChip(label: String, selected: Boolean = false, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(if (focused) MfColors.Red else MfColors.BgCard)
+            .background(
+                when {
+                    focused -> MfColors.Red
+                    selected -> MfColors.BgHover
+                    else -> MfColors.BgCard
+                },
+            )
             .border(
                 1.dp,
-                if (focused) Color.Transparent else MfColors.Border,
+                when {
+                    focused -> Color.Transparent
+                    selected -> MfColors.Red
+                    else -> MfColors.Border
+                },
                 RoundedCornerShape(20.dp),
             )
             .onFocusChanged { focused = it.isFocused }
@@ -175,10 +185,10 @@ fun TvChip(label: String, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            color = if (focused) Color.White else MfColors.TextSoft,
+            color = if (focused) Color.White else if (selected) MfColors.Text else MfColors.TextSoft,
             fontFamily = MfSans,
             fontSize = 13.sp,
-            fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = if (focused || selected) FontWeight.Bold else FontWeight.Normal,
         )
     }
 }
@@ -256,13 +266,32 @@ fun TvWideCard(title: String, imageUrl: String, progress: Double, onClick: () ->
 fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
     val s by vm.state.collectAsState()
     val list = if (kind == "tv") s.series else s.movies
-    var genre by remember { mutableStateOf<String?>(null) }
     val gridState = rememberLazyGridState()
-
-    LaunchedEffect(kind) { vm.loadCatalog(kind) }
+    val searchFocus = remember { FocusRequester() }
 
     /*
-      ── Carregamento automático (item 3) ──────────────────────────────────────
+      Campo de pesquisa local.
+
+      O texto digitado vive aqui (para o teclado virtual funcionar sem
+      re-renderizar a lista a cada tecla) e é enviado ao ViewModel com debounce
+      de 350 ms — sem isso, cada letra dispararia uma requisição ao servidor e a
+      TV engasgaria na digitação.
+    */
+    var term by remember(kind) { mutableStateOf("") }
+
+    LaunchedEffect(kind) {
+        term = ""
+        vm.loadCatalog(kind, genre = null, sort = "popular", query = "")
+    }
+
+    LaunchedEffect(term) {
+        if (term == s.catalogQuery) return@LaunchedEffect
+        kotlinx.coroutines.delay(350)
+        vm.searchCatalog(kind, term)
+    }
+
+    /*
+      ── Carregamento automático (item 3) ────────────────────────────────────
 
       Antes a tela pedia 60 itens e parava: a navegação terminava no fim da
       grade mesmo existindo centenas de títulos cadastrados.
@@ -303,6 +332,58 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TvPageTitle(if (kind == "tv") "Séries" else "Filmes")
 
+        /*
+          Pesquisa direta da tela (itens 5 e 6).
+
+          Fica ACIMA das categorias e da ordenação porque é o primeiro gesto de
+          quem já sabe o que quer ver. O resultado respeita o tipo da tela: a
+          rota de Séries devolve só séries, a de Filmes só filmes.
+        */
+        OutlinedTextField(
+            value = term,
+            onValueChange = { term = it },
+            placeholder = {
+                Text(
+                    if (kind == "tv") "Buscar série pelo nome..." else "Buscar filme pelo nome...",
+                    color = MfColors.TextDim,
+                )
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MfColors.Red,
+                unfocusedBorderColor = MfColors.Border,
+                focusedContainerColor = MfColors.BgCard,
+                unfocusedContainerColor = MfColors.BgCard,
+                focusedTextColor = MfColors.Text,
+                unfocusedTextColor = MfColors.Text,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 48.dp)
+                .padding(bottom = 14.dp)
+                .focusRequester(searchFocus),
+        )
+
+        /*
+          Seletor de ordenação (itens 2 e 3).
+
+          Cinco opções, as mesmas em Filmes e em Séries. São ORDENAÇÕES, não
+          categorias: por isso ficam numa fileira própria, abaixo da pesquisa e
+          acima dos gêneros, e não substituem nenhum chip de categoria.
+        */
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 48.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(bottom = 12.dp),
+        ) {
+            items(SORT_OPTIONS) { opt ->
+                TvChip(opt.second, selected = s.sort == opt.first) {
+                    vm.setSort(kind, opt.first)
+                }
+            }
+        }
+
         if (s.genres.isNotEmpty()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 48.dp),
@@ -310,15 +391,13 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
                 modifier = Modifier.padding(bottom = 18.dp),
             ) {
                 item {
-                    TvChip("Todos") {
-                        genre = null
-                        vm.loadCatalog(kind, null)
+                    TvChip("Todos", selected = s.genre == null) {
+                        vm.loadCatalog(kind, null, sort = s.sort, query = s.catalogQuery)
                     }
                 }
                 items(s.genres.take(14)) { g ->
-                    TvChip(g) {
-                        genre = g
-                        vm.loadCatalog(kind, g)
+                    TvChip(g, selected = s.genre == g) {
+                        vm.loadCatalog(kind, g, sort = s.sort, query = s.catalogQuery)
                     }
                 }
             }
@@ -326,6 +405,8 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
 
         when {
             s.loading && list.isEmpty() -> TvLoading()
+            list.isEmpty() && s.catalogQuery.isNotBlank() ->
+                TvEmpty("Nenhum resultado para \"${s.catalogQuery}\".", "🔍")
             list.isEmpty() -> TvEmpty("Nada por aqui ainda.")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                 state = gridState,
@@ -387,6 +468,21 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
         }
     }
 }
+
+/**
+ * As cinco ordenações, na ordem em que aparecem na TV.
+ *
+ * O primeiro elemento é o valor que o servidor entende (`sort`), o segundo é o
+ * rótulo em português. Manter os dois juntos evita o clássico descompasso
+ * entre o texto do botão e o parâmetro enviado.
+ */
+private val SORT_OPTIONS = listOf(
+    "popular" to "Mais populares",
+    "recent" to "Mais recentes",
+    "oldest" to "Mais antigos",
+    "az" to "A–Z",
+    "rating" to "Melhor avaliados",
+)
 
 /** Categorias/gêneros — a rota /categorias do site. */
 @Composable

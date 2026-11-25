@@ -245,11 +245,29 @@ function filterAndSort(list, q) {
   }
   const sort = q.sort ?? 'popular'
   const copy = [...out]
+  /*
+    Datas ausentes vão SEMPRE para o fim.
+
+    O catálogo tem títulos sem `release_date` (string vazia). Comparando como
+    texto, `''` é menor que qualquer data — então "Mais antigos" abria com uma
+    fileira de títulos SEM data, que não são os mais antigos de nada. Aqui a
+    ausência é tratada como "desconhecida" e empurrada para o fim, nos dois
+    sentidos.
+  */
+  const date = (t) => String(t.release_date ?? '')
+  const byDate = (dir) => (a, b) => {
+    const da = date(a)
+    const db = date(b)
+    if (!da && !db) return 0
+    if (!da) return 1
+    if (!db) return -1
+    return dir * da.localeCompare(db)
+  }
   switch (sort) {
     case 'recent':
-      return copy.sort((a, b) => String(b.release_date ?? '').localeCompare(String(a.release_date ?? '')))
+      return copy.sort(byDate(-1))
     case 'oldest':
-      return copy.sort((a, b) => String(a.release_date ?? '').localeCompare(String(b.release_date ?? '')))
+      return copy.sort(byDate(1))
     case 'az':
       return copy.sort((a, b) => String(a.title).localeCompare(String(b.title), 'pt-BR'))
     case 'rating':

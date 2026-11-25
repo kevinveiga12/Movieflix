@@ -56,6 +56,18 @@ data class TvState(
     val loadingMore: Boolean = false,
     /** Semente da sessão — mantém a ordem estável entre páginas. */
     val seed: String = "",
+    /**
+     * Ordenação atual do catálogo (Filmes/Séries).
+     *
+     * `popular` | `recent` | `oldest` | `az` | `rating` — o MESMO vocabulário
+     * que o servidor entende. Fica no estado porque a tela precisa desenhar o
+     * chip selecionado e a paginação precisa repetir o mesmo `sort`.
+     */
+    val sort: String = "popular",
+    /** Gênero selecionado (null = Todos). Preservado ao trocar a ordenação. */
+    val genre: String? = null,
+    /** Termo da pesquisa direta da tela de Filmes/Séries (vazio = sem busca). */
+    val catalogQuery: String = "",
 )
 
 /**
@@ -97,6 +109,8 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     private data class PageCursor(
         val kind: String,
         val genre: String?,
+        val sort: String,
+        val query: String,
         val offset: Int,
         val total: Int,
         val loading: Boolean,
@@ -149,21 +163,40 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Carrega a PRIMEIRA página de um catálogo (Filmes ou Séries).
      *
-     * Substitui a lista e reinicia o cursor. Chamado ao entrar na tela e ao
-     * trocar de gênero.
+     * `sort` e `q` são repassados ao servidor, que ordena/pesquisa sobre o
+     * catálogo INTEIRO. `genre` é preservado quando só a ordenação muda — é o
+     * que faz "Ação + Mais populares" continuar sendo Ação.
      */
-    fun loadCatalog(kind: String, genre: String? = null) {
-        cursor = PageCursor(kind = kind, genre = genre, offset = 0, total = 0, loading = true)
+    fun loadCatalog(
+        kind: String,
+        genre: String? = null,
+        sort: String = _state.value.sort,
+        query: String = _state.value.catalogQuery,
+    ) {
+        cursor = PageCursor(kind = kind, genre = genre, sort = sort, query = query, offset = 0, total = 0, loading = true)
         viewModelScope.launch {
-            update { it.copy(loading = true, error = null, loadingMore = false) }
+            update {
+                it.copy(
+                    loading = true,
+                    error = null,
+                    loadingMore = false,
+                    sort = sort,
+                    genre = genre,
+                    catalogQuery = query,
+                )
+            }
             try {
                 val seed = _state.value.seed
-                val r = if (kind == "tv") api.series(limit = pageSize, offset = 0, genre = genre, seed = seed)
-                else api.movies(limit = pageSize, offset = 0, genre = genre, seed = seed)
+                val r = if (kind == "tv")
+                    api.series(limit = pageSize, offset = 0, genre = genre, seed = seed, sort = sort, q = query)
+                else
+                    api.movies(limit = pageSize, offset = 0, genre = genre, seed = seed, sort = sort, q = query)
 
                 cursor = PageCursor(
                     kind = kind,
                     genre = genre,
+                    sort = sort,
+                    query = query,
                     offset = r.items.size,
                     total = r.total,
                     loading = false,
@@ -182,6 +215,27 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                 update { it.copy(loading = false, error = friendly(e), hasMore = false) }
             }
         }
+    }
+
+    /**
+     * Troca a ordenação mantendo gênero e pesquisa.
+     *
+     * É o que o seletor de 5 opções chama. Não zera o gênero: aplicar uma
+     * ordenação não pode apagar a categoria selecionada.
+     */
+    fun setSort(kind: String, sort: String) {
+        loadCatalog(kind, genre = _state.value.genre, sort = sort, query = _state.value.catalogQuery)
+    }
+
+    /**
+     * Pesquisa direta na tela de Filmes/Séries.
+     *
+     * Usa a MESMA rota do catálogo com `q`, então o resultado respeita o tipo
+     * da tela (Filmes devolve só filmes, Séries só séries) e continua
+     * combinável com gênero e ordenação.
+     */
+    fun searchCatalog(kind: String, term: String) {
+        loadCatalog(kind, genre = _state.value.genre, sort = _state.value.sort, query = term.trim())
     }
 
     /**
@@ -220,9 +274,9 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val seed = _state.value.seed
                 val r = if (c.kind == "tv")
-                    api.series(limit = pageSize, offset = c.offset, genre = c.genre, seed = seed)
+                    api.series(limit = pageSize, offset = c.offset, genre = c.genre, seed = seed, sort = c.sort, q = c.query)
                 else
-                    api.movies(limit = pageSize, offset = c.offset, genre = c.genre, seed = seed)
+                    api.movies(limit = pageSize, offset = c.offset, genre = c.genre, seed = seed, sort = c.sort, q = c.query)
 
                 update { st ->
                     val existing = if (c.kind == "tv") st.series else st.movies

@@ -3,6 +3,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      Atualizador integrado (1.0.6).
+
+      REQUEST_INSTALL_PACKAGES é o que permite abrir o instalador do Android
+      para instalar o APK baixado. NÃO é instalação silenciosa: o sistema
+      sempre mostra a confirmação do usuário (e, na primeira vez, a tela de
+      "instalar apps desconhecidos"). Sem esta permissão o Android recusa o
+      Intent de instalação.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Exigido pela Play Store para apps de TV; também faz o app aparecer
          no launcher do Android TV / Google TV. -->
@@ -36,5 +46,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          FileProvider do atualizador.
+
+          O APK baixado fica no cache privado do app. Para o instalador do
+          Android conseguir lê-lo, precisamos expor o arquivo por um
+          content:// URI — `file://` é proibido desde o Android 7 e derruba o
+          app com FileUriExposedException. O authority tem de casar com o que
+          UpdateManager.install() usa: "${packageName}.updates".
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
     </application>
 </manifest>

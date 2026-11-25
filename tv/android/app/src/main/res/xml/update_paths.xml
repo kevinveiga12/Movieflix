@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Caminhos que o FileProvider do atualizador pode expor.
+
+  Só o diretório de updates do cache é exposto — nada de armazenamento
+  interno, nada de dados do usuário. O instalador do Android recebe um
+  content:// URI para o APK baixado e nada mais.
+-->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

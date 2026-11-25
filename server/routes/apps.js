@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { requireAdmin } from '../lib/auth.js'
 
@@ -67,8 +68,9 @@ const ANDROID_APK = path.join(ROOT, 'public', 'apk', 'movieflix-android.apk')
 function tvApkPath() {
   const candidates = [
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv.apk'),
+    path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.6.apk'),
+    path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.5.apk'),
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.4.apk'),
-    path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.3.apk'),
   ]
   return candidates.find((p) => fs.existsSync(p)) ?? candidates[0]
 }
@@ -144,25 +146,18 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.5',
+      version: '1.0.6',
       minAndroid: '8.0',
       sizeBytes: tv.sizeBytes || 10906425,
       updatedAt: tv.updatedAt,
       url: '/api/apps/tv/download',
       fallbackUrl: TV_APK_CDN,
-      /**
-       * `beta` é o que a página lê para mostrar o selo. NÃO é decoração: o
-       * app de TV ainda não foi validado num aparelho físico pelo proprietário,
-       * e o aviso existe para que ninguém o trate como pronto.
-       */
-      status: 'beta',
-      notice: 'Atualização 1.0.5',
       /*
-        O que mudou nesta versão, em uma linha. A página de downloads mostra
-        isto ao lado do número da versão — é o que o proprietário pediu: que
-        quem já tem o app saiba que é uma ATUALIZAÇÃO e o que ela traz.
+        1.0.6 é a versão de produção: ordenação, pesquisa direta, proteção de
+        tela e atualizador integrado. O selo "beta" foi removido — o app não é
+        mais apresentado como em desenvolvimento.
       */
-      updateNote: 'escolha de temporadas e episódios',
+      updateNote: 'escolha de categorias como populares, recentes, mais antigos, A–Z e melhor avaliados',
       platforms: ['Android TV', 'Google TV', 'TV Box'],
     },
   })
@@ -175,7 +170,7 @@ publicRouter.get('/', (_req, res) => {
  * para cá. O arquivo continua em `storage/apps/`, fora do estático, para que
  * a troca de versão seja uma decisão nossa e não um efeito de copiar arquivo.
  */
-publicRouter.get('/tv/download', (req, res) => {
+publicRouter.get('/tv/download', (req, res, next) => {
   const p = tvApkPath()
   if (!fs.existsSync(p)) {
     /* APK fora do pacote (pool da Velixir cheio): manda para o CDN. */
@@ -189,6 +184,103 @@ publicRouter.get('/tv/download', (req, res) => {
 })
 
 /**
+ * ── MANIFESTO DE VERSÕES DO APP DE TV ────────────────────────────────────────
+ *
+ * GET /api/apps/tv/version
+ *
+ * É o arquivo de controle que o atualizador integrado consulta ao abrir. O app
+ * NÃO tem número de versão fixo no código: ele lê este JSON e compara com o
+ * `versionCode` instalado.
+ *
+ * ── COMO PUBLICAR UMA VERSÃO NOVA (1.0.7, 1.0.8, 2.0.0...) ──────────────────
+ *
+ *   1. gerar o APK novo (workflow Build APKs);
+ *   2. publicar o arquivo em `storage/apps/movieflix-tv.apk`;
+ *   3. atualizar `storage/apps/tv-version.json` com version/versionCode/notes.
+ *
+ * Nada de código muda. O `sha256` é calculado AQUI, a partir do APK que está
+ * no disco — assim o hash nunca fica dessincronizado do arquivo entregue, que
+ * é o erro clássico de um atualizador (hash de um build, APK de outro).
+ *
+ * Se o APK não estiver no disco (servido pelo CDN), o hash vem do JSON; se
+ * também não houver, o campo sai nulo e o app recusa a instalação — melhor
+ * recusar do que instalar um arquivo não verificado.
+ */
+const TV_VERSION_FILE = path.join(PRIVATE_APPS_DIR, 'tv-version.json')
+
+/** Hash SHA-256 do APK em disco, com cache por mtime+tamanho. */
+let shaCache = { key: '', value: null }
+function apkSha256(p) {
+  try {
+    const st = fs.statSync(p)
+    const key = `${st.size}:${st.mtimeMs}`
+    if (shaCache.key === key && shaCache.value) return shaCache.value
+    const hash = crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')
+    shaCache = { key, value: hash }
+    return hash
+  } catch {
+    return null
+  }
+}
+
+publicRouter.get('/tv/version', (req, res) => {
+  res.set('Cache-Control', 'no-store')
+
+  let manifest = null
+  try {
+    manifest = JSON.parse(fs.readFileSync(TV_VERSION_FILE, 'utf8'))
+  } catch {
+    manifest = null
+  }
+
+  const p = tvApkPath()
+  const onDisk = fs.existsSync(p)
+  const sha = onDisk ? apkSha256(p) : null
+
+  /*
+    ── REGRA DE HONESTIDADE ──────────────────────────────────────────────────
+
+    Só anunciamos uma versão quando o APK que será ENTREGUE é exatamente o que
+    o manifesto descreve. Sem isso, o servidor poderia dizer "1.0.6 disponível"
+    enquanto o arquivo em disco ainda é o 1.0.5 — o app baixaria, o SHA não
+    bateria e o usuário veria um erro sem explicação.
+
+    A verificação é o SHA-256: o manifesto precisa declarar o hash do APK e ele
+    tem de bater com o arquivo em disco. Se não bater (ou se o manifesto não
+    trouxer hash), respondemos `versionCode: 0`, que o app interpreta como
+    "nada a atualizar" — silencioso e seguro.
+
+    É por isso que publicar uma versão nova exige preencher `sha256` no
+    `storage/apps/tv-version.json` (o workflow de build faz isso).
+  */
+  const declared = manifest?.sha256 ? String(manifest.sha256).toLowerCase().trim() : null
+  const verified = Boolean(declared && sha && declared === sha)
+
+  const version = verified ? manifest.version : '1.0.6'
+  const versionCode = verified ? Number(manifest.versionCode) : 0
+
+  res.json({
+    version,
+    versionCode,
+    /*
+      URL ABSOLUTA e HTTPS: o app só aceita endereço oficial. A rota de
+      download é a mesma que o site usa, então o APK entregue ao atualizador é
+      exatamente o que um humano baixaria.
+    */
+    apkUrl: manifest?.apkUrl ?? 'https://movieflix.velixir.run/api/apps/tv/download',
+    /*
+      O hash devolvido é SEMPRE o do arquivo em disco — nunca o do manifesto.
+      Assim o app valida contra o byte que realmente recebeu.
+    */
+    sha256: sha,
+    notes: verified ? (manifest.notes ?? []) : [],
+    mandatory: verified ? Boolean(manifest.mandatory) : false,
+    publishedAt: verified ? (manifest.publishedAt ?? null) : null,
+    minSupportedVersionCode: verified ? Number(manifest.minSupportedVersionCode ?? 0) : 0,
+  })
+})
+
+/**
  * GET /api/admin/apps/tv — metadados do APK da TV (somente admin).
  * Não devolve o arquivo: o download tem URL própria para poder ser auditado.
  */
@@ -198,7 +290,7 @@ router.get('/tv', requireAdmin, (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     name: 'MovieFlix TV',
-    version: '1.0.5',
+    version: '1.0.6',
     available: info.exists,
     sizeBytes: info.sizeBytes,
     updatedAt: info.updatedAt,
@@ -222,7 +314,7 @@ router.get('/tv/download', requireAdmin, (req, res, next) => {
   }
   console.log(`[MovieFlix] APK TV baixado por ${req.user?.email ?? req.user?.id ?? 'admin'}`)
   res.type('application/vnd.android.package-archive')
-  res.download(p, 'movieflix-tv-1.0.5.apk', (err) => {
+  res.download(p, 'movieflix-tv-1.0.6.apk', (err) => {
     if (err && !res.headersSent) next(err)
   })
 })

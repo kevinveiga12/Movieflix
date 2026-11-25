@@ -345,6 +345,18 @@ private fun TvDirectPlayer(
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
 
+    /*
+      Proteção contra a tela de descanso (item 10) — modo DIRETO.
+
+      O estado vem do ExoPlayer, que é nosso: `isPlaying` é confiável. Também
+      cobrimos BUFFERING, porque durante o buffer a tela não pode descansar
+      (o vídeo está prestes a voltar e o usuário não apertou nada).
+    */
+    KeepScreenOn(
+        active = playingState.value ||
+            player.playbackState == Player.STATE_BUFFERING,
+    )
+
     /** O usuário pausou de propósito: a retentativa de autoplay não deve brigar. */
     var userPaused by remember { mutableStateOf(false) }
 
@@ -1108,6 +1120,65 @@ private val BRIDGE_JS: String = """
 })();
 """.trimIndent()
 
+/**
+ * Mantém a tela ligada enquanto houver reprodução ativa.
+ *
+ * ── O PROBLEMA ──────────────────────────────────────────────────────────────
+ *
+ * Algumas Smart TVs entram em modo de descanso (a tela com paisagem, relógio e
+ * clima) depois de alguns minutos sem NENHUM evento de controle remoto — mesmo
+ * com vídeo tocando. O Android não considera a reprodução de vídeo como
+ * "atividade do usuário", então o protetor de tela do sistema dispara.
+ *
+ * ── A SOLUÇÃO ───────────────────────────────────────────────────────────────
+ *
+ * `FLAG_KEEP_SCREEN_ON` na janela da Activity é o mecanismo OFICIAL do Android
+ * para isso: enquanto a flag está posta, o sistema não apaga nem descansa a
+ * tela. É a mesma flag que `View.setKeepScreenOn(true)` liga por baixo.
+ *
+ * A flag é LIGADA e DESLIGADA conforme o estado real do player — nunca fica
+ * posta a vida toda do app. Isso é deliberado: o pedido proíbe manter a tela
+ * permanentemente ligada e proíbe desativar o protetor de tela do usuário.
+ *
+ * Estados considerados (os que o player realmente expõe):
+ *   • PLAYING / BUFFERING  → liga  (há conteúdo a mostrar)
+ *   • PAUSED / ENDED / ERROR / STOPPED → desliga (nada a proteger)
+ *
+ * `active` já chega calculado pelo chamador a partir do estado real
+ * (`player.isPlaying`, `playbackState`, ou o `playing` reportado pelo JS do
+ * provedor no modo embed). Não inventamos eventos: usamos o que existe.
+ */
+@Composable
+private fun KeepScreenOn(active: Boolean) {
+    val context = LocalContext.current
+    DisposableEffect(active) {
+        val activity = context.findActivity()
+        if (activity != null) {
+            if (active) {
+                activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+        onDispose {
+            // Sair do player (ou trocar de fonte) SEMPRE devolve a tela ao
+            // comportamento normal — senão a flag ficaria presa no app inteiro.
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+}
+
+/** Sobe a árvore de Context até achar a Activity (o Compose entrega um Context
+ *  que pode ser um ContextWrapper). */
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var ctx: android.content.Context? = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is android.app.Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return ctx as? android.app.Activity
+}
+
 /** Recebe o estado do `<video>` vindo do JS. */
 private class PlayerBridge(private val onMessage: (String) -> Unit) {
     @JavascriptInterface
@@ -1176,6 +1247,19 @@ internal fun TvEmbedPlayer(
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
     var hasVideo by remember { mutableStateOf(false) }
+
+    /*
+      Proteção contra a tela de descanso (item 10) — modo EMBED.
+
+      Aqui o player é do provedor, dentro do WebView. O estado vem do evento
+      `state` que a ponte JS reporta a partir dos eventos REAIS do <video>
+      (play/pause/ended/error). Não dependemos de teclado: se o vídeo está
+      tocando, a tela fica ligada mesmo que ninguém toque no controle.
+
+      `hasVideo` evita ligar a flag antes de existir vídeo — durante o
+      carregamento do provedor a tela pode descansar normalmente.
+    */
+    KeepScreenOn(active = hasVideo && playingState.value)
     /** Só avisa "sem vídeo" depois de dar tempo real ao provedor. */
     var waitedLong by remember { mutableStateOf(false) }
     /** Recarrega a página do provedor (o "Tentar novamente" do aviso). */

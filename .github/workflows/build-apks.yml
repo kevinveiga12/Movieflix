@@ -196,9 +196,49 @@ jobs:
           # de admin. Fica em storage/apps/, que nao e servido estaticamente.
           mkdir -p storage/apps
           cp out/movieflix-tv-release.apk storage/apps/movieflix-tv.apk
+
+          # ── MANIFESTO DE VERSÃO DO ATUALIZADOR ──────────────────────────────
+          #
+          # O atualizador integrado (1.0.6+) consulta /api/apps/tv/version e só
+          # aceita a atualização se o SHA-256 do manifesto bater com o APK
+          # entregue. Por isso o hash é calculado AQUI, do arquivo que acabou de
+          # ser compilado — nunca escrito à mão.
+          #
+          # version/versionCode vêm do próprio APK (aapt), então o manifesto
+          # nunca anuncia uma versão diferente da que o pacote contém.
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)"
+          BADGING="$("$BT"/aapt dump badging storage/apps/movieflix-tv.apk | head -1)"
+          VNAME="$(printf '%s' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+          VCODE="$(printf '%s' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          SHA="$(sha256sum storage/apps/movieflix-tv.apk | cut -d' ' -f1)"
+          echo "TV APK: version=$VNAME code=$VCODE sha=$SHA"
+
+          python3 - "$VNAME" "$VCODE" "$SHA" <<'PY'
+          import json, sys, datetime
+          version, code, sha = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          path = 'storage/apps/tv-version.json'
+          try:
+              data = json.load(open(path))
+          except Exception:
+              data = {}
+          data.update({
+              'version': version,
+              'versionCode': code,
+              'apkUrl': 'https://movieflix.velixir.run/api/apps/tv/download',
+              'sha256': sha,
+              'publishedAt': datetime.datetime.now(datetime.timezone.utc)
+                             .strftime('%Y-%m-%dT%H:%M:%SZ'),
+          })
+          data.setdefault('notes', [])
+          data.setdefault('mandatory', False)
+          data.setdefault('minSupportedVersionCode', 0)
+          json.dump(data, open(path, 'w'), ensure_ascii=False, indent=2)
+          print('manifesto atualizado:', path)
+          PY
+
           git config user.name "MovieFlix Build"
           git config user.email "build@movieflix.local"
-          git add public/apk/movieflix-android.apk storage/apps/movieflix-tv.apk
+          git add public/apk/movieflix-android.apk storage/apps/movieflix-tv.apk storage/apps/tv-version.json
           if git diff --cached --quiet; then
             echo "APKs sem mudanca — nada a commitar"
           else
