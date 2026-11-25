@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
-import { resolvePlanPrice, brl } from '../server/lib/plan-pricing.js'
+import { resolvePlanPrice, brl, PERIODS, PLAN_DAYS } from '../server/lib/plan-pricing.js'
 import { verifyWebhookSignature, paymentIdFromNotification } from '../server/lib/mercadopago.js'
 import { validatePayment } from '../server/lib/subscription-activation.js'
+import { validateCpf, onlyDigits, formatCpf } from '../server/lib/cpf.js'
 
 /**
  * Testes da lógica pura da integração Pix.
@@ -21,6 +22,57 @@ function check(name, cond, detail = '') {
     fail++
     console.log(`  FAIL ${name} ${detail}`)
   }
+}
+
+console.log('\n── CPF (obrigatório no Mercado Pago) ──')
+{
+  // CPFs válidos reais (dígitos verificadores corretos).
+  check('CPF válido 529.982.247-25 é aceito', validateCpf('529.982.247-25').ok === true)
+  check('CPF válido sem máscara é aceito', validateCpf('52998224725').ok === true)
+  check('CPF válido 111.444.777-35 é aceito', validateCpf('11144477735').ok === true)
+
+  check('CPF vazio é recusado', validateCpf('').reason === 'empty')
+  check('CPF nulo é recusado', validateCpf(null).reason === 'empty')
+  check('CPF com 10 dígitos é recusado', validateCpf('1234567890').reason === 'length')
+  check('CPF com 12 dígitos é recusado', validateCpf('123456789012').reason === 'length')
+  check('CPF repetido é recusado', validateCpf('11111111111').reason === 'repeated')
+  check('CPF com dígito verificador errado é recusado', validateCpf('52998224724').ok === false)
+  check('CPF inventado é recusado', validateCpf('12345678900').ok === false)
+
+  check('onlyDigits limpa a máscara', onlyDigits('529.982.247-25') === '52998224725')
+  check('formatCpf formata', formatCpf('52998224725') === '529.982.247-25')
+  check('validateCpf devolve os dígitos quando ok', validateCpf('529.982.247-25').digits === '52998224725')
+}
+
+console.log('\n── Matriz completa plano × período (9 combinações) ──')
+{
+  /**
+   * O cliente recebe exatamente o plano e o período que comprou. O valor é
+   * resolvido no servidor por `resolvePlanPrice` — a mesma função da tela.
+   * Aqui conferimos as 9 combinações contra a regra comercial vigente:
+   * mensal cheio, 3 meses com 20% e 1 ano com 50%.
+   */
+  const expected = {
+    basico: { '1m': 1990, '3m': 4776, '12m': 11940 },
+    standard: { '1m': 2990, '3m': 7176, '12m': 17940 },
+    premium: { '1m': 3990, '3m': 9576, '12m': 23940 },
+  }
+  const days = { '1m': 30, '3m': 90, '12m': 365 }
+
+  for (const planCode of ['basico', 'standard', 'premium']) {
+    for (const periodCode of ['1m', '3m', '12m']) {
+      const r = await resolvePlanPrice(planCode, periodCode)
+      const want = expected[planCode][periodCode]
+      check(
+        `${planCode} ${periodCode} = ${brl(want)} e ${days[periodCode]} dias`,
+        r && r.cents === want && r.days === days[periodCode] && r.plan.code === planCode && r.period.code === periodCode,
+        r ? `got ${r.cents}/${r.days}` : 'null',
+      )
+    }
+  }
+
+  check('PERIODS tem 3 períodos', PERIODS.length === 3)
+  check('PLAN_DAYS cobre 1m/3m/12m', PLAN_DAYS['1m'] === 30 && PLAN_DAYS['3m'] === 90 && PLAN_DAYS['12m'] === 365)
 }
 
 console.log('\n── Preços (mesma regra do site) ──')

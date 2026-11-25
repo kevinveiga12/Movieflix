@@ -585,6 +585,12 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
     // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
     var period by remember { mutableStateOf("1m") }
 
+    // CPF do titular — o Mercado Pago exige `payer.identification` para emitir
+    // o Pix. O servidor valida os dígitos verificadores; aqui só conferimos o
+    // formato para dar retorno rápido.
+    var cpf by remember { mutableStateOf("") }
+    var cpfErr by remember { mutableStateOf<String?>(null) }
+
     // QR Code de contratação. Na TV o controle remoto não digita, então em vez
     // de abrir o WhatsApp direto mostramos o QR para o cliente ler com o
     // celular. O PNG vem do servidor (`/api/plans/qr`), que monta a MESMA
@@ -643,6 +649,39 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
                     )
                 }
             }
+        }
+
+        // CPF — obrigatório para gerar o Pix.
+        if (s.pixEnabled) {
+            OutlinedTextField(
+                value = cpf,
+                onValueChange = {
+                    cpf = it
+                    if (cpfErr != null) cpfErr = null
+                },
+                label = { Text("CPF do titular", fontFamily = MfSans, fontSize = 13.sp) },
+                singleLine = true,
+                isError = cpfErr != null,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = MfColors.Text,
+                    unfocusedTextColor = MfColors.Text,
+                    focusedBorderColor = MfColors.Red,
+                    unfocusedBorderColor = MfColors.Border,
+                ),
+                modifier = Modifier
+                    .padding(start = 48.dp, bottom = 6.dp)
+                    .width(320.dp),
+            )
+            if (cpfErr != null) {
+                Text(
+                    cpfErr!!,
+                    color = MfColors.Red,
+                    fontFamily = MfSans,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 48.dp, bottom = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
         }
 
         LazyRow(
@@ -761,8 +800,16 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
                             .onFocusChanged { btnFocused = it.isFocused }
                             .clickable(enabled = pixOn || waUrl.isNotBlank()) {
                                 if (pixOn) {
-                                    vm.createPix(plan.code, chosen?.code ?: period)
-                                    onOpenPix()
+                                    val digits = cpf.filter { it.isDigit() }
+                                    if (digits.length != 11) {
+                                        cpfErr = "O CPF precisa ter 11 dígitos."
+                                    } else if (digits.toSet().size == 1) {
+                                        cpfErr = "Este CPF não é válido. Confira os números."
+                                    } else {
+                                        cpfErr = null
+                                        vm.createPix(plan.code, chosen?.code ?: period, digits)
+                                        onOpenPix()
+                                    }
                                 } else {
                                     // Na TV mostramos o QR Code; o celular lê e
                                     // abre o WhatsApp já com a mensagem.

@@ -5,6 +5,7 @@ import { bearer, resolveUser } from '../lib/entitlement.js'
 import { requireAdmin } from '../lib/auth.js'
 import { createPixPayment, mpConfigured, mpMode, validateAccessToken } from '../lib/mercadopago.js'
 import { resolvePlanPrice, brl } from '../lib/plan-pricing.js'
+import { validateCpf, cpfErrorMessage } from '../lib/cpf.js'
 import { getPaymentRecord, listPayments, paymentsForUser, paymentStats, upsertPayment } from '../lib/payments-store.js'
 import { activateFromPayment } from '../lib/subscription-activation.js'
 
@@ -86,6 +87,28 @@ router.post('/pix', createLimiter, async (req, res, next) => {
       })
     }
 
+    /**
+     * CPF do titular — OBRIGATÓRIO.
+     *
+     * O Mercado Pago recusa a criação de Pix sem `payer.identification`, e a
+     * produção vinha falhando exatamente por isso. A validação é feita aqui,
+     * no servidor, porque site, app e TV são todos clientes não confiáveis.
+     *
+     * O CPF não é gravado em lugar nenhum: só os 4 últimos dígitos vão para o
+     * registro (para o cliente reconhecer a cobrança no histórico). O número
+     * completo existe apenas em memória até a chamada ao provedor.
+     */
+    const cpfCheck = validateCpf(req.body?.cpf)
+    if (!cpfCheck.ok) {
+      return res.status(400).json({
+        error: cpfErrorMessage(cpfCheck.reason),
+        code: 'invalid_cpf',
+        field: 'cpf',
+      })
+    }
+    const cpf = cpfCheck.digits
+    const cpfLast4 = cpf.slice(-4)
+
     const planCode = String(req.body?.plan_code ?? '').trim().toLowerCase()
     const periodCode = String(req.body?.period ?? '1m').trim().toLowerCase()
 
@@ -136,6 +159,7 @@ router.post('/pix', createLimiter, async (req, res, next) => {
         amountCents: cents,
         description: `MovieFlix — ${plan.name} (${period.label})`,
         email: user.email ?? 'cliente@movieflix.app',
+        identification: { type: 'CPF', number: cpf },
         externalReference,
         expiresInMinutes: 30,
         idempotencyKey: crypto.randomUUID(),
@@ -175,6 +199,9 @@ router.post('/pix', createLimiter, async (req, res, next) => {
       status: String(mp.status ?? 'pending'),
       status_detail: mp.status_detail ?? null,
       external_reference: externalReference,
+      // Só os 4 últimos dígitos: o cliente reconhece a cobrança no histórico
+      // sem que o CPF completo fique gravado em disco.
+      cpf_last4: cpfLast4,
       qr_code: qrCode,
       qr_code_base64: qrBase64,
       expires_at: mp.date_of_expiration ?? null,

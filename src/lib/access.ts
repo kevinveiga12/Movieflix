@@ -67,12 +67,13 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 export async function createPixCharge(args: {
   planCode: string
   period: string
+  cpf: string
 }): Promise<PixCharge> {
   const headers = await authHeader()
   return getJson<PixCharge>('/api/payments/pix', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ plan_code: args.planCode, period: args.period }),
+    body: JSON.stringify({ plan_code: args.planCode, period: args.period, cpf: args.cpf }),
   })
 }
 
