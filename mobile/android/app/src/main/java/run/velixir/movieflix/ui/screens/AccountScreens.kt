@@ -788,12 +788,6 @@ fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
     // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
     var period by remember { mutableStateOf("1m") }
 
-    // CPF do titular — o Mercado Pago exige `payer.identification` para emitir
-    // o Pix. O servidor valida os dígitos verificadores; aqui só conferimos o
-    // formato para dar retorno rápido ao cliente.
-    var cpf by remember { mutableStateOf("") }
-    var cpfErr by remember { mutableStateOf<String?>(null) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -854,38 +848,6 @@ fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
                 }
             }
             Spacer(Modifier.height(16.dp))
-
-            // CPF — obrigatório para gerar o Pix.
-            if (s.pixEnabled) {
-                OutlinedTextField(
-                    value = cpf,
-                    onValueChange = {
-                        cpf = it
-                        if (cpfErr != null) cpfErr = null
-                    },
-                    label = { Text("CPF do titular", fontFamily = MfSans, fontSize = 12.sp) },
-                    singleLine = true,
-                    isError = cpfErr != null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MfColors.Text,
-                        unfocusedTextColor = MfColors.Text,
-                        focusedBorderColor = MfColors.Red,
-                        unfocusedBorderColor = MfColors.Border,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (cpfErr != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        cpfErr!!,
-                        color = MfColors.Red,
-                        fontFamily = MfSans,
-                        fontSize = 11.sp,
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-            }
         }
 
         s.plans.forEach { plan ->
@@ -992,16 +954,10 @@ fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
                             )
                             .clickable(enabled = pixOn || waUrl.isNotBlank()) {
                                 if (pixOn) {
-                                    val digits = cpf.filter { it.isDigit() }
-                                    if (digits.length != 11) {
-                                        cpfErr = "O CPF precisa ter 11 dígitos."
-                                    } else if (digits.toSet().size == 1) {
-                                        cpfErr = "Este CPF não é válido. Confira os números."
-                                    } else {
-                                        cpfErr = null
-                                        vm.createPix(p.code, period, digits)
-                                        onOpenPix()
-                                    }
+                                    // O CPF da cobrança é o fixo do dono da conta,
+                                    // preenchido no servidor. O cliente não digita nada.
+                                    vm.createPix(p.code, period)
+                                    onOpenPix()
                                 } else {
                                     openExternal(context, waUrl)
                                 }

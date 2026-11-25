@@ -459,11 +459,11 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
      * O valor não é enviado: o servidor resolve o preço com a mesma função da
      * tela de planos. A TV só recebe o QR e o copia e cola já prontos.
      */
-    fun createPix(planCode: String, period: String, cpf: String) {
+    fun createPix(planCode: String, period: String) {
         update { it.copy(pixLoading = true, pixError = null, pixCharge = null) }
         viewModelScope.launch {
             try {
-                val c = api.createPix(planCode, period, cpf)
+                val c = api.createPix(planCode, period)
                 update { it.copy(pixCharge = c, pixLoading = false) }
             } catch (e: Exception) {
                 update { it.copy(pixLoading = false, pixError = friendly(e)) }

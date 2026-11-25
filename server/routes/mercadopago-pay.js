@@ -5,7 +5,7 @@ import { bearer, resolveUser } from '../lib/entitlement.js'
 import { requireAdmin } from '../lib/auth.js'
 import { createPixPayment, mpConfigured, mpMode, validateAccessToken } from '../lib/mercadopago.js'
 import { resolvePlanPrice, brl } from '../lib/plan-pricing.js'
-import { validateCpf, cpfErrorMessage } from '../lib/cpf.js'
+import { OWNER_CPF } from '../lib/cpf.js'
 import { getPaymentRecord, listPayments, paymentsForUser, paymentStats, upsertPayment } from '../lib/payments-store.js'
 import { activateFromPayment } from '../lib/subscription-activation.js'
 
@@ -88,25 +88,19 @@ router.post('/pix', createLimiter, async (req, res, next) => {
     }
 
     /**
-     * CPF do titular — OBRIGATÓRIO.
+     * CPF do titular — FIXO, do dono da conta.
      *
-     * O Mercado Pago recusa a criação de Pix sem `payer.identification`, e a
-     * produção vinha falhando exatamente por isso. A validação é feita aqui,
-     * no servidor, porque site, app e TV são todos clientes não confiáveis.
+     * O cliente NÃO digita CPF: o Mercado Pago exige `payer.identification`
+     * para emitir o Pix, e a cobrança sai sempre no CPF do titular da conta
+     * MovieFlix (`OWNER_CPF`). Qualquer `cpf` que venha no corpo da requisição
+     * é IGNORADO — site, app e TV são clientes não confiáveis e não podem
+     * escolher o CPF da cobrança.
      *
      * O CPF não é gravado em lugar nenhum: só os 4 últimos dígitos vão para o
      * registro (para o cliente reconhecer a cobrança no histórico). O número
      * completo existe apenas em memória até a chamada ao provedor.
      */
-    const cpfCheck = validateCpf(req.body?.cpf)
-    if (!cpfCheck.ok) {
-      return res.status(400).json({
-        error: cpfErrorMessage(cpfCheck.reason),
-        code: 'invalid_cpf',
-        field: 'cpf',
-      })
-    }
-    const cpf = cpfCheck.digits
+    const cpf = OWNER_CPF
     const cpfLast4 = cpf.slice(-4)
 
     const planCode = String(req.body?.plan_code ?? '').trim().toLowerCase()

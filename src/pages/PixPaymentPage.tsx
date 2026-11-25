@@ -45,20 +45,16 @@ export function PixPaymentPage() {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
 
   /**
-   * CPF do titular.
+   * Gera o Pix direto, sem pedir CPF.
    *
-   * O Mercado Pago exige `payer.identification` para criar o Pix. Coletamos
-   * aqui, antes de pedir a cobrança; o servidor valida os dígitos
-   * verificadores — a tela só confere o formato para dar retorno rápido.
+   * O CPF usado na cobrança é o fixo do dono da conta, preenchido no servidor
+   * em `payer.identification`. O cliente não digita nada: ao abrir esta tela
+   * com um plano escolhido, a cobrança é criada na hora.
    */
-  const [cpf, setCpf] = useState('')
-  const [cpfError, setCpfError] = useState<string | null>(null)
-  const [cpfConfirmed, setCpfConfirmed] = useState(false)
-
   const startedAt = useRef(Date.now())
   const pollTimer = useRef<number | null>(null)
 
-  /* ── Cria a cobrança uma vez, depois do CPF confirmado ─────────────────── */
+  /* ── Cria a cobrança assim que a tela abre ─────────────────────────────── */
   useEffect(() => {
     if (!user) {
       navigate('/login', { replace: true })
@@ -69,17 +65,12 @@ export function PixPaymentPage() {
       setLoading(false)
       return
     }
-    if (!cpfConfirmed) {
-      // Ainda não temos o CPF: não chama o servidor.
-      setLoading(false)
-      return
-    }
 
     let active = true
     setLoading(true)
     ;(async () => {
       try {
-        const c = await createPixCharge({ planCode, period, cpf })
+        const c = await createPixCharge({ planCode, period })
         if (active) setCharge(c)
       } catch (e) {
         if (active) setError((e as Error).message)
@@ -91,23 +82,7 @@ export function PixPaymentPage() {
     return () => {
       active = false
     }
-  }, [user, planCode, period, cpf, cpfConfirmed, navigate])
-
-  /** Confere o formato do CPF (11 dígitos) antes de pedir a cobrança. */
-  function confirmCpf() {
-    const digits = cpf.replace(/\D/g, '')
-    if (digits.length !== 11) {
-      setCpfError('O CPF precisa ter 11 dígitos.')
-      return
-    }
-    if (/^(\d)\1{10}$/.test(digits)) {
-      setCpfError('Este CPF não é válido. Confira os números.')
-      return
-    }
-    setCpfError(null)
-    setCpf(digits)
-    setCpfConfirmed(true)
-  }
+  }, [user, planCode, period, navigate])
 
   /* ── Polling do status ───────────────────────────────────────────────── */
   const poll = useCallback(async () => {
@@ -184,56 +159,6 @@ export function PixPaymentPage() {
       </h1>
 
       {loading && <div className="skeleton" style={{ height: 320, marginTop: 20 }} />}
-
-      {/* ── Etapa do CPF: obrigatória antes de gerar o Pix ─────────────── */}
-      {!cpfConfirmed && !loading && !error && (
-        <div className="panel" style={{ marginTop: 20 }}>
-          <div className="panel-title" style={{ marginBottom: 6 }}>
-            Informe seu CPF
-          </div>
-          <p className="muted" style={{ fontSize: '0.88rem', marginBottom: 16 }}>
-            O Mercado Pago exige o CPF do titular para emitir a cobrança Pix. Ele é usado
-            apenas na geração do pagamento.
-          </p>
-          <label
-            htmlFor="pix-cpf"
-            style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: 6 }}
-          >
-            CPF
-          </label>
-          <input
-            id="pix-cpf"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="000.000.000-00"
-            value={cpf}
-            maxLength={14}
-            onChange={(e) => {
-              setCpf(e.target.value)
-              if (cpfError) setCpfError(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') confirmCpf()
-            }}
-            style={{
-              width: '100%',
-              padding: 12,
-              borderRadius: 8,
-              border: `1px solid ${cpfError ? '#e5484d' : 'var(--border, #333)'}`,
-              background: 'rgba(255,255,255,0.04)',
-              color: 'inherit',
-              fontSize: '1rem',
-              marginBottom: cpfError ? 6 : 14,
-            }}
-          />
-          {cpfError && (
-            <p style={{ color: '#e5484d', fontSize: '0.82rem', marginBottom: 12 }}>{cpfError}</p>
-          )}
-          <button className="btn btn--primary" onClick={confirmCpf} style={{ width: '100%' }}>
-            Gerar Pix
-          </button>
-        </div>
-      )}
 
       {error && (
         <div className="alert alert--error" style={{ marginTop: 20 }}>

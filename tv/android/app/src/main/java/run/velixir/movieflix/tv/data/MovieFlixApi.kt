@@ -212,8 +212,8 @@ class MovieFlixApi(
      * mesma função que a tela de planos usa. Mandar o valor daqui permitiria
      * pedir Premium pagando Básico.
      */
-    suspend fun createPix(planCode: String, period: String, cpf: String): PixCharge {
-        val body = """{"plan_code":${str(planCode)},"period":${str(period)},"cpf":${str(cpf)}}"""
+    suspend fun createPix(planCode: String, period: String): PixCharge {
+        val body = """{"plan_code":${str(planCode)},"period":${str(period)}}"""
         return json.decodeFromString(post("/api/payments/pix", body, auth = true))
     }
 

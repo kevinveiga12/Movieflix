@@ -7,6 +7,8 @@
  * produção.
  */
 import { createPixPayment } from '../server/lib/mercadopago.js'
+import { OWNER_CPF, ownerIdentification, validateCpf } from '../server/lib/cpf.js'
+import { readFile } from 'node:fs/promises'
 
 let pass = 0
 let fail = 0
@@ -40,13 +42,22 @@ global.fetch = async (url, init) => {
   }
 }
 
+console.log('\n── CPF fixo do dono da conta ──')
+{
+  check('OWNER_CPF é 56180761876', OWNER_CPF === '56180761876', OWNER_CPF)
+  check('OWNER_CPF tem dígitos verificadores válidos', validateCpf(OWNER_CPF).ok === true)
+  const ident = ownerIdentification()
+  check('ownerIdentification devolve type CPF', ident.type === 'CPF')
+  check('ownerIdentification devolve o CPF fixo', ident.number === '56180761876', ident.number)
+}
+
 console.log('\n── Requisição ao Mercado Pago (mock) ──')
 {
   const res = await createPixPayment({
     amountCents: 4776,
     description: 'MovieFlix — Básico (3 meses)',
     email: 'cliente@movieflix.app',
-    identification: { type: 'CPF', number: '52998224725' },
+    identification: ownerIdentification(),
     externalReference: 'u1:basico:3m:1764000000000',
     expiresInMinutes: 30,
     idempotencyKey: 'idem-123',
@@ -56,9 +67,9 @@ console.log('\n── Requisição ao Mercado Pago (mock) ──')
   check('método é pix', captured.body.payment_method_id === 'pix')
   check('valor em reais (47.76)', captured.body.transaction_amount === 47.76, String(captured.body.transaction_amount))
   check(
-    'CPF enviado em payer.identification',
+    'CPF fixo enviado em payer.identification',
     captured.body.payer?.identification?.type === 'CPF' &&
-      captured.body.payer?.identification?.number === '52998224725',
+      captured.body.payer?.identification?.number === '56180761876',
     JSON.stringify(captured.body.payer),
   )
   check('e-mail do pagador presente', captured.body.payer?.email === 'cliente@movieflix.app')
@@ -84,6 +95,16 @@ console.log('\n── Sem CPF: identification não é inventado ──')
     idempotencyKey: 'k',
   })
   check('sem CPF, payer.identification ausente', captured.body.payer?.identification === undefined)
+}
+
+console.log('\n── Rota: CPF do cliente é ignorado ──')
+{
+  // A rota de cobrança não pode ler `req.body.cpf`: o CPF vem do servidor.
+  const src = await readFile(new URL('../server/routes/mercadopago-pay.js', import.meta.url), 'utf8')
+  check('rota não lê req.body.cpf', !/req\.body\??\.cpf/.test(src))
+  check('rota usa OWNER_CPF', /const cpf = OWNER_CPF/.test(src))
+  check('rota não valida CPF do cliente', !/validateCpf/.test(src))
+  check('rota não devolve invalid_cpf', !/invalid_cpf/.test(src))
 }
 
 console.log(`\n${pass} passaram, ${fail} falharam\n`)

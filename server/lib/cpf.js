@@ -23,6 +23,23 @@ export function onlyDigits(value) {
 }
 
 /**
+ * CPF FIXO do dono da conta — usado em TODA cobrança Pix.
+ *
+ * O cliente NÃO digita CPF: o Mercado Pago exige `payer.identification` para
+ * emitir o Pix, e a cobrança é sempre emitida no CPF do titular da conta
+ * MovieFlix. Este valor vive só no servidor: nunca é enviado ao navegador, ao
+ * app Android ou à TV, e qualquer CPF que o cliente tente mandar é ignorado.
+ *
+ * `561.807.618-76` → `56180761876` (dígitos verificadores conferidos).
+ */
+export const OWNER_CPF = '56180761876'
+
+/** Identificação pronta para `payer.identification` do Mercado Pago. */
+export function ownerIdentification() {
+  return { type: 'CPF', number: OWNER_CPF }
+}
+
+/**
  * Valida um CPF pelos dígitos verificadores.
  *
  * Regras aplicadas:
