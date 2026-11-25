@@ -174,7 +174,7 @@ const FALLBACK: AppInfo = {
   ios: { available: true, minIos: '16.0', install: 'pwa' },
   tv: {
     available: true,
-    version: '1.0.6',
+    version: '1.0.7',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',
@@ -308,7 +308,7 @@ export function DownloadPage() {
             O selo "Em desenvolvimento" e o quadro de aviso foram removidos a
             pedido do proprietário: o app está publicado e não deve mais ser
             apresentado como beta. O botão vermelho "Baixar para TV" continua
-            apontando para /api/apps/tv/download, que entrega o APK 1.0.6.
+            apontando para /api/apps/tv/download, que entrega o APK 1.0.7.
           */}
           {info.tv && (
             <div className="panel">
@@ -325,8 +325,8 @@ export function DownloadPage() {
                     {mb(info.tv.sizeBytes) ? ` · ${mb(info.tv.sizeBytes)}` : ''}
                   </p>
                   <p className="muted" style={{ margin: '6px 0 0', fontSize: '0.82rem' }}>
-                    Atualização: escolha de categorias como populares, recentes, mais antigos,
-                    A–Z e melhor avaliados.
+                    Atualização: cards completos, ordenação cronológica correta e pesquisa funcional
+                    em Filmes e Séries.
                   </p>
                 </div>
               </div>

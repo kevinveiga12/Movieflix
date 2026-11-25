@@ -135,12 +135,28 @@ fun TvPosterCard(
     onClick: () -> Unit,
     width: Int = 168,
     progress: Double? = null,
+    /*
+      fillWidth = true nas GRADES (Filmes, Séries, Categorias, Buscar, Favoritos,
+      Histórico).
+
+      ── CAUSA DOS CARDS CORTADOS NA TV (corrigida na 1.0.7) ──────────────────
+      Antes o card tinha largura FIXA (`width = 200`) mesmo dentro de uma célula
+      de grade adaptativa (~150dp). O card ficava mais largo que a célula: a
+      imagem era comprimida na horizontal, o título colidia com a fileira de
+      baixo e a última linha era cortada pela borda da TV.
+
+      Agora, na grade, o card ocupa a LARGURA DA CÉLULA (`fillMaxWidth`) e a
+      altura vem da proporção 2:3 do pôster — nada de largura fixa brigando com
+      o grid. Nas fileiras horizontais (TvRow) continua com largura fixa, que é
+      o correto para um carrossel.
+    */
+    fillWidth: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
-            .width(width.dp)
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(width.dp))
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .padding(6.dp),
@@ -180,10 +196,17 @@ fun TvPosterCard(
             )
 
             if (title.posterUrl.isNotBlank()) {
+                /*
+                  ContentScale.Fit: o pôster aparece INTEIRO, sem corte em cima
+                  ou embaixo e sem deformação. Como a caixa já é 2:3 (a mesma
+                  proporção do pôster do TMDB), o Fit preenche exatamente; se
+                  algum pôster vier em outra proporção, ele é reduzido para
+                  caber em vez de ser cortado.
+                */
                 AsyncImage(
                     model = title.posterUrl,
                     contentDescription = title.title,
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

@@ -29,7 +29,7 @@ router.get('/movies', async (req, res, next) => {
   try {
     const overrides = await readOverrides()
     let list = applyOverrides(await loadBase('movie'), overrides, 'movie')
-    list = applyVariety(filterAndSort(list, req.query), req.query.seed)
+    list = applyVariety(filterAndSort(list, req.query), req.query.seed, req.query.sort)
     res.json({ total: list.length, items: paginate(list, req.query) })
   } catch (e) {
     next(e)
@@ -40,7 +40,7 @@ router.get('/series', async (req, res, next) => {
   try {
     const overrides = await readOverrides()
     let list = applyOverrides(await loadBase('tv'), overrides, 'series')
-    list = applyVariety(filterAndSort(list, req.query), req.query.seed)
+    list = applyVariety(filterAndSort(list, req.query), req.query.seed, req.query.sort)
     res.json({ total: list.length, items: paginate(list, req.query) })
   } catch (e) {
     next(e)
@@ -221,11 +221,26 @@ const VARIETY_POOL = 500
 /**
  * Aplica a variação por sessão sobre uma lista JÁ ordenada.
  *
- * Sem `seed` devolve a lista intacta (comportamento antigo, usado por quem não
- * pediu variedade — busca, painel administrativo, testes).
+ * ── CORREÇÃO 1.0.7: a variação NÃO pode destruir a ordenação pedida ──────────
+ *
+ * Antes, qualquer `seed` embaralhava os 500 primeiros itens — inclusive quando
+ * o cliente pedia `sort=recent`, `oldest`, `az` ou `rating`. O app de TV envia
+ * `seed` em TODA requisição (para manter a home variada), então "Mais
+ * recentes" abria com 2024/2023/2025 misturados, "A–Z" saía fora de ordem e
+ * "Melhor avaliados" não vinha ordenado por nota. Era exatamente o defeito
+ * relatado na televisão.
+ *
+ * A variação só faz sentido para a ordenação PADRÃO (`popular`), que é o que o
+ * site já faz em `src/pages/CatalogPage.tsx` (`canVary = sort === 'popular'`).
+ * Aqui o servidor passa a seguir a MESMA regra: com qualquer ordenação
+ * explícita diferente de `popular`, a lista sai na ordem exata pedida.
+ *
+ * Sem `seed` (ou com ordenação explícita) devolve a lista intacta.
  */
-function applyVariety(sorted, seed) {
+function applyVariety(sorted, seed, sort) {
   if (!seed || sorted.length < 2) return sorted
+  // Só a ordenação padrão recebe variedade. As demais são ordens contratuais.
+  if (sort && sort !== 'popular') return sorted
   const poolSize = Math.min(VARIETY_POOL, sorted.length)
   const pool = shuffleWithSeed(sorted.slice(0, poolSize), seed)
   return pool.concat(sorted.slice(poolSize))

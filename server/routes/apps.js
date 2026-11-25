@@ -68,6 +68,7 @@ const ANDROID_APK = path.join(ROOT, 'public', 'apk', 'movieflix-android.apk')
 function tvApkPath() {
   const candidates = [
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv.apk'),
+    path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.7.apk'),
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.6.apk'),
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.5.apk'),
     path.join(PRIVATE_APPS_DIR, 'movieflix-tv-1.0.4.apk'),
@@ -146,7 +147,7 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.6',
+      version: '1.0.7',
       minAndroid: '8.0',
       sizeBytes: tv.sizeBytes || 10906425,
       updatedAt: tv.updatedAt,
@@ -157,7 +158,7 @@ publicRouter.get('/', (_req, res) => {
         tela e atualizador integrado. O selo "beta" foi removido — o app não é
         mais apresentado como em desenvolvimento.
       */
-      updateNote: 'escolha de categorias como populares, recentes, mais antigos, A–Z e melhor avaliados',
+      updateNote: 'cards completos, ordenação cronológica correta e pesquisa funcional em Filmes e Séries',
       platforms: ['Android TV', 'Google TV', 'TV Box'],
     },
   })
@@ -256,7 +257,7 @@ publicRouter.get('/tv/version', (req, res) => {
   const declared = manifest?.sha256 ? String(manifest.sha256).toLowerCase().trim() : null
   const verified = Boolean(declared && sha && declared === sha)
 
-  const version = verified ? manifest.version : '1.0.6'
+  const version = verified ? manifest.version : '1.0.7'
   const versionCode = verified ? Number(manifest.versionCode) : 0
 
   res.json({
@@ -290,7 +291,7 @@ router.get('/tv', requireAdmin, (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     name: 'MovieFlix TV',
-    version: '1.0.6',
+    version: '1.0.7',
     available: info.exists,
     sizeBytes: info.sizeBytes,
     updatedAt: info.updatedAt,
@@ -314,7 +315,7 @@ router.get('/tv/download', requireAdmin, (req, res, next) => {
   }
   console.log(`[MovieFlix] APK TV baixado por ${req.user?.email ?? req.user?.id ?? 'admin'}`)
   res.type('application/vnd.android.package-archive')
-  res.download(p, 'movieflix-tv-1.0.6.apk', (err) => {
+  res.download(p, 'movieflix-tv-1.0.7.apk', (err) => {
     if (err && !res.headersSent) next(err)
   })
 })
