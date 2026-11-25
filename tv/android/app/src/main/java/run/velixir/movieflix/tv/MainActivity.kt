@@ -39,6 +39,7 @@ import run.velixir.movieflix.tv.ui.screens.TvHistoryScreen
 import run.velixir.movieflix.tv.ui.screens.TvHomeScreen
 import run.velixir.movieflix.tv.ui.screens.TvLoginScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlansScreen
+import run.velixir.movieflix.tv.ui.screens.TvPixScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlayerScreen
 import run.velixir.movieflix.tv.ui.screens.TvProfilesScreen
 import run.velixir.movieflix.tv.ui.screens.TvSearchScreen
@@ -83,6 +84,7 @@ sealed interface TvRoute {
     data object Favorites : TvRoute
     data object History : TvRoute
     data object Plans : TvRoute
+    data object Pix : TvRoute
     data object Account : TvRoute
     data object Profiles : TvRoute
     data object Settings : TvRoute
@@ -262,7 +264,8 @@ fun MovieFlixTvApp(
                         TvRoute.Search -> TvSearchScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.Favorites -> TvFavoritesScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.History -> TvHistoryScreen(vm) { route = TvRoute.Detail(it) }
-                        TvRoute.Plans -> TvPlansScreen(vm)
+                        TvRoute.Plans -> TvPlansScreen(vm) { route = TvRoute.Pix }
+                        TvRoute.Pix -> TvPixScreen(vm) { route = TvRoute.Plans }
                         TvRoute.Account -> TvAccountScreen(vm) { route = TvRoute.Login }
                         TvRoute.Profiles -> TvProfilesScreen(vm) { route = TvRoute.Login }
                         TvRoute.Settings -> TvSettingsScreen(vm)

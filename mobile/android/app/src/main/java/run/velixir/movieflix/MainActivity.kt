@@ -97,6 +97,7 @@ sealed interface Route {
     data object Profiles : Route
     data object Settings : Route
     data object Plans : Route
+    data object Pix : Route
     data object Admin : Route
     data object Login : Route
     data object Signup : Route
@@ -190,7 +191,8 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) 
                 )
                 Route.Profiles -> ProfilesScreen(vm) { route = Route.Account }
                 Route.Settings -> SettingsScreen(vm) { route = Route.Account }
-                Route.Plans -> PlansScreen(vm)
+                Route.Plans -> PlansScreen(vm) { route = Route.Pix }
+                Route.Pix -> PixScreen(vm) { route = Route.Plans }
                 Route.Admin -> AdminScreen(vm) { route = Route.Account }
                 Route.Login -> LoginScreen(
                     vm,

@@ -14,6 +14,7 @@ import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordPages'
 import { FavoritesPage, HistoryPage, ProfilePage } from './pages/AccountPages'
 import { SettingsPage, DownloadPage } from './pages/SettingsPages'
 import { PlansPage } from './pages/PlansPage'
+import { PixPaymentPage } from './pages/PixPaymentPage'
 import { SeriesPage } from './pages/SeriesPage'
 
 // Player e admin são pesados — carregados sob demanda.
@@ -105,6 +106,7 @@ export default function App() {
                   <Route path="/perfil" element={<ProfilePage />} />
                   <Route path="/configuracoes" element={<SettingsPage />} />
                   <Route path="/planos" element={<PlansPage />} />
+                  <Route path="/pagamento/pix" element={<PixPaymentPage />} />
                   <Route path="/baixar-app" element={<DownloadPage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   {/* O app de TV não é mais distribuído pelo site público. */}

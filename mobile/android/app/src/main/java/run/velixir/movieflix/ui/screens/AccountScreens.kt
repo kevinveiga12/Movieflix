@@ -780,7 +780,7 @@ private fun openExternal(context: android.content.Context, url: String) {
 
 /** Planos — a rota /planos do site, com os descontos de 3 meses e 1 ano. */
 @Composable
-fun PlansScreen(vm: AppViewModel) {
+fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
     val s by vm.state.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(Unit) { vm.loadPlans() }
@@ -936,23 +936,36 @@ fun PlansScreen(vm: AppViewModel) {
 
                     Spacer(Modifier.height(14.dp))
 
-                    // Botão de contratação — o "Assinar pelo WhatsApp" do site.
-                    // O link vem do servidor com e-mail, plano, duração e valor.
+                    // Contratação.
+                    //
+                    // Com o Pix ativo no servidor, o botão gera a cobrança e
+                    // abre a tela de pagamento — o cliente paga e a conta é
+                    // liberada sozinha, sem comprovante e sem falar com
+                    // ninguém. Sem Pix configurado, cai no WhatsApp, que
+                    // continua existindo para suporte.
                     val waUrl = chosen?.whatsappUrl.orEmpty()
+                    val pixOn = s.pixEnabled
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (waUrl.isBlank()) MfColors.BgHover else MfColors.Red)
-                            .clickable(enabled = waUrl.isNotBlank()) {
-                                openExternal(context, waUrl)
+                            .background(
+                                if (!pixOn && waUrl.isBlank()) MfColors.BgHover else MfColors.Red,
+                            )
+                            .clickable(enabled = pixOn || waUrl.isNotBlank()) {
+                                if (pixOn) {
+                                    vm.createPix(p.code, period)
+                                    onOpenPix()
+                                } else {
+                                    openExternal(context, waUrl)
+                                }
                             }
                             .padding(vertical = 13.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "Assinar pelo WhatsApp",
-                            color = if (waUrl.isBlank()) MfColors.TextDim else Color.White,
+                            if (pixOn) "Pagar com Pix" else "Assinar pelo WhatsApp",
+                            color = if (!pixOn && waUrl.isBlank()) MfColors.TextDim else Color.White,
                             fontFamily = MfSans,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,

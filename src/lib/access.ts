@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Plan, Subscription, PlaybackAuth, DbSeason, Title } from './types'
+import type { Plan, Subscription, PlaybackAuth, DbSeason, Title, PixCharge } from './types'
 
 /**
  * Acesso a conteúdo e planos — sempre via backend.
@@ -55,6 +55,40 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw err
   }
   return body as T
+}
+
+/**
+ * Cria uma cobrança Pix no Mercado Pago.
+ *
+ * O valor NÃO é enviado: o servidor resolve o preço do plano/período com a
+ * mesma função que a tela de planos usa. Mandar o valor daqui permitiria
+ * pedir Premium pagando Básico.
+ */
+export async function createPixCharge(args: {
+  planCode: string
+  period: string
+}): Promise<PixCharge> {
+  const headers = await authHeader()
+  return getJson<PixCharge>('/api/payments/pix', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ plan_code: args.planCode, period: args.period }),
+  })
+}
+
+/** Status de um pagamento — a tela usa em polling até aprovar ou expirar. */
+export async function fetchPaymentStatus(paymentId: string): Promise<PixCharge> {
+  const headers = await authHeader()
+  return getJson<PixCharge>(`/api/payments/${encodeURIComponent(paymentId)}/status`, { headers })
+}
+
+/** O Pix está disponível neste servidor? (MP_ACCESS_TOKEN configurado) */
+export async function fetchPixConfig(): Promise<{ pix_enabled: boolean; mode: string }> {
+  try {
+    return await getJson('/api/payments/config')
+  } catch {
+    return { pix_enabled: false, mode: 'unconfigured' }
+  }
 }
 
 /** Planos reais (preços vêm do banco). */

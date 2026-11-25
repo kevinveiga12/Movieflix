@@ -138,6 +138,38 @@ class MovieFlixApi(
     }
 
     /**
+     * O Pix está disponível neste servidor?
+     *
+     * Depende de `MP_ACCESS_TOKEN` no backend. Quando não está, a tela de
+     * planos mantém o botão do WhatsApp — melhor vender pelo caminho que
+     * funciona do que mostrar um botão que dá erro.
+     */
+    suspend fun pixConfig(): PixConfig =
+        json.decodeFromString(get("/api/payments/config"))
+
+    /**
+     * Cria a cobrança Pix.
+     *
+     * O VALOR NÃO É ENVIADO: o servidor resolve o preço do plano/período com a
+     * mesma função que a tela de planos usa. Mandar o valor daqui permitiria
+     * pedir Premium pagando Básico.
+     */
+    suspend fun createPix(planCode: String, period: String): PixCharge {
+        val body = """{"plan_code":${str(planCode)},"period":${str(period)}}"""
+        return json.decodeFromString(post("/api/payments/pix", body, auth = true))
+    }
+
+    /**
+     * Status do pagamento — a tela consulta em intervalos até aprovar.
+     *
+     * No servidor esta rota também reconcilia: se o webhook se perdeu, é esta
+     * consulta que ativa. Mas ela só ativa com confirmação oficial do Mercado
+     * Pago, nunca porque o app disse que pagou.
+     */
+    suspend fun pixStatus(paymentId: String): PixCharge =
+        json.decodeFromString(get("/api/payments/${enc(paymentId)}/status", auth = true))
+
+    /**
      * Números do painel administrativo.
      *
      * O servidor responde 403 para quem não é admin — o app não tem como

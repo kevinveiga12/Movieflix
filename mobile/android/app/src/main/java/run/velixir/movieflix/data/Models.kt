@@ -166,6 +166,42 @@ data class Plan(
 data class PlansResponse(val plans: List<Plan> = emptyList())
 
 /**
+ * Cobrança Pix devolvida por POST /api/payments/pix e GET /api/payments/:id/status.
+ *
+ * `qrCode` é o texto EMV (o "copia e cola"); `qrCodeBase64` é a imagem PNG em
+ * base64, pronta para decodificar e desenhar. Ambos vêm do Mercado Pago — o app
+ * nunca gera QR por conta própria.
+ */
+@Serializable
+data class PixCharge(
+    @SerialName("payment_id") val paymentId: String = "",
+    val status: String = "",
+    @SerialName("status_detail") val statusDetail: String? = null,
+    @SerialName("amount_cents") val amountCents: Int = 0,
+    @SerialName("amount_label") val amountLabel: String = "",
+    val plan: PixPlanRef = PixPlanRef(),
+    val period: PixPeriodRef = PixPeriodRef(),
+    @SerialName("qr_code") val qrCode: String? = null,
+    @SerialName("qr_code_base64") val qrCodeBase64: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    val approved: Boolean = false,
+    val activated: Boolean = false,
+    @SerialName("plan_expires_at") val planExpiresAt: String? = null,
+)
+
+@Serializable
+data class PixPlanRef(val code: String = "", val name: String = "")
+
+@Serializable
+data class PixPeriodRef(val code: String = "", val label: String = "")
+
+@Serializable
+data class PixConfig(
+    @SerialName("pix_enabled") val pixEnabled: Boolean = false,
+    val mode: String = "unconfigured",
+)
+
+/**
  * Títulos que o provedor realmente serve (GET /api/catalog/availability).
  *
  * Usado para esconder de Favoritos e Histórico os títulos que hoje não abrem,

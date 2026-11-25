@@ -28,6 +28,30 @@ export interface Title {
   source?: 'database'
 }
 
+/**
+ * Cobrança Pix devolvida por POST /api/payments/pix e GET /api/payments/:id/status.
+ *
+ * `qr_code` é o texto EMV do Pix (o "copia e cola"); `qr_code_base64` é a
+ * imagem PNG em base64, pronta para `<img src="data:image/png;base64,...">`.
+ * Ambos vêm do Mercado Pago — nunca são gerados no navegador.
+ */
+export interface PixCharge {
+  payment_id: string
+  status: string
+  status_detail?: string | null
+  amount_cents: number
+  amount_label: string
+  plan: { code: string; name: string }
+  period: { code: string; label: string; days?: number }
+  qr_code: string | null
+  qr_code_base64: string | null
+  expires_at: string | null
+  approved?: boolean
+  activated?: boolean
+  plan_expires_at?: string | null
+  reused?: boolean
+}
+
 export interface PlanPeriod {
   code: '1m' | '3m' | '12m'
   label: string

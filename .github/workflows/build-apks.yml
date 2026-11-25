@@ -95,6 +95,15 @@ jobs:
       - name: Testes da ponte JS do player
         run: node scripts/test-tv-bridge.mjs
 
+      # ── Testes da integração Pix (Mercado Pago) ──────────────────────────
+      #
+      # Preços (mesma regra do site), assinatura HMAC do webhook e as regras
+      # anti-fraude da ativação: valor menor, pagamento pendente, referência de
+      # outro pedido, moeda estrangeira. Se alguma quebrar, ou o cliente paga o
+      # valor errado ou a conta é liberada sem pagamento — este passo pega isso.
+      - name: Testes da integração Pix
+        run: node scripts/test-pix.mjs
+
       # ── Testes da rota de capas (histórico/favoritos da TV) ────────────────
       #
       # Sobe o Express e confere que `/api/catalog/posters` resolve capa de

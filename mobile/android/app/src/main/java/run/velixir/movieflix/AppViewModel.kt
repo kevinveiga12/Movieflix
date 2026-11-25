@@ -13,6 +13,7 @@ import run.velixir.movieflix.data.FavoriteRow
 import run.velixir.movieflix.data.HistoryRow
 import run.velixir.movieflix.data.MovieFlixApi
 import run.velixir.movieflix.data.Plan
+import run.velixir.movieflix.data.PixCharge
 import run.velixir.movieflix.data.PlaybackSource
 import run.velixir.movieflix.data.Season
 import run.velixir.movieflix.data.SessionStore
@@ -30,6 +31,10 @@ data class UiState(
     val favorites: List<FavoriteRow> = emptyList(),
     val history: List<HistoryRow> = emptyList(),
     val plans: List<Plan> = emptyList(),
+    val pixEnabled: Boolean = false,
+    val pixCharge: PixCharge? = null,
+    val pixLoading: Boolean = false,
+    val pixError: String? = null,
     val subscription: SubscriptionResponse? = null,
     val loggedIn: Boolean = false,
     val email: String? = null,
@@ -243,9 +248,53 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun loadPlans() {
         viewModelScope.launch {
             val p = runCatching { api.plans(session.email) }.getOrNull()
-            update { it.copy(plans = p?.plans ?: emptyList()) }
+            // O Pix depende de MP_ACCESS_TOKEN no servidor. Se não estiver
+            // configurado, a tela mantém o botão do WhatsApp.
+            val cfg = runCatching { api.pixConfig() }.getOrNull()
+            update {
+                it.copy(
+                    plans = p?.plans ?: emptyList(),
+                    pixEnabled = cfg?.pixEnabled == true,
+                )
+            }
         }
     }
+
+    /**
+     * Cria a cobrança Pix do plano/período escolhido.
+     *
+     * O valor não é enviado: o servidor resolve o preço com a mesma função da
+     * tela de planos. O app só recebe o QR e o copia e cola já prontos.
+     */
+    fun createPix(planCode: String, period: String) {
+        update { it.copy(pixLoading = true, pixError = null, pixCharge = null) }
+        viewModelScope.launch {
+            try {
+                val c = api.createPix(planCode, period)
+                update { it.copy(pixCharge = c, pixLoading = false) }
+            } catch (e: Exception) {
+                update { it.copy(pixLoading = false, pixError = friendly(e)) }
+            }
+        }
+    }
+
+    /**
+     * Consulta o status do Pix.
+     *
+     * A tela chama isto em intervalos. Quem ativa é o servidor, depois de
+     * consultar a API oficial do Mercado Pago — o app nunca libera acesso.
+     */
+    fun refreshPixStatus() {
+        val id = _state.value.pixCharge?.paymentId ?: return
+        if (id.isBlank()) return
+        viewModelScope.launch {
+            val s = runCatching { api.pixStatus(id) }.getOrNull() ?: return@launch
+            update { it.copy(pixCharge = s) }
+            if (s.approved) loadSubscription()
+        }
+    }
+
+    fun clearPix() = update { it.copy(pixCharge = null, pixError = null, pixLoading = false) }
 
     /**
      * Carrega os números do painel administrativo.

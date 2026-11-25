@@ -17,6 +17,8 @@ import { plansRouter } from './routes/plans.js'
 import { appsRouter, publicAppsRouter } from './routes/apps.js'
 import { streamRouter } from './routes/stream.js'
 import megaembedRouter from './routes/megaembed.js'
+import { paymentsRouter, paymentsAdminRouter } from './routes/mercadopago-pay.js'
+import { mercadopagoWebhookRouter } from './routes/mercadopago-webhook.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
 import { confirmAllPendingEmails } from './lib/profile.js'
 
@@ -171,9 +173,16 @@ app.use('/api/apps', publicAppsRouter)
 // que o router de apps trate a rota direto, sem passar duas vezes pelo
 // requireAdmin (o adminRouter aplica requireAdmin em tudo que cai nele).
 app.use('/api/admin/apps', appsRouter)
+// Pagamentos do painel. Vem ANTES de /api/admin pelo mesmo motivo do apps:
+// o router já aplica requireAdmin, e passar duas vezes seria redundante.
+app.use('/api/admin/payments', paymentsAdminRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/db', dbCatalogRouter)
 app.use('/api/plans', plansRouter)
+// Cobrança Pix (Mercado Pago). O webhook fica em /api/mercadopago/webhook e
+// NÃO exige sessão: quem chama é o Mercado Pago, autenticado por assinatura.
+app.use('/api/payments', paymentsRouter)
+app.use('/api/mercadopago', mercadopagoWebhookRouter)
 // Autorização de reprodução e assinatura (rotas /playback/authorize e /subscription).
 // Proxy do stream direto (HLS). Fica ANTES do accessRouter porque não exige
 // sessão: o player já autorizou o título, e o CDN do provedor não conhece

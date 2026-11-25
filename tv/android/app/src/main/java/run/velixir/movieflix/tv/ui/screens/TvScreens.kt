@@ -577,7 +577,7 @@ fun TvHistoryScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
  * `server/routes/plans.js`. O app não remonta a mensagem para não divergir.
  */
 @Composable
-fun TvPlansScreen(vm: TvViewModel) {
+fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
     val s by vm.state.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(Unit) { vm.loadPlans() }
@@ -732,8 +732,15 @@ fun TvPlansScreen(vm: TvViewModel) {
 
                     Spacer(Modifier.height(16.dp))
 
-                    // Botão de contratação — foco evidente para o controle remoto.
+                    // Contratação — foco evidente para o controle remoto.
+                    //
+                    // Com o Pix ativo no servidor, o botão gera a cobrança e
+                    // abre a tela de pagamento: o cliente aponta o celular
+                    // para o QR, paga no banco e a TV libera sozinha. Sem Pix
+                    // configurado, cai no QR do WhatsApp, que continua
+                    // existindo para suporte.
                     val waUrl = chosen?.whatsappUrl.orEmpty()
+                    val pixOn = s.pixEnabled
                     var btnFocused by remember { mutableStateOf(false) }
                     Box(
                         modifier = Modifier
@@ -741,7 +748,7 @@ fun TvPlansScreen(vm: TvViewModel) {
                             .clip(RoundedCornerShape(10.dp))
                             .background(
                                 when {
-                                    waUrl.isBlank() -> MfColors.BgHover
+                                    !pixOn && waUrl.isBlank() -> MfColors.BgHover
                                     btnFocused -> MfColors.RedBright
                                     else -> MfColors.Red
                                 },
@@ -752,24 +759,29 @@ fun TvPlansScreen(vm: TvViewModel) {
                                 } else Modifier,
                             )
                             .onFocusChanged { btnFocused = it.isFocused }
-                            .clickable(enabled = waUrl.isNotBlank()) {
-                                // Na TV mostramos o QR Code; o celular lê e abre
-                                // o WhatsApp já com a mensagem preenchida.
-                                qr = QrTarget(
-                                    planCode = plan.code,
-                                    planName = plan.name,
-                                    periodCode = chosen?.code ?: period,
-                                    periodLabel = chosen?.label ?: "",
-                                    priceLabel = chosen?.priceLabel ?: plan.priceLabel,
-                                    waUrl = waUrl,
-                                )
+                            .clickable(enabled = pixOn || waUrl.isNotBlank()) {
+                                if (pixOn) {
+                                    vm.createPix(plan.code, chosen?.code ?: period)
+                                    onOpenPix()
+                                } else {
+                                    // Na TV mostramos o QR Code; o celular lê e
+                                    // abre o WhatsApp já com a mensagem.
+                                    qr = QrTarget(
+                                        planCode = plan.code,
+                                        planName = plan.name,
+                                        periodCode = chosen?.code ?: period,
+                                        periodLabel = chosen?.label ?: "",
+                                        priceLabel = chosen?.priceLabel ?: plan.priceLabel,
+                                        waUrl = waUrl,
+                                    )
+                                }
                             }
                             .padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "Assinar pelo WhatsApp",
-                            color = if (waUrl.isBlank()) MfColors.TextDim else Color.White,
+                            if (pixOn) "Pagar com Pix" else "Assinar pelo WhatsApp",
+                            color = if (!pixOn && waUrl.isBlank()) MfColors.TextDim else Color.White,
                             fontFamily = MfSans,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,

@@ -13,6 +13,7 @@ import run.velixir.movieflix.tv.data.FavoriteRow
 import run.velixir.movieflix.tv.data.HistoryRow
 import run.velixir.movieflix.tv.data.MovieFlixApi
 import run.velixir.movieflix.tv.data.Plan
+import run.velixir.movieflix.tv.data.PixCharge
 import run.velixir.movieflix.tv.data.PlaybackSource
 import run.velixir.movieflix.tv.data.Season
 import run.velixir.movieflix.tv.data.SessionStore
@@ -31,6 +32,10 @@ data class TvState(
     val related: List<Title> = emptyList(),
     val genres: List<String> = emptyList(),
     val plans: List<Plan> = emptyList(),
+    val pixEnabled: Boolean = false,
+    val pixCharge: PixCharge? = null,
+    val pixLoading: Boolean = false,
+    val pixError: String? = null,
     val subscription: SubscriptionResponse? = null,
     val loggedIn: Boolean = false,
     val email: String? = null,
@@ -435,9 +440,55 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
     fun loadPlans() {
         viewModelScope.launch {
             val p = runCatching { api.plans(session.email) }.getOrNull()
-            update { it.copy(plans = p?.plans ?: emptyList()) }
+            // O Pix depende de MP_ACCESS_TOKEN no servidor. Sem ele, a tela
+            // mantém o QR do WhatsApp — melhor vender pelo caminho que
+            // funciona do que mostrar um botão que dá erro.
+            val cfg = runCatching { api.pixConfig() }.getOrNull()
+            update {
+                it.copy(
+                    plans = p?.plans ?: emptyList(),
+                    pixEnabled = cfg?.pixEnabled == true,
+                )
+            }
         }
     }
+
+    /**
+     * Cria a cobrança Pix do plano/período escolhido.
+     *
+     * O valor não é enviado: o servidor resolve o preço com a mesma função da
+     * tela de planos. A TV só recebe o QR e o copia e cola já prontos.
+     */
+    fun createPix(planCode: String, period: String) {
+        update { it.copy(pixLoading = true, pixError = null, pixCharge = null) }
+        viewModelScope.launch {
+            try {
+                val c = api.createPix(planCode, period)
+                update { it.copy(pixCharge = c, pixLoading = false) }
+            } catch (e: Exception) {
+                update { it.copy(pixLoading = false, pixError = friendly(e)) }
+            }
+        }
+    }
+
+    /**
+     * Consulta o status do Pix.
+     *
+     * Quem ativa é o servidor, depois de consultar a API oficial do Mercado
+     * Pago. A TV só reflete o que ele respondeu — e, ao aprovar, recarrega a
+     * assinatura para o acesso valer sem reinstalar nem cadastrar de novo.
+     */
+    fun refreshPixStatus() {
+        val id = _state.value.pixCharge?.paymentId ?: return
+        if (id.isBlank()) return
+        viewModelScope.launch {
+            val s = runCatching { api.pixStatus(id) }.getOrNull() ?: return@launch
+            update { it.copy(pixCharge = s) }
+            if (s.approved) loadSubscription()
+        }
+    }
+
+    fun clearPix() = update { it.copy(pixCharge = null, pixError = null, pixLoading = false) }
 
     /** Números do painel — só para admin; o servidor revalida a cada chamada. */
     fun loadAdminStats() {

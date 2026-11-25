@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { fetchPlans, fetchSubscription, whatsappUrl, WHATSAPP_DISPLAY } from '../lib/access'
+import { fetchPlans, fetchSubscription, fetchPixConfig, whatsappUrl, WHATSAPP_DISPLAY } from '../lib/access'
 import type { Plan, PlanPeriod, Subscription } from '../lib/types'
 import { CheckIcon, InfoIcon, ArrowLeft } from '../components/Icons'
 
@@ -40,6 +40,15 @@ export function PlansPage() {
   */
   const [periodByPlan, setPeriodByPlan] = useState<Record<string, PlanPeriod['code']>>({})
 
+  /**
+   * O Pix está disponível neste servidor?
+   *
+   * Depende de `MP_ACCESS_TOKEN` estar configurado no backend. Quando não
+   * está, o botão de contratação volta a ser o WhatsApp — é melhor vender
+   * pelo caminho que funciona do que mostrar um botão que dá erro.
+   */
+  const [pixEnabled, setPixEnabled] = useState(false)
+
   useEffect(() => {
     let active = true
     ;(async () => {
@@ -47,6 +56,8 @@ export function PlansPage() {
         const data = await fetchPlans(user?.email)
         if (!active) return
         setPlans(data.plans)
+        const cfg = await fetchPixConfig()
+        if (active) setPixEnabled(cfg.pix_enabled)
         if (user) {
           const s = await fetchSubscription()
           if (active) {
@@ -231,18 +242,39 @@ export function PlansPage() {
                     ))}
                   </ul>
 
-                  <a
-                    className="btn btn--primary"
-                    href={
-                      chosen?.whatsapp_url ??
-                      p.whatsapp_url ??
-                      whatsappUrl(`Olá! Quero assinar o MovieFlix — ${p.name}.`)
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Assinar pelo WhatsApp
-                  </a>
+                  {/*
+                    Contratação.
+
+                    Com o Pix ativo, o botão leva à tela de pagamento — o
+                    cliente paga e a conta é liberada sozinha, sem comprovante
+                    e sem falar com ninguém. Sem Pix configurado no servidor,
+                    cai no WhatsApp, que continua existindo para suporte.
+                  */}
+                  {pixEnabled ? (
+                    <button
+                      className="btn btn--primary"
+                      onClick={() =>
+                        navigate(
+                          `/pagamento/pix?plano=${encodeURIComponent(p.code)}&periodo=${encodeURIComponent(period)}`,
+                        )
+                      }
+                    >
+                      Pagar com Pix
+                    </button>
+                  ) : (
+                    <a
+                      className="btn btn--primary"
+                      href={
+                        chosen?.whatsapp_url ??
+                        p.whatsapp_url ??
+                        whatsappUrl(`Olá! Quero assinar o MovieFlix — ${p.name}.`)
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Assinar pelo WhatsApp
+                    </a>
+                  )}
                 </div>
               )
             })}
