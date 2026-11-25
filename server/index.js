@@ -19,6 +19,7 @@ import { streamRouter } from './routes/stream.js'
 import megaembedRouter from './routes/megaembed.js'
 import { paymentsRouter, paymentsAdminRouter } from './routes/mercadopago-pay.js'
 import { validateAccessToken } from './lib/mercadopago.js'
+import { reconcilePending } from './lib/subscription-activation.js'
 import { mercadopagoWebhookRouter } from './routes/mercadopago-webhook.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
 import { confirmAllPendingEmails } from './lib/profile.js'
@@ -298,6 +299,42 @@ app.listen(PORT, HOST, () => {
       .catch((e) => console.warn('[MovieFlix] Mercado Pago: falha ao validar token ·', e?.message))
   } else {
     console.warn('[MovieFlix] Mercado Pago: MP_ACCESS_TOKEN ausente — Pix desativado')
+  }
+
+  // ── Reconciliação periódica de Pix pendentes ──────────────────────────────
+  //
+  // O webhook é o caminho principal, mas depende de o Mercado Pago conseguir
+  // alcançar o servidor. Se a notificação se perder (deploy no meio, timeout,
+  // firewall), o cliente pagaria e ficaria sem acesso — o pior desfecho.
+  //
+  // `reconcilePending` varre os pagamentos pendentes das últimas 24h e consulta
+  // cada um na API oficial. É idempotente: `markApplied` só estende a assinatura
+  // uma vez, então rodar isto junto com o webhook não duplica nada.
+  //
+  // Desligue com PIX_RECONCILE_INTERVAL_MS=0 se precisar.
+  const reconcileMs = Number(process.env.PIX_RECONCILE_INTERVAL_MS ?? 5 * 60_000)
+  if (Number.isFinite(reconcileMs) && reconcileMs > 0 && process.env.MP_ACCESS_TOKEN) {
+    const runReconcile = async () => {
+      try {
+        const results = await reconcilePending({ maxAgeHours: 24, limit: 25 })
+        const activated = results.filter((r) => r.activated)
+        if (activated.length > 0) {
+          console.log(
+            '[MovieFlix] reconciliação Pix:',
+            activated.length,
+            'ativado(s) de',
+            results.length,
+            'pendente(s)',
+          )
+        }
+      } catch (e) {
+        console.warn('[MovieFlix] reconciliação Pix falhou:', e?.message ?? e)
+      }
+    }
+    // Primeira passada depois de 60 s (deixa o boot terminar), depois no intervalo.
+    setTimeout(runReconcile, 60_000).unref?.()
+    setInterval(runReconcile, reconcileMs).unref?.()
+    console.log(`[MovieFlix] reconciliação Pix ativa a cada ${Math.round(reconcileMs / 1000)}s`)
   }
 
   // ── Aprovação das contas antigas ──────────────────────────────────────────

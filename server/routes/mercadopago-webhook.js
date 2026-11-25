@@ -4,7 +4,7 @@ import {
   paymentIdFromNotification,
   verifyWebhookSignature,
 } from '../lib/mercadopago.js'
-import { activateFromPayment } from '../lib/subscription-activation.js'
+import { activateFromPayment, recoverRecordFromOfficial } from '../lib/subscription-activation.js'
 import { getPaymentRecord } from '../lib/payments-store.js'
 
 /**
@@ -101,9 +101,19 @@ router.post('/webhook', async (req, res) => {
     }
 
     // Pagamento que não é nosso: ignora sem consultar a API.
-    const known = await getPaymentRecord(paymentId)
+    //
+    // EXCEÇÃO IMPORTANTE: se o registro se perdeu (disco efêmero, deploy no
+    // meio), `known` é null mesmo para um pagamento legítimo. Antes de
+    // descartar, tentamos reconstruir o registro a partir do
+    // `external_reference` que o Mercado Pago guarda — que é assinado pela
+    // conta dele e contém userId:plano:período. Só reconstruímos se o
+    // pagamento estiver `approved` e a referência for nossa.
+    let known = await getPaymentRecord(paymentId)
     if (!known) {
-      return res.status(200).json({ ok: true, ignored: 'unknown_payment' })
+      known = await recoverRecordFromOfficial(paymentId)
+      if (!known) {
+        return res.status(200).json({ ok: true, ignored: 'unknown_payment' })
+      }
     }
 
     const result = await activateFromPayment(paymentId)

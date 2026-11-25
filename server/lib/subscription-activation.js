@@ -220,6 +220,72 @@ export async function activateFromPayment(paymentId) {
 }
 
 /**
+ * RECUPERAÇÃO DE REGISTRO PERDIDO.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * O CENÁRIO QUE ISTO RESOLVE
+ * ═══════════════════════════════════════════════════════════════════════════
+ * O registro de pagamentos vive em `payments.json` (ver payments-store.js). Se
+ * o disco for efêmero, um deploy apaga o arquivo. Aí o cliente paga, o webhook
+ * chega, `getPaymentRecord` devolve null e a rota respondia
+ * `ignored: unknown_payment` — o pagamento era DESCARTADO em silêncio. O
+ * cliente pagou e não recebeu acesso, e ninguém ficou sabendo.
+ *
+ * A saída não é confiar no corpo do webhook (isso continua proibido). É que o
+ * `external_reference` que gravamos na cobrança tem o formato
+ * `userId:planCode:periodCode:timestamp` — ou seja, o próprio Mercado Pago
+ * guarda, assinado pela conta dele, tudo que precisamos para reconstruir o
+ * registro. Consultamos a API oficial, lemos a referência, e só reconstruímos
+ * se ela for NOSSA e o pagamento estiver `approved`.
+ *
+ * O valor cobrado vem do pagamento oficial, nunca de um número inventado.
+ * Devolve o registro reconstruído, ou null se não for recuperável.
+ */
+export async function recoverRecordFromOfficial(paymentId) {
+  let official
+  try {
+    official = await fetchOfficialPayment(paymentId)
+  } catch {
+    return null
+  }
+
+  if (official.status !== APPROVED) return null
+  if (official.currency && official.currency !== 'BRL') return null
+
+  const ref = String(official.externalReference ?? '')
+  // Formato exato: <uuid>:<plan>:<period>:<digits>
+  const m = /^([0-9a-fA-F-]{36}):([a-z0-9_]+):([a-z0-9]+):(\d+)$/.exec(ref)
+  if (!m) return null
+
+  const [, userId, planCode, periodCode] = m
+  if (!PLAN_DAYS[periodCode]) return null
+
+  const record = await upsertPayment(paymentId, {
+    user_id: userId,
+    plan_code: planCode,
+    period_code: periodCode,
+    amount_cents: official.amountCents,
+    currency: 'BRL',
+    status: official.status,
+    status_detail: official.statusDetail,
+    external_reference: ref,
+    source: 'pix',
+    recovered: true,
+    recovered_at: new Date().toISOString(),
+  })
+
+  console.warn(
+    '[MovieFlix] registro de pagamento RECUPERADO da API oficial:',
+    paymentId,
+    '· plano',
+    planCode,
+    '· período',
+    periodCode,
+  )
+  return record
+}
+
+/**
  * Consulta periódica de segurança.
  *
  * O webhook é o caminho principal, mas ele depende de o Mercado Pago conseguir

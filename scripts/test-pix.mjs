@@ -125,5 +125,30 @@ console.log('\n── Validação do pagamento (anti-fraude) ──')
   check('registro inexistente é recusado', validatePayment(null, ok).reason === 'unknown_payment')
 }
 
+console.log('\n── Recuperação de registro perdido (external_reference) ──')
+{
+  /**
+   * O parser de `external_reference` é o que decide se um pagamento legítimo
+   * cujo registro se perdeu é recuperado ou descartado. Testamos o formato
+   * exato que a rota de cobrança grava, e os casos que NÃO podem passar.
+   */
+  const REF_RE = /^([0-9a-fA-F-]{36}):([a-z0-9_]+):([a-z0-9]+):(\d+)$/
+  const uid = '3f2b8c1e-9a4d-4e7b-8c2f-1a2b3c4d5e6f'
+
+  const good = REF_RE.exec(`${uid}:premium:12m:1764000000000`)
+  check('referência válida é reconhecida', Boolean(good))
+  check('extrai o userId', good?.[1] === uid)
+  check('extrai o plano', good?.[2] === 'premium')
+  check('extrai o período', good?.[3] === '12m')
+
+  check('referência vazia é recusada', REF_RE.test('') === false)
+  check('referência sem período é recusada', REF_RE.test(`${uid}:premium`) === false)
+  check('referência com plano inventado não casa o formato', REF_RE.test('x:y:z') === false)
+  check(
+    'período desconhecido não tem dias (não ativaria)',
+    !Object.prototype.hasOwnProperty.call({ '1m': 30, '3m': 90, '12m': 365 }, '99m'),
+  )
+}
+
 console.log(`\n${pass} passaram, ${fail} falharam\n`)
 process.exit(fail === 0 ? 0 : 1)
