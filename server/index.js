@@ -18,6 +18,7 @@ import { appsRouter, publicAppsRouter } from './routes/apps.js'
 import { streamRouter } from './routes/stream.js'
 import megaembedRouter from './routes/megaembed.js'
 import { paymentsRouter, paymentsAdminRouter } from './routes/mercadopago-pay.js'
+import { validateAccessToken } from './lib/mercadopago.js'
 import { mercadopagoWebhookRouter } from './routes/mercadopago-webhook.js'
 import { catalogStats, orphanSeasons, hasDbCatalog } from './lib/db-catalog.js'
 import { confirmAllPendingEmails } from './lib/profile.js'
@@ -268,8 +269,36 @@ app.listen(PORT, HOST, () => {
       supabaseAnon: Boolean(process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY),
       serviceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
       tmdb: Boolean(process.env.TMDB_API_KEY),
+      mpAccessToken: Boolean(process.env.MP_ACCESS_TOKEN),
+      mpWebhookSecret: Boolean(process.env.MP_WEBHOOK_SECRET),
     }),
   )
+
+  // ── Validação do Access Token do Mercado Pago ─────────────────────────────
+  //
+  // `Boolean(MP_ACCESS_TOKEN)` só prova que a variável existe. Um token
+  // revogado, de outra conta ou truncado na hora de colar no painel também
+  // "existe" — e o cliente só descobriria ao tentar pagar. Aqui fazemos uma
+  // chamada SOMENTE DE LEITURA (`GET /users/me`) e registramos o veredito.
+  //
+  // Roda em background para não atrasar o health check, e nunca imprime o
+  // token: só ok/falha, o modo e o site_id público da conta.
+  if (process.env.MP_ACCESS_TOKEN) {
+    validateAccessToken()
+      .then((r) => {
+        if (r.ok) {
+          console.log(
+            '[MovieFlix] Mercado Pago: token ACEITO ·',
+            JSON.stringify({ mode: r.mode, site: r.siteId, country: r.countryId, testUser: r.isTestUser }),
+          )
+        } else {
+          console.warn('[MovieFlix] Mercado Pago: token RECUSADO ·', r.reason, '· status', r.status ?? '-', '· mode', r.mode)
+        }
+      })
+      .catch((e) => console.warn('[MovieFlix] Mercado Pago: falha ao validar token ·', e?.message))
+  } else {
+    console.warn('[MovieFlix] Mercado Pago: MP_ACCESS_TOKEN ausente — Pix desativado')
+  }
 
   // ── Aprovação das contas antigas ──────────────────────────────────────────
   //
