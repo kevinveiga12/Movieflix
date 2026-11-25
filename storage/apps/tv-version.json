@@ -4,10 +4,10 @@
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
   "sha256": "1ab4f808e1a3acf04c4453bee6b555fb73bb0d44c94fe644833dba5bb8aa30aa",
   "notes": [
-    "Novas opções de ordenação em Filmes e Séries",
-    "Pesquisa direta nas telas de Filmes e Séries",
+    "Cards de Filmes e Séries completos: pôsteres inteiros, títulos e notas visíveis",
+    "Ordenação 'Mais recentes' corrigida: respeita a data real de lançamento",
+    "Pesquisa direta em Filmes e Séries combinável com gênero e ordenação",
     "Proteção contra a tela de descanso durante a reprodução",
-    "Melhorias gerais de estabilidade",
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
