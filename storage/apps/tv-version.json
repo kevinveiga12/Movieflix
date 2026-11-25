@@ -1,8 +1,8 @@
 {
-  "version": "1.0.6",
-  "versionCode": 8,
+  "version": "1.0.7",
+  "versionCode": 9,
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
-  "sha256": "4b9ab7e15b7552d185676c12f6d093414cdb0b0b52817e916fec019c89e468bd",
+  "sha256": "1ab4f808e1a3acf04c4453bee6b555fb73bb0d44c94fe644833dba5bb8aa30aa",
   "notes": [
     "Novas opções de ordenação em Filmes e Séries",
     "Pesquisa direta nas telas de Filmes e Séries",
@@ -11,6 +11,6 @@
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
-  "publishedAt": "2026-11-25T22:28:33Z",
+  "publishedAt": "2026-11-25T23:21:31Z",
   "minSupportedVersionCode": 0
 }
