@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit'
 import crypto from 'node:crypto'
 import { bearer, resolveUser } from '../lib/entitlement.js'
 import { requireAdmin } from '../lib/auth.js'
-import { createPixPayment, mpConfigured, mpMode } from '../lib/mercadopago.js'
+import { createPixPayment, mpConfigured, mpMode, validateAccessToken } from '../lib/mercadopago.js'
 import { resolvePlanPrice, brl } from '../lib/plan-pricing.js'
 import { getPaymentRecord, listPayments, paymentsForUser, paymentStats, upsertPayment } from '../lib/payments-store.js'
 import { activateFromPayment } from '../lib/subscription-activation.js'
@@ -324,6 +324,38 @@ adminRouter.get('/', async (req, res, next) => {
         plan_expires_at: p.plan_expires_at ?? null,
       })),
       stats: await paymentStats(),
+      mode: mpMode(),
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * GET /api/admin/payments/health — auditoria das credenciais do Mercado Pago.
+ *
+ * Faz uma chamada SOMENTE DE LEITURA (`GET /users/me`) para provar que o token
+ * é aceito, e informa se o segredo do webhook está carregado. Nunca devolve o
+ * token nem o segredo — só booleanos e metadados públicos da conta.
+ */
+adminRouter.get('/health', async (_req, res, next) => {
+  try {
+    const token = await validateAccessToken()
+    res.json({
+      access_token: {
+        present: mpConfigured(),
+        valid: token.ok,
+        reason: token.reason,
+        mode: token.mode,
+        site_id: token.siteId ?? null,
+        country_id: token.countryId ?? null,
+        is_test_user: token.isTestUser ?? null,
+      },
+      webhook_secret: {
+        present: Boolean(process.env.MP_WEBHOOK_SECRET),
+      },
+      webhook_url: 'https://movieflix.velixir.run/api/mercadopago/webhook',
+      pix_enabled: mpConfigured(),
       mode: mpMode(),
     })
   } catch (e) {

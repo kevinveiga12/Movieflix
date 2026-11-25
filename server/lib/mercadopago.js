@@ -136,6 +136,43 @@ export async function getPayment(id) {
 }
 
 /**
+ * Valida o Access Token com uma chamada SOMENTE DE LEITURA.
+ *
+ * `GET /users/me` é o endpoint mais barato que prova duas coisas de uma vez:
+ * que o token é aceito (não é 401) e a qual conta ele pertence. Não cria
+ * cobrança, não altera nada.
+ *
+ * Devolve apenas dados não sensíveis — nunca o token, nunca o e-mail completo.
+ * O `site_id`/`country_id` é o que distingue produção de teste na prática.
+ */
+export async function validateAccessToken() {
+  if (!mpConfigured()) {
+    return { ok: false, reason: 'unconfigured', mode: 'unconfigured' }
+  }
+  try {
+    const me = await mpFetch('/users/me')
+    return {
+      ok: true,
+      reason: null,
+      mode: mpMode(),
+      userId: me?.id ? String(me.id) : null,
+      nickname: me?.nickname ?? null,
+      siteId: me?.site_id ?? null,
+      countryId: me?.country_id ?? null,
+      // `tags` traz "test_user" em contas de teste — sinal mais confiável que o prefixo.
+      isTestUser: Array.isArray(me?.tags) ? me.tags.includes('test_user') : null,
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      reason: e?.status === 401 ? 'invalid_token' : 'api_error',
+      status: e?.status ?? null,
+      mode: mpMode(),
+    }
+  }
+}
+
+/**
  * Valida a assinatura da notificação (webhook).
  *
  * O Mercado Pago assina `id:<data.id>;request-id:<x-request-id>;ts:<ts>;` com
