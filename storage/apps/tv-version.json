@@ -2,7 +2,7 @@
   "version": "1.0.10",
   "versionCode": 12,
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
-  "sha256": "1253fb9a8fc3cb516112c538ba6b4f589df8c99062b92705fa55f493b573583e",
+  "sha256": "7960b21140a9a2a76b28cb04b056dcfd9f61594c677c7a8cf226b3a5cfba1108",
   "notes": [
     "Cards menores e mais colunas nas páginas de Filmes e Séries: 4 cards por linha em vez de 3, com capa completa e nome inteiro",
     "Cabeçalho mais compacto (título, busca e chips): a grade de cards sobe e mostra mais títulos sem rolar",
@@ -13,6 +13,6 @@
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
-  "publishedAt": "2026-11-26T01:47:39Z",
+  "publishedAt": "2026-11-26T02:05:36Z",
   "minSupportedVersionCode": 0
 }
