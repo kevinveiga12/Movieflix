@@ -4,6 +4,8 @@
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
   "sha256": "8b7f193359511f99ba0168ff29a3571019d7433b861fd1cb90d5be8a2ae16013",
   "notes": [
+    "Melhoria do layout dos cards das páginas de Filmes e Séries: os cards agora aparecem inteiros, com capa e nome, ao navegar com o controle remoto",
+    "Cabeçalho mais compacto: título, busca, ordenação e gêneros ocupam menos altura, sobrando espaço para a grade",
     "Cards de Filmes e Séries completos: pôsteres inteiros, títulos e notas visíveis",
     "Ordenação 'Mais recentes' corrigida: respeita a data real de lançamento",
     "Pesquisa direta em Filmes e Séries combinável com gênero e ordenação",
