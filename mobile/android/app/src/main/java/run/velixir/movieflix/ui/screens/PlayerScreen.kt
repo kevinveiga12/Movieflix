@@ -94,6 +94,23 @@ fun PlayerScreen(
     var immersive by remember { mutableStateOf(true) }
     val context = LocalContext.current
 
+    /*
+      BOTÃO VOLTAR DO ANDROID — SAI DA TELA CHEIA ANTES DE SAIR DO PLAYER.
+
+      ── O DEFEITO QUE ISTO CORRIGE ────────────────────────────────────────────
+      O player abre em tela cheia (`immersive = true`). Sem este handler, o
+      Voltar do aparelho pulava direto para a tela de detalhes, deixando o
+      `immersive` ligado: as barras do sistema continuavam escondidas na tela
+      seguinte e o app parecia "travado" em tela cheia.
+
+      Agora o primeiro Voltar desliga o imersivo (volta ao modo normal, com as
+      barras do sistema e o botão ‹ Voltar visíveis) e só o segundo Voltar sai
+      do player — o comportamento que o pedido descreve.
+    */
+    androidx.activity.compose.BackHandler(enabled = immersive) {
+        immersive = false
+    }
+
     // Barras do sistema somem enquanto `immersive` estiver ligado.
     DisposableEffect(immersive) {
         val activity = context as? android.app.Activity
@@ -219,6 +236,8 @@ fun PlayerScreen(
                 season = season,
                 episode = episode,
                 vm = vm,
+                immersive = immersive,
+                onToggleImmersive = { immersive = !immersive },
                 onSourceFailed = { advanceSource() },
             )
 
@@ -255,6 +274,8 @@ private fun DirectPlayer(
     season: Int?,
     episode: Int?,
     vm: AppViewModel,
+    immersive: Boolean = false,
+    onToggleImmersive: () -> Unit = {},
     onSourceFailed: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -300,19 +321,46 @@ private fun DirectPlayer(
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                this.player = player
-                useController = true
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            }
-        },
-        modifier = Modifier.fillMaxSize(),
-    )
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        /*
+          BOTÃO DE SAIR DA TELA CHEIA — MODO DIRETO.
+
+          ── O DEFEITO QUE ISTO CORRIGE ────────────────────────────────────────
+          O `EmbedPlayer` já tinha o ✕, mas o `DirectPlayer` (MP4/HLS, o modo
+          mais comum) não tinha NENHUM. Como o player abre em tela cheia e as
+          barras do sistema estão escondidas, o cliente ficava sem saída visível
+          — só o Voltar do aparelho, que antes pulava a tela inteira.
+
+          Fica no canto superior direito, discreto, e só existe em tela cheia.
+        */
+        if (immersive) {
+            Text(
+                "✕",
+                color = Color.White,
+                fontSize = 20.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .background(Color(0x66000000), androidx.compose.foundation.shape.CircleShape)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clickableNoRipple(onToggleImmersive),
+            )
+        }
+    }
 }
 
 /**

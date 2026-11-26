@@ -1422,17 +1422,41 @@ h4 {
 }
 
 /*
-  EM TELA CHEIA, SÓ O VÍDEO.
+  EM TELA CHEIA, O OVERLAY CONTINUA MONTADO — MAS INVISÍVEL ATÉ O TOQUE.
 
-  O overlay (nossa barra e nossos botões) fica DENTRO de `.player-stage`, então
-  ele continuaria visível em tela cheia — era exatamente o "entrou em tela
-  cheia mas os botões não somem". Aqui ele é removido da pintura nos dois
-  caminhos: `:fullscreen` nativo e `.is-fullscreen` (modo CSS de reserva).
+  ── O DEFEITO QUE ISTO CORRIGE ──────────────────────────────────────────────
+  Antes esta regra era `display: none !important`. O overlay inteiro saía da
+  pintura em tela cheia, e com ele iam embora o play/pause, a barra de
+  progresso, o botão de sair e o próprio sensor de toque. Resultado: em tela
+  cheia o cliente tocava a tela e NADA aparecia — o `pokeUi()` marcava
+  `showUi = true`, mas o elemento estava com `display: none`, então não havia
+  o que pintar. A única saída era Escape ou o botão Voltar do aparelho.
+
+  Agora o overlay permanece no DOM e obedece ao mesmo `opacity` do modo
+  normal: some sozinho depois de 5 s e volta no toque. O que muda em tela
+  cheia é só a LIMPEZA: o bloco de título/subtítulo sai (é informação da
+  página, não do vídeo) e as barras ficam mais discretas.
+*/
+.player-stage:fullscreen .player-top-info,
+.player-stage:-webkit-full-screen .player-top-info,
+.player-page.is-fullscreen .player-top-info {
+  display: none;
+}
+
+/*
+  Em tela cheia a barra de baixo fica mais baixa e o gradiente mais suave,
+  para não comer a imagem do filme.
 */
 .player-stage:fullscreen .player-overlay,
 .player-stage:-webkit-full-screen .player-overlay,
 .player-page.is-fullscreen .player-overlay {
-  display: none !important;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.55) 0%,
+    transparent 18%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.72) 100%
+  );
 }
 
 /*
@@ -1473,19 +1497,25 @@ h4 {
 }
 
 /*
-  EM TELA CHEIA O SENSOR CONTINUA, mas só como faixa no rodapé.
+  EM TELA CHEIA O SENSOR COBRE A TELA INTEIRA.
 
-  O overlay inteiro sai da pintura em tela cheia (é o requisito: só o vídeo).
-  Sem nenhum sensor, o toque não teria como trazer o ✕ de volta e a pessoa
-  ficaria presa em tela cheia no celular, onde não existe tecla Escape. A faixa
-  resolve isso sem cobrir o vídeo: o meio da tela continua indo para o player.
+  ── O DEFEITO QUE ISTO CORRIGE ──────────────────────────────────────────────
+  Antes, em tela cheia, o sensor era só uma faixa de 64 px no rodapé. Como o
+  overlay também estava com `display: none`, tocar no MEIO da tela não fazia
+  nada: o toque ia para o iframe do provedor (que desenha a própria barra) e a
+  nossa interface nunca voltava. Era o "toque na tela não controla o player".
+
+  Agora o sensor ocupa a tela toda enquanto a UI está escondida: o primeiro
+  toque em qualquer ponto devolve a nossa barra. Quando a barra está visível o
+  sensor sai do DOM, então o toque seguinte volta a chegar no vídeo — é o
+  "segundo toque alterna", sem camada nenhuma presa por cima do filme.
 */
 .player-stage:fullscreen .player-sensor,
 .player-stage:-webkit-full-screen .player-sensor,
 .player-page.is-fullscreen .player-sensor {
   display: block !important;
-  inset: auto 0 0 0;
-  height: 64px;
+  inset: 0;
+  height: auto;
 }
 
 /*

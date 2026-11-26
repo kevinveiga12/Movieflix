@@ -136,6 +136,15 @@ export function PlayerPage() {
   const [showUi, setShowUi] = useState(true)
   const [uiPoke, setUiPoke] = useState(0)
 
+  /**
+   * Suspende o auto-hide enquanto a pessoa interage com a barra de progresso.
+   *
+   * Sem isto, arrastar/segurar a barra por mais de 5 s fazia a barra sumir no
+   * meio do seek — o pedido explícito é "não esconder enquanto o usuário
+   * estiver interagindo com a barra de progresso".
+   */
+  const [holdUi, setHoldUi] = useState(false)
+
   /** Tela cheia real do contêiner. */
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -439,11 +448,26 @@ export function PlayerPage() {
   }, [])
 
   // ── Auto-hide da UI ──────────────────────────────────────────────────────
+  /*
+    ── O DEFEITO QUE ISTO CORRIGE ────────────────────────────────────────────
+    Antes as dependências eram `[showUi, current, playing, uiPoke]`. O `current`
+    muda a cada `timeupdate` do <video> — cerca de 4 vezes por segundo. Cada
+    mudança recriava o `setTimeout`, então o relógio de 5 s NUNCA chegava ao
+    fim enquanto o filme rodava: a barra ficava permanentemente sobre a imagem.
+    Era exatamente o "elementos da interface ficam aparecendo sobre o filme".
+
+    Agora só `showUi` e `uiPoke` reiniciam o relógio. `uiPoke` é incrementado
+    por `pokeUi()` a cada interação real (toque, tecla, clique na barra), que é
+    o único evento que deve adiar o auto-hide.
+
+    `holdUi` suspende o auto-hide enquanto a pessoa arrasta/segura a barra de
+    progresso — sem isso a barra sumiria no meio de um seek.
+  */
   useEffect(() => {
-    if (!showUi) return
+    if (!showUi || holdUi) return
     const timer = setTimeout(() => setShowUi(false), UI_HIDE_MS)
     return () => clearTimeout(timer)
-  }, [showUi, current, playing, uiPoke])
+  }, [showUi, uiPoke, holdUi])
 
   const pokeUi = useCallback(() => {
     setShowUi(true)
@@ -738,7 +762,7 @@ export function PlayerPage() {
         {!showUi && isEmbed && (
           <button
             type="button"
-            className="player-sensor player-sensor--strip"
+            className={`player-sensor ${isFullscreen ? '' : 'player-sensor--strip'}`}
             aria-label="Mostrar controles"
             onClick={() => pokeUi()}
           />
@@ -1018,7 +1042,26 @@ export function PlayerPage() {
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect()
                   seekTo((e.clientX - rect.left) / rect.width)
+                  pokeUi()
                 }}
+                /*
+                  Segurar/arrastar a barra suspende o auto-hide. `onPointerDown`
+                  liga o `holdUi`; soltar (ou cancelar) desliga e reinicia o
+                  relógio de 5 s. Sem isto a barra sumia no meio do seek.
+                */
+                onPointerDown={() => {
+                  setHoldUi(true)
+                  pokeUi()
+                }}
+                onPointerUp={() => {
+                  setHoldUi(false)
+                  pokeUi()
+                }}
+                onPointerCancel={() => {
+                  setHoldUi(false)
+                  pokeUi()
+                }}
+                onPointerLeave={() => setHoldUi(false)}
                 role="slider"
                 aria-label="Progresso"
                 aria-valuemin={0}

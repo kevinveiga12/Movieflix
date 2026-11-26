@@ -410,7 +410,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             list.isEmpty() -> TvEmpty("Nada por aqui ainda.")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                 state = gridState,
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 180.dp),
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
                 /*
                   Padding inferior de 40dp: a última fileira de cards precisa de
                   folga para não encostar na borda física da TV (overscan). Antes
@@ -418,7 +418,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
                 */
                 contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 40.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 items(list.size, key = { "${list[it].type}-${list[it].tmdbId}" }) { i ->
                     TvPosterCard(list[i], { onOpen(list[i]) }, fillWidth = true)
@@ -522,10 +522,10 @@ fun TvGenresScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
                 modifier = Modifier.padding(start = 48.dp, bottom = 14.dp),
             )
             androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 180.dp),
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 items(s.movies.size, key = { "${s.movies[it].type}-${s.movies[it].tmdbId}" }) { i ->
                     TvPosterCard(s.movies[i], { onOpen(s.movies[i]) }, fillWidth = true)
@@ -575,10 +575,10 @@ fun TvSearchScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             s.loading -> TvLoading()
             s.searchResults.isEmpty() -> TvEmpty("Nenhum resultado para \"$term\".", "🔍")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 180.dp),
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 items(s.searchResults.size, key = { "${s.searchResults[it].type}-${s.searchResults[it].tmdbId}" }) { i ->
                     TvPosterCard(s.searchResults[i], { onOpen(s.searchResults[i]) }, fillWidth = true)
@@ -618,7 +618,7 @@ fun TvFavoritesScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             )
         }
         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 180.dp),
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
@@ -656,7 +656,7 @@ fun TvHistoryScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             )
         }
         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 180.dp),
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),

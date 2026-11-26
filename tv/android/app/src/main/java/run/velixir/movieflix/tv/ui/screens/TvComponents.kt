@@ -159,7 +159,12 @@ fun TvPosterCard(
             .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(width.dp))
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(6.dp),
+            /*
+              Padding 4dp (era 6dp): com a célula menor (150dp) o padding de 6dp
+              comia 12dp de largura útil e o pôster ficava estreito demais. 4dp
+              mantém a folga do anel de foco vermelho (3dp) sem encolher a capa.
+            */
+            .padding(4.dp),
     ) {
         Box(
             modifier = Modifier
@@ -278,16 +283,21 @@ fun TvPosterCard(
         }
 
         // .card-info do site.
-        Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp)) {
+        Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 6.dp)) {
             Text(
                 title.title,
                 color = if (focused) MfColors.Text else MfColors.TextSoft,
                 fontFamily = MfSans,
-                fontSize = 13.sp,
+                /*
+                  12sp (era 13sp) e lineHeight 15sp: com a célula de 150dp o
+                  título de 13sp quebrava em 2 linhas e a segunda linha era
+                  cortada pela fileira seguinte. 12sp cabe inteiro.
+                */
+                fontSize = 12.sp,
                 fontWeight = if (focused) FontWeight.Bold else FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 16.sp,
+                lineHeight = 15.sp,
             )
             Spacer(Modifier.height(2.dp))
             Text(

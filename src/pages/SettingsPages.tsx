@@ -174,7 +174,7 @@ const FALLBACK: AppInfo = {
   ios: { available: true, minIos: '16.0', install: 'pwa' },
   tv: {
     available: true,
-    version: '1.0.8',
+    version: '1.0.9',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',

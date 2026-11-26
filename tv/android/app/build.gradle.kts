@@ -26,11 +26,16 @@ android {
           • Atualizador integrado: consulta /api/apps/tv/version, baixa o APK,
             valida SHA-256 e abre o instalador do Android.
 
-          versionCode 10 (o 1.0.7 saiu como 9). Instalar por cima preserva login e
+          versionCode 11 (o 1.0.8 saiu como 10). Instalar por cima preserva login e
           dados porque o applicationId e a chave de assinatura são os mesmos.
+
+          1.0.9 — cards menores e mais colunas. A célula da grade caiu de 180dp
+          para 150dp (mais cards por linha, capas completas), o espaçamento
+          vertical de 22dp para 16dp e o título de 13sp para 12sp, para o nome
+          caber inteiro sem ser cortado pela fileira seguinte.
         */
-        versionCode = 10
-        versionName = "1.0.8"
+        versionCode = 11
+        versionName = "1.0.9"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")
