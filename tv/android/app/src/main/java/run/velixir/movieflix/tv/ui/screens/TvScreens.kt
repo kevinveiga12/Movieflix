@@ -181,7 +181,7 @@ fun TvChip(label: String, selected: Boolean = false, onClick: () -> Unit) {
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 9.dp),
+            .padding(horizontal = 18.dp, vertical = 6.dp),
     ) {
         Text(
             label,
@@ -361,7 +361,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 48.dp)
-                .padding(bottom = 14.dp)
+                .padding(bottom = 8.dp)
                 .focusRequester(searchFocus),
         )
 
@@ -375,7 +375,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(bottom = 12.dp),
+            modifier = Modifier.padding(bottom = 8.dp),
         ) {
             items(SORT_OPTIONS) { opt ->
                 TvChip(opt.second, selected = s.sort == opt.first) {
@@ -388,7 +388,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(bottom = 18.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
             ) {
                 item {
                     TvChip("Todos", selected = s.genre == null) {

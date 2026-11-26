@@ -415,7 +415,7 @@ function AppsTab({ token }: { token?: string }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `movieflix-tv-${tv?.version ?? '1.0.4'}.apk`
+      a.download = `movieflix-tv-${tv?.version ?? '1.0.8'}.apk`
       document.body.appendChild(a)
       a.click()
       a.remove()

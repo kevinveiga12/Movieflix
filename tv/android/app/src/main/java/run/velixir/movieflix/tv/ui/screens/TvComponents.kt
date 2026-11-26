@@ -677,8 +677,8 @@ fun TvPageTitle(text: String) {
         text,
         color = MfColors.Text,
         fontFamily = MfSans,
-        fontSize = 28.sp,
+        fontSize = 22.sp,
         fontWeight = FontWeight.Black,
-        modifier = Modifier.padding(start = 48.dp, top = 28.dp, bottom = 16.dp),
+        modifier = Modifier.padding(start = 48.dp, top = 12.dp, bottom = 8.dp),
     )
 }
