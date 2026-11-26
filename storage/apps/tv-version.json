@@ -1,8 +1,8 @@
 {
-  "version": "1.0.7",
-  "versionCode": 9,
+  "version": "1.0.8",
+  "versionCode": 10,
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
-  "sha256": "1ab4f808e1a3acf04c4453bee6b555fb73bb0d44c94fe644833dba5bb8aa30aa",
+  "sha256": "8b7f193359511f99ba0168ff29a3571019d7433b861fd1cb90d5be8a2ae16013",
   "notes": [
     "Cards de Filmes e Séries completos: pôsteres inteiros, títulos e notas visíveis",
     "Ordenação 'Mais recentes' corrigida: respeita a data real de lançamento",
@@ -11,6 +11,6 @@
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
-  "publishedAt": "2026-11-25T23:21:31Z",
+  "publishedAt": "2026-11-26T00:35:14Z",
   "minSupportedVersionCode": 0
 }
