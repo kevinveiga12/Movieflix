@@ -2,7 +2,7 @@
   "version": "1.0.9",
   "versionCode": 11,
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
-  "sha256": "8b7f193359511f99ba0168ff29a3571019d7433b861fd1cb90d5be8a2ae16013",
+  "sha256": "1253fb9a8fc3cb516112c538ba6b4f589df8c99062b92705fa55f493b573583e",
   "notes": [
     "Cards menores e mais colunas nas páginas de Filmes e Séries: capas completas, nomes inteiros e mais títulos visíveis por linha",
     "Espaçamento entre fileiras reduzido para o nome do título não ser cortado pela linha seguinte",
@@ -14,6 +14,6 @@
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
-  "publishedAt": "2026-11-26T00:35:14Z",
+  "publishedAt": "2026-11-26T01:47:39Z",
   "minSupportedVersionCode": 0
 }
