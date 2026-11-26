@@ -687,8 +687,12 @@ fun TvPageTitle(text: String) {
         text,
         color = MfColors.Text,
         fontFamily = MfSans,
-        fontSize = 22.sp,
+        fontSize = 20.sp,
         fontWeight = FontWeight.Black,
-        modifier = Modifier.padding(start = 48.dp, top = 12.dp, bottom = 8.dp),
+        /*
+          top 6dp / bottom 4dp (era 12/8): o título da página é o primeiro item
+          do cabeçalho e cada dp aqui é um dp a menos empurrando a grade.
+        */
+        modifier = Modifier.padding(start = 48.dp, top = 6.dp, bottom = 4.dp),
     )
 }

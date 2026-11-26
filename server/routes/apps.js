@@ -147,7 +147,7 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.9',
+      version: '1.0.10',
       minAndroid: '8.0',
       sizeBytes: tv.sizeBytes || 10906425,
       updatedAt: tv.updatedAt,
@@ -291,7 +291,7 @@ router.get('/tv', requireAdmin, (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({
     name: 'MovieFlix TV',
-    version: '1.0.9',
+    version: '1.0.10',
     available: info.exists,
     sizeBytes: info.sizeBytes,
     updatedAt: info.updatedAt,
@@ -315,7 +315,7 @@ router.get('/tv/download', requireAdmin, (req, res, next) => {
   }
   console.log(`[MovieFlix] APK TV baixado por ${req.user?.email ?? req.user?.id ?? 'admin'}`)
   res.type('application/vnd.android.package-archive')
-  res.download(p, 'movieflix-tv-1.0.9.apk', (err) => {
+  res.download(p, 'movieflix-tv-1.0.10.apk', (err) => {
     if (err && !res.headersSent) next(err)
   })
 })

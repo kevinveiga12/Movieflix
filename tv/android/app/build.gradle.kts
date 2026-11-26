@@ -26,16 +26,15 @@ android {
           • Atualizador integrado: consulta /api/apps/tv/version, baixa o APK,
             valida SHA-256 e abre o instalador do Android.
 
-          versionCode 11 (o 1.0.8 saiu como 10). Instalar por cima preserva login e
+          versionCode 12 (o 1.0.9 saiu como 11). Instalar por cima preserva login e
           dados porque o applicationId e a chave de assinatura são os mesmos.
 
-          1.0.9 — cards menores e mais colunas. A célula da grade caiu de 180dp
-          para 150dp (mais cards por linha, capas completas), o espaçamento
-          vertical de 22dp para 16dp e o título de 13sp para 12sp, para o nome
-          caber inteiro sem ser cortado pela fileira seguinte.
+          1.0.10 — 4 colunas. A célula caiu de 150dp para 130dp: com a área útil
+          de ~580dp isso passa de 3 para 4 cards por linha. O cabeçalho também
+          encolheu (título 20sp, busca 46dp, chips 14/4dp) para a grade subir.
         */
-        versionCode = 11
-        versionName = "1.0.9"
+        versionCode = 12
+        versionName = "1.0.10"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

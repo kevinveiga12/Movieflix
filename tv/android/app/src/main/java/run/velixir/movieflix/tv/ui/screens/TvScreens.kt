@@ -181,7 +181,12 @@ fun TvChip(label: String, selected: Boolean = false, onClick: () -> Unit) {
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 6.dp),
+            /*
+              14dp/4dp (era 18dp/6dp): com duas fileiras de chips (ordenação e
+              gêneros) o cabeçalho comia ~30% da altura da tela e empurrava a
+              grade para baixo. Chips mais justos devolvem essa altura aos cards.
+            */
+            .padding(horizontal = 14.dp, vertical = 4.dp),
     ) {
         Text(
             label,
@@ -361,7 +366,8 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 48.dp)
-                .padding(bottom = 8.dp)
+                .padding(bottom = 6.dp)
+                .height(46.dp)
                 .focusRequester(searchFocus),
         )
 
@@ -375,7 +381,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(bottom = 8.dp),
+            modifier = Modifier.padding(bottom = 4.dp),
         ) {
             items(SORT_OPTIONS) { opt ->
                 TvChip(opt.second, selected = s.sort == opt.first) {
@@ -388,7 +394,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier.padding(bottom = 4.dp),
             ) {
                 item {
                     TvChip("Todos", selected = s.genre == null) {
@@ -410,7 +416,7 @@ fun TvCatalogScreen(vm: TvViewModel, kind: String, onOpen: (Title) -> Unit) {
             list.isEmpty() -> TvEmpty("Nada por aqui ainda.")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                 state = gridState,
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 130.dp),
                 /*
                   Padding inferior de 40dp: a última fileira de cards precisa de
                   folga para não encostar na borda física da TV (overscan). Antes
@@ -522,7 +528,7 @@ fun TvGenresScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
                 modifier = Modifier.padding(start = 48.dp, bottom = 14.dp),
             )
             androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 130.dp),
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -575,7 +581,7 @@ fun TvSearchScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             s.loading -> TvLoading()
             s.searchResults.isEmpty() -> TvEmpty("Nenhum resultado para \"$term\".", "🔍")
             else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 130.dp),
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -618,10 +624,10 @@ fun TvFavoritesScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             )
         }
         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 130.dp),
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(titles.size, key = { "${titles[it].type}-${titles[it].tmdbId}" }) { i ->
                 TvPosterCard(titles[i], { onOpen(titles[i]) }, fillWidth = true)
@@ -656,10 +662,10 @@ fun TvHistoryScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
             )
         }
         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 130.dp),
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(titles.size, key = { "${titles[it].type}-${titles[it].tmdbId}" }) { i ->
                 TvPosterCard(titles[i], { onOpen(titles[i]) }, fillWidth = true)
