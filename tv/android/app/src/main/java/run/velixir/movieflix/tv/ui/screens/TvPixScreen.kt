@@ -29,9 +29,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -278,7 +285,26 @@ fun TvPixScreen(vm: TvViewModel, onBack: () -> Unit) {
  * trocar de Pix para cartão.
  */
 @Composable
-internal fun TvPixButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun TvPixButton(
+    label: String,
+    enabled: Boolean,
+    /*
+      Parâmetros OPCIONAIS de navegação por D-pad.
+
+      A tela de cartão precisa de uma cadeia de foco explícita (os campos de
+      texto consomem as setas), então ela passa o `FocusRequester` do botão e o
+      que cada seta deve fazer. As outras telas continuam chamando
+      `TvPixButton(label, enabled) { ... }` e o comportamento padrão do Compose
+      (foco automático) segue valendo — nada muda para elas.
+    */
+    focusRequester: FocusRequester? = null,
+    onFocused: (() -> Unit)? = null,
+    onUp: (() -> Unit)? = null,
+    onDown: (() -> Unit)? = null,
+    onLeft: (() -> Unit)? = null,
+    onRight: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
@@ -295,7 +321,24 @@ internal fun TvPixButton(label: String, enabled: Boolean, onClick: () -> Unit) {
                 if (focused) Modifier.border(3.dp, Color.White, RoundedCornerShape(10.dp))
                 else Modifier,
             )
-            .onFocusChanged { focused = it.isFocused }
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .then(
+                if (onUp == null && onDown == null && onLeft == null && onRight == null) Modifier
+                else Modifier.onPreviewKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (ev.key) {
+                        Key.DirectionUp -> { onUp?.invoke(); true }
+                        Key.DirectionDown -> { onDown?.invoke(); true }
+                        Key.DirectionLeft -> { onLeft?.invoke(); true }
+                        Key.DirectionRight -> { onRight?.invoke(); true }
+                        else -> false
+                    }
+                },
+            )
             .clickable(enabled = enabled) { onClick() }
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,

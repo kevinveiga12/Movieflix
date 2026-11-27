@@ -27,7 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -36,6 +37,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -49,15 +51,25 @@ import run.velixir.movieflix.tv.ui.theme.MfSans
  * Pagamento com cartão de crédito ou débito na TV.
  *
  * ══════════════════════════════════════════════════════════════════════════════
- * POR QUE ISTO NÃO É A MESMA TELA DO CELULAR
+ * O BUG QUE ESTA VERSÃO CORRIGE (relatado no aparelho)
  * ══════════════════════════════════════════════════════════════════════════════
- * Numa TV o cliente digita com o D-pad, um caractere por vez. Um campo que rola
- * horizontalmente e esconde o que já foi digitado é inutilizável à distância —
- * por isso cada campo mostra o número formatado (grupos de 4) e o foco acende o
- * anel branco, igual às outras telas do app.
+ * O cliente conseguia focar o número do cartão e digitar, mas o D-pad não descia
+ * para validade, CVV e nome — "clico e não anda". No Pix funcionava.
  *
- * A ordem dos campos segue o caminho do D-pad para baixo: número → validade →
- * CVV → nome. O botão de pagar é o último, para ninguém cair nele sem querer.
+ * CAUSA: cada campo tinha um `onPreviewKeyEvent` que devolvia `true` para
+ * DirectionUp/Down/Left/Right. Devolver `true` significa "eu consumi a tecla":
+ * a tecla morria ali e o Compose nunca recebia o pedido de mover o foco. O
+ * campo ficava preso para sempre.
+ *
+ * CORREÇÃO: a navegação não depende mais do comportamento implícito do
+ * `BasicTextField` (que também consome setas para mover o cursor). Cada campo
+ * tem um `FocusRequester` próprio e uma cadeia explícita de foco:
+ *
+ *     número → validade → CVV → nome → PAGAR → VOLTAR
+ *
+ * A seta é tratada aqui, move o foco para o vizinho certo e SÓ ENTÃO devolve
+ * `true` (consumida). Assim o foco anda sempre, na ordem certa, e o cursor do
+ * texto nunca "rouba" a seta. OK/ENTER abre o teclado na tela do campo em foco.
  *
  * ══════════════════════════════════════════════════════════════════════════════
  * O QUE ESTA TELA NÃO GUARDA
@@ -67,7 +79,15 @@ import run.velixir.movieflix.tv.ui.theme.MfSans
  * o ViewModel — e ele não tem número de cartão.
  */
 @Composable
-fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: String, periodLabel: String, amountLabel: String, onBack: () -> Unit) {
+fun TvCardScreen(
+    vm: TvViewModel,
+    planCode: String,
+    period: String,
+    planName: String,
+    periodLabel: String,
+    amountLabel: String,
+    onBack: () -> Unit,
+) {
     val s by vm.state.collectAsState()
     val charge = s.cardCharge
     val approved = charge?.approved == true
@@ -76,6 +96,23 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
     var expiry by remember { mutableStateOf("") }
     var cvv by remember { mutableStateOf("") }
     var holder by remember { mutableStateOf("") }
+
+    /*
+      Cadeia de foco. Índices fixos, na ordem em que o cliente preenche:
+        0 número · 1 validade · 2 CVV · 3 nome · 4 PAGAR · 5 VOLTAR
+      `idx` guarda quem está em foco para as setas saberem para onde ir.
+    */
+    val focus = remember { List(6) { FocusRequester() } }
+    var idx by remember { mutableStateOf(0) }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    fun go(to: Int) {
+        val t = to.coerceIn(0, focus.lastIndex)
+        idx = t
+        // Se o foco sair de um campo de texto, o teclado na tela fecha sozinho.
+        if (t > 3) keyboard?.hide()
+        runCatching { focus[t].requestFocus() }
+    }
 
     Column(
         modifier = Modifier
@@ -86,7 +123,7 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
         TvPageTitle("Pagamento com cartão")
         Spacer(Modifier.height(6.dp))
 
-        // ── Aprovado ───────────────────────────────────────────────────────
+        // ── Aprovado ─────────────────────────────────────────────────────────
         if (approved) {
             Box(
                 modifier = Modifier
@@ -124,7 +161,7 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
             return@Column
         }
 
-        // ── Recusado / em análise ─────────────────────────────────────────
+        // ── Recusado / em análise ────────────────────────────────────────────
         if (charge != null && !approved) {
             val pending = charge.status == "in_process" || charge.status == "pending"
             Box(
@@ -167,7 +204,7 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
             return@Column
         }
 
-        // ── Cabeçalho do pedido ────────────────────────────────────────────
+        // ── Cabeçalho do pedido ──────────────────────────────────────────────
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "$planName · $periodLabel",
@@ -213,13 +250,19 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
             Spacer(Modifier.height(14.dp))
         }
 
-        // ── Campos ─────────────────────────────────────────────────────────
+        // ── Campos ───────────────────────────────────────────────────────────
         TvCardField(
             label = "Número do cartão",
             value = number,
             placeholder = "0000 0000 0000 0000",
             keyboard = KeyboardType.Number,
             width = 520.dp,
+            focusRequester = focus[0],
+            onFocused = { idx = 0 },
+            onUp = { go(0) },
+            onDown = { go(1) },
+            onLeft = { go(0) },
+            onRight = { go(1) },
             onChange = { v ->
                 // Agrupa de 4 em 4 enquanto digita — é o que o cliente espera
                 // ver no cartão físico.
@@ -236,6 +279,12 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
                 placeholder = "MM/AA",
                 keyboard = KeyboardType.Number,
                 width = 200.dp,
+                focusRequester = focus[1],
+                onFocused = { idx = 1 },
+                onUp = { go(0) },
+                onDown = { go(3) },
+                onLeft = { go(1) },
+                onRight = { go(2) },
                 onChange = { v ->
                     val d = v.filter { it.isDigit() }.take(4)
                     expiry = if (d.length <= 2) d else "${d.take(2)}/${d.drop(2)}"
@@ -247,6 +296,12 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
                 placeholder = "123",
                 keyboard = KeyboardType.Number,
                 width = 150.dp,
+                focusRequester = focus[2],
+                onFocused = { idx = 2 },
+                onUp = { go(0) },
+                onDown = { go(3) },
+                onLeft = { go(1) },
+                onRight = { go(2) },
                 onChange = { v -> cvv = v.filter { it.isDigit() }.take(4) },
             )
         }
@@ -257,6 +312,12 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
             value = holder,
             placeholder = "COMO ESTÁ NO CARTÃO",
             width = 520.dp,
+            focusRequester = focus[3],
+            onFocused = { idx = 3 },
+            onUp = { go(1) },
+            onDown = { go(4) },
+            onLeft = { go(3) },
+            onRight = { go(3) },
             onChange = { v -> holder = v.uppercase().take(40) },
         )
         Spacer(Modifier.height(20.dp))
@@ -271,6 +332,12 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
             TvPixButton(
                 if (s.cardLoading) "Processando…" else "Pagar $amountLabel",
                 enabled = canPay,
+                focusRequester = focus[4],
+                onFocused = { idx = 4 },
+                onUp = { go(3) },
+                onDown = { go(4) },
+                onLeft = { go(4) },
+                onRight = { go(5) },
             ) {
                 val parts = expiry.split("/")
                 vm.payWithCard(
@@ -285,7 +352,16 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
                     holder = holder.trim(),
                 )
             }
-            TvPixButton("Voltar", enabled = !s.cardLoading) {
+            TvPixButton(
+                "Voltar",
+                enabled = !s.cardLoading,
+                focusRequester = focus[5],
+                onFocused = { idx = 5 },
+                onUp = { go(3) },
+                onDown = { go(5) },
+                onLeft = { go(4) },
+                onRight = { go(5) },
+            ) {
                 vm.clearCard()
                 onBack()
             }
@@ -294,11 +370,22 @@ fun TvCardScreen(vm: TvViewModel, planCode: String, period: String, planName: St
 }
 
 /**
- * Campo de texto com foco visível para o D-pad.
+ * Campo de texto com foco visível e navegação EXPLÍCITA para o D-pad.
  *
  * `BasicTextField` em vez de `TextField` do Material: o Material pensa em toque
  * (cursor, seleção com dedo) e na TV isso vira ruído visual. Aqui o que importa
  * é: o anel branco diz onde o foco está, e o texto é legível a 3 metros.
+ *
+ * ── POR QUE AS SETAS SÃO TRATADAS AQUI ───────────────────────────────────────
+ * O `BasicTextField` consome DirectionLeft/Right para mover o cursor e não sabe
+ * para onde ir em DirectionUp/Down. Se deixássemos o Compose decidir, o foco
+ * ficaria preso no campo (era exatamente o bug relatado). Então cada seta é
+ * interceptada, o foco é movido pelo `FocusRequester` do vizinho e a tecla é
+ * consumida — o campo nunca "engole" a navegação.
+ *
+ * OK/ENTER abre o teclado na tela (o `BasicTextField` já faz isso ao receber o
+ * foco; o pedido explícito garante o comportamento também quando o foco chega
+ * por seta).
  */
 @Composable
 private fun TvCardField(
@@ -307,9 +394,16 @@ private fun TvCardField(
     placeholder: String,
     width: androidx.compose.ui.unit.Dp,
     keyboard: KeyboardType = KeyboardType.Text,
+    focusRequester: FocusRequester,
+    onFocused: () -> Unit,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+    onLeft: () -> Unit,
+    onRight: () -> Unit,
     onChange: (String) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     Column {
         Text(
@@ -347,18 +441,22 @@ private fun TvCardField(
                 keyboardOptions = KeyboardOptions(keyboardType = keyboard),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .onFocusChanged { focused = it.isFocused }
-                    /*
-                      Na TV o OK abre o teclado virtual; as setas precisam andar
-                      entre campos, não dentro do texto. Sem isto, a seta
-                      esquerda/direita moveria o cursor e o cliente ficaria
-                      preso no campo.
-                    */
+                    .focusRequester(focusRequester)
+                    .onFocusChanged {
+                        focused = it.isFocused
+                        if (it.isFocused) onFocused()
+                    }
                     .onPreviewKeyEvent { ev ->
                         if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (ev.key) {
-                            Key.DirectionDown, Key.DirectionUp -> true
-                            Key.DirectionLeft, Key.DirectionRight -> true
+                            Key.DirectionUp -> { onUp(); true }
+                            Key.DirectionDown -> { onDown(); true }
+                            Key.DirectionLeft -> { onLeft(); true }
+                            Key.DirectionRight -> { onRight(); true }
+                            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                keyboardController?.show()
+                                true
+                            }
                             else -> false
                         }
                     },

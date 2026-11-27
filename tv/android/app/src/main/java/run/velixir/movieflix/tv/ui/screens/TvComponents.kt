@@ -373,6 +373,9 @@ fun TvSidebar(
         add("account" to "Conta")
         add("profiles" to "Perfis")
         add("settings" to "Configurações")
+        // Página de atualização: sempre acessível, com botão clicável pelo
+        // controle remoto. Antes não havia nenhum lugar no app para atualizar.
+        add("update" to "Atualizar")
         // Só para administrador. `isAdmin` vem do servidor (profiles.is_admin),
         // nunca de um campo que o usuário edite no próprio perfil.
         if (isAdmin) add("admin" to "Painel Admin")

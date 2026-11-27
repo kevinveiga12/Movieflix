@@ -53,9 +53,24 @@ android {
           corpo do texto vive num verticalScroll com os botões ancorados no
           rodapé, então nada mais fica cortado embaixo e dá para descer até
           "ATUALIZAR AGORA" / "DEPOIS" com as setas.
+          1.0.16 — duas correções pedidas no aparelho:
+
+          • CONTROLE REMOTO NA TELA DE CARTÃO. O cliente focava o número do
+            cartão e digitava, mas o D-pad não descia para validade, CVV e nome
+            ("clico e não anda"). Cada campo consumia as setas no
+            onPreviewKeyEvent e o foco nunca andava. Agora a cadeia de foco é
+            explícita (número → validade → CVV → nome → PAGAR → VOLTAR), com
+            FocusRequester por campo, e o teclado na tela abre/fecha junto.
+
+          • PÁGINA DE ATUALIZAÇÃO PRÓPRIA. A atualização deixou de ser uma
+            janela por cima do MovieFlix: virou a rota TvRoute.Update, uma tela
+            de verdade, alcançável pelo menu lateral ("Atualizar") e aberta
+            automaticamente quando há versão nova. Mostra versão instalada e
+            disponível, tem botão "Atualizar" clicável pelo controle e, sem
+            atualização, "Continuar" leva ao catálogo.
         */
-        versionCode = 17
-        versionName = "1.0.15"
+        versionCode = 18
+        versionName = "1.0.16"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

@@ -47,9 +47,9 @@ import run.velixir.movieflix.tv.ui.screens.TvProfilesScreen
 import run.velixir.movieflix.tv.ui.screens.TvSearchScreen
 import run.velixir.movieflix.tv.ui.screens.TvSettingsScreen
 import run.velixir.movieflix.tv.ui.screens.TvSidebar
+import run.velixir.movieflix.tv.ui.screens.TvUpdateScreen
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MovieFlixTheme
-import run.velixir.movieflix.tv.update.UpdateDialog
 import run.velixir.movieflix.tv.update.UpdateKeyRouter
 import run.velixir.movieflix.tv.update.UpdateManager
 
@@ -109,6 +109,16 @@ sealed interface TvRoute {
     data object Account : TvRoute
     data object Profiles : TvRoute
     data object Settings : TvRoute
+
+    /**
+     * Página de atualização — uma TELA, não uma sobreposição.
+     *
+     * O cliente pediu explicitamente que a atualização não abrisse por cima do
+     * MovieFlix, e sim uma página própria para onde o app redireciona. Como
+     * rota, ela usa o foco normal do Compose (o mesmo que já funciona no resto
+     * do app), então o D-pad alcança o botão "Atualizar" sem tratador global.
+     */
+    data object Update : TvRoute
     data object Admin : TvRoute
     data object Login : TvRoute
     data class Detail(val title: Title) : TvRoute
@@ -158,12 +168,13 @@ fun MovieFlixTvApp(
       por ele evita o bug clássico de "1.0.10 < 1.0.9" em comparação de string.
     */
     var updateManifest by remember { mutableStateOf<UpdateManager.Manifest?>(null) }
-    var updateDismissed by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val m = UpdateManager.check(BuildConfig.API_BASE_URL)
+        updateManifest = m
         if (UpdateManager.isNewer(m, BuildConfig.VERSION_CODE)) {
-            updateManifest = m
+            // REDIRECIONA para a página de atualização — não sobrepõe nada.
+            route = TvRoute.Update
         }
     }
 
@@ -211,13 +222,15 @@ fun MovieFlixTvApp(
             .fillMaxSize()
             .onPreviewKeyEvent { ev ->
                 /*
-                  A janela de atualização tem prioridade ABSOLUTA.
+                  A atualização agora é uma ROTA (TvRoute.Update), não uma
+                  janela. Portanto NÃO existe mais tratador global de teclas:
+                  `UpdateKeyRouter` fica sem handler e `dispatch` devolve false,
+                  deixando a tecla seguir o caminho normal do Compose.
 
-                  Enquanto ela estiver aberta, `UpdateKeyRouter` tem um tratador
-                  registrado e consome toda tecla aqui, na raiz, antes de
-                  qualquer tela. É o que impede o controle remoto de continuar
-                  mexendo no MovieFlix que está atrás do véu — inclusive quando
-                  o foco do Compose não foi para a janela.
+                  Isso é essencial: um tratador global que consumisse as setas
+                  aqui na raiz era justamente o que impedia o D-pad de navegar
+                  dentro das telas (o bug relatado na tela de cartão). A página
+                  de atualização usa o foco normal, como qualquer outra tela.
                 */
                 if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 UpdateKeyRouter.dispatch(ev.key)
@@ -295,6 +308,7 @@ fun MovieFlixTvApp(
                     TvRoute.Account, TvRoute.Login -> "account"
                     TvRoute.Profiles -> "profiles"
                     TvRoute.Settings -> "settings"
+                    TvRoute.Update -> "update"
                     TvRoute.Admin -> "admin"
                     is TvRoute.Detail -> "home"
                     else -> "home"
@@ -311,6 +325,7 @@ fun MovieFlixTvApp(
                         "plans" -> TvRoute.Plans
                         "profiles" -> if (s.loggedIn) TvRoute.Profiles else TvRoute.Login
                         "settings" -> TvRoute.Settings
+                        "update" -> TvRoute.Update
                         "admin" -> TvRoute.Admin
                         "account" -> if (s.loggedIn) TvRoute.Account else TvRoute.Login
                         else -> TvRoute.Home
@@ -354,6 +369,10 @@ fun MovieFlixTvApp(
                         TvRoute.Account -> TvAccountScreen(vm) { route = TvRoute.Login }
                         TvRoute.Profiles -> TvProfilesScreen(vm) { route = TvRoute.Login }
                         TvRoute.Settings -> TvSettingsScreen(vm)
+                        TvRoute.Update -> TvUpdateScreen(
+                            manifest = updateManifest,
+                            onContinue = { route = TvRoute.Home },
+                        )
                         TvRoute.Admin -> TvAdminScreen(vm)
                         TvRoute.Login -> TvLoginScreen(vm) {
                             // Volta para o título de onde veio, quando houve
@@ -396,17 +415,12 @@ fun MovieFlixTvApp(
         }
 
         /*
-          A janela de atualização fica ACIMA de qualquer rota — inclusive do
-          player. Se o usuário estiver assistindo quando a checagem termina, a
-          janela aparece por cima; ele pode adiar (quando opcional) e continuar.
+          A atualização NÃO é mais uma janela por cima do app.
+
+          Ela é a rota `TvRoute.Update`, desenhada no mesmo lugar que as outras
+          telas. O cliente pediu uma página de verdade, e uma rota é exatamente
+          isso: o MovieFlix não fica atrás de um véu e o D-pad usa o foco normal
+          do Compose — o mesmo que já funciona em Home, Planos e Configurações.
         */
-        val m = updateManifest
-        if (m != null && !updateDismissed) {
-            UpdateDialog(
-                manifest = m,
-                installedVersion = BuildConfig.VERSION_NAME,
-                onDismiss = { updateDismissed = true },
-            )
-        }
     }
 }
