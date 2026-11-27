@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -132,6 +133,14 @@ fun TvPlayerScreen(
     episode: Int?,
     onBack: () -> Unit,
     onLoginRequired: () -> Unit = {},
+    /**
+     * Troca de episódio (anterior/próximo ou avanço automático).
+     *
+     * A navegação vive no MainActivity, que já é quem monta a rota do player.
+     * O player só PEDE a troca — nunca navega por conta própria, para não
+     * duplicar a pilha de rotas.
+     */
+    onEpisodeChange: (Int, Int) -> Unit = { _, _ -> },
 ) {
     var url by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf<String?>(null) }
@@ -146,6 +155,51 @@ fun TvPlayerScreen(
     var chainIndex by remember { mutableStateOf(0) }
     /** Chave que força o WebView a remontar quando trocamos de fonte. */
     var sourceKey by remember { mutableStateOf(0) }
+
+    /*
+      ══════════════════════════════════════════════════════════════════════
+      EPISÓDIO ANTERIOR / PRÓXIMO E AVANÇO AUTOMÁTICO
+      ══════════════════════════════════════════════════════════════════════
+
+      A ordem real da temporada vem de `episodes_available` (["1/1","1/2",…]),
+      a MESMA lista que o servidor usa para autorizar a reprodução. Não
+      inventamos episódio: se o par não está na lista, não existe.
+
+      `episodeOrder` é a lista ordenada; `epIndex` é onde estamos. Os dois
+      botões ficam desabilitados nas pontas — nunca pulamos de temporada.
+    */
+    val episodeOrder = remember(title.tmdbId) {
+        (title.episodesAvailable ?: emptyList())
+            .mapNotNull { key ->
+                val parts = key.split('/')
+                if (parts.size != 2) return@mapNotNull null
+                val s = parts[0].toIntOrNull() ?: return@mapNotNull null
+                val e = parts[1].toIntOrNull() ?: return@mapNotNull null
+                s to e
+            }
+    }
+    val epIndex = if (season != null && episode != null) {
+        episodeOrder.indexOf(season to episode)
+    } else {
+        -1
+    }
+    val prevEp = if (epIndex > 0) episodeOrder[epIndex - 1] else null
+    val nextEp = if (epIndex >= 0 && epIndex + 1 < episodeOrder.size) {
+        episodeOrder[epIndex + 1]
+    } else {
+        null
+    }
+
+    /**
+     * O usuário já trocou de episódio à mão?
+     *
+     * NÃO usamos isso para bloquear o avanço automático: se a pessoa escolheu o
+     * episódio 5 e ele termina, o natural é seguir para o 6. O avanço só depende
+     * do fim REAL da mídia e da existência de um próximo episódio.
+     */
+    fun goToEpisode(target: Pair<Int, Int>) {
+        onEpisodeChange(target.first, target.second)
+    }
 
 
     /*
@@ -266,6 +320,11 @@ fun TvPlayerScreen(
                 episode = episode,
                 vm = vm,
                 onFailed = { advanceSource() },
+                prevEp = prevEp,
+                nextEp = nextEp,
+                onPrev = { prevEp?.let { goToEpisode(it) } },
+                onNext = { nextEp?.let { goToEpisode(it) } },
+                autoAdvance = true,
             )
 
             url != null -> TvEmbedPlayer(
@@ -281,6 +340,11 @@ fun TvPlayerScreen(
                     sourceKey++
                 },
                 onBack = onBack,
+                prevEp = prevEp,
+                nextEp = nextEp,
+                onPrev = { prevEp?.let { goToEpisode(it) } },
+                onNext = { nextEp?.let { goToEpisode(it) } },
+                autoAdvance = true,
             )
         }
     }
@@ -297,6 +361,13 @@ private fun TvDirectPlayer(
     vm: TvViewModel,
     /** Fim das tentativas neste aparelho: a cadeia deve tentar a próxima fonte. */
     onFailed: () -> Unit = {},
+    /** Episódio anterior/próximo na ordem real da temporada (null nas pontas). */
+    prevEp: Pair<Int, Int>? = null,
+    nextEp: Pair<Int, Int>? = null,
+    onPrev: () -> Unit = {},
+    onNext: () -> Unit = {},
+    /** Avanço automático ligado? Desligado quando o usuário trocou à mão. */
+    autoAdvance: Boolean = true,
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
@@ -391,6 +462,7 @@ private fun TvDirectPlayer(
       Número finito de propósito — tentativa infinita trava o aparelho.
     */
     var errorRetries by remember { mutableStateOf(0) }
+    val endedHandled = remember(url) { java.util.concurrent.atomic.AtomicBoolean(false) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -404,6 +476,24 @@ private fun TvDirectPlayer(
                 } else {
                     onFailed()
                 }
+            }
+
+            /*
+              AVANÇO AUTOMÁTICO PARA O PRÓXIMO EPISÓDIO.
+
+              `STATE_ENDED` é o fim REAL da mídia (não pausa, não buffer). Só
+              então — e só se existir próximo episódio na ordem da temporada —
+              pedimos a troca. No último episódio não há para onde ir: nada
+              acontece, como pedido.
+
+              `endedHandled` garante UM disparo: o listener pode receber
+              STATE_ENDED mais de uma vez.
+            */
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state != Player.STATE_ENDED) return
+                if (!autoAdvance || nextEp == null) return
+                if (!endedHandled.compareAndSet(false, true)) return
+                onNext()
             }
         }
         player.addListener(listener)
@@ -596,6 +686,32 @@ private fun TvDirectPlayer(
         }
 
         /*
+          BOTÕES DE EPISÓDIO ANTERIOR / PRÓXIMO.
+
+          Aparecem junto com a barra (mesma janela de 5 s do `ui.visible`) e
+          ficam DESABILITADOS nas pontas — nunca inventamos um episódio. O
+          "próximo" ganha destaque nos últimos 15 s, que é o "tempinho de
+          antecedência" pedido: a pessoa vê que o episódio está acabando e que
+          há para onde ir antes do corte.
+
+          Não recebem foco do D-pad: o foco continua no Box do player, então a
+          navegação por controle (esquerda/direita = seek, OK = play/pause) não
+          muda. São atalhos de toque, como no site.
+        */
+        if (!isFullscreen && ui.visible && (prevEp != null || nextEp != null)) {
+            val nearEnd = durationState.value > 0 &&
+                durationState.value - positionState.value <= 15 &&
+                durationState.value - positionState.value > 0
+            TvEpisodeButtons(
+                prevEp = prevEp,
+                nextEp = nextEp,
+                nearEnd = nearEnd,
+                onPrev = onPrev,
+                onNext = onNext,
+            )
+        }
+
+        /*
           CARD DE PAUSA — o mesmo comportamento do site.
 
           Aparece quando o vídeo está pausado, com capa, título e descrição.
@@ -743,7 +859,7 @@ private const val HOLD_TO_ACTIVATE_MS = 1_200L
 private val BRIDGE_JS: String = """
 (function () {
   if (window.__mf) return;
-  var S = { v: null, playing: false, t: 0, d: 0, ready: false, tried: 0, autoTried: 0,
+  var S = { v: null, playing: false, t: 0, d: 0, ready: false, ended: false, tried: 0, autoTried: 0,
             clickX: null, clickY: null, mouseMode: false, fs: false,
             isTop: (window.parent === window) };
   window.__mf = S;
@@ -1025,7 +1141,7 @@ private val BRIDGE_JS: String = """
 
   /** Estado completo — o app lê estes campos, não só o `type`. */
   function snapshot() {
-    return { type: 'state', playing: S.playing, t: S.t, d: S.d, ready: S.ready };
+    return { type: 'state', playing: S.playing, t: S.t, d: S.d, ready: S.ready, ended: S.ended };
   }
 
   function sync() {
@@ -1035,6 +1151,15 @@ private val BRIDGE_JS: String = """
     S.t = v.currentTime || 0;
     S.d = (isFinite(v.duration) ? v.duration : 0);
     S.ready = true;
+    /*
+      FIM REAL DA MÍDIA.
+
+      `v.ended` é o único sinal honesto de "acabou" no modo embed — o `<video>`
+      é de outra origem, mas o evento `ended` chega até nós porque o script é
+      injetado em TODOS os frames. É por ele que o app decide o avanço
+      automático; nunca por "chegou perto do fim".
+    */
+    S.ended = !!v.ended;
   }
 
   /**
@@ -1237,6 +1362,13 @@ internal fun TvEmbedPlayer(
     /** Pede ao pai que recomece a cadeia do topo. */
     onRestartChain: () -> Unit = {},
     onBack: () -> Unit,
+    /** Episódio anterior/próximo na ordem real da temporada (null nas pontas). */
+    prevEp: Pair<Int, Int>? = null,
+    nextEp: Pair<Int, Int>? = null,
+    onPrev: () -> Unit = {},
+    onNext: () -> Unit = {},
+    /** Avanço automático ligado? Desligado quando o usuário trocou à mão. */
+    autoAdvance: Boolean = true,
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -1247,6 +1379,17 @@ internal fun TvEmbedPlayer(
     val positionState = remember { mutableStateOf(0.0) }
     val durationState = remember { mutableStateOf(0.0) }
     var hasVideo by remember { mutableStateOf(false) }
+
+    /**
+     * O vídeo do provedor chegou ao FIM?
+     *
+     * Vem do `v.ended` real do `<video>` (a ponte JS reporta no snapshot). É o
+     * único sinal honesto de "acabou" no modo embed — nunca deduzimos por
+     * "chegou perto do fim".
+     */
+    var endedState by remember { mutableStateOf(false) }
+    /** Garante que o avanço automático dispare UMA vez por episódio. */
+    var autoAdvanced by remember(url) { mutableStateOf(false) }
 
     /*
       Proteção contra a tela de descanso (item 10) — modo EMBED.
@@ -1396,6 +1539,20 @@ internal fun TvEmbedPlayer(
         }
     }
 
+    /*
+      AVANÇO AUTOMÁTICO — modo EMBED.
+
+      Dispara quando o `<video>` do provedor reporta `ended` de verdade. Só uma
+      vez por episódio (`autoAdvanced`) e só se existir próximo na ordem da
+      temporada. No último episódio não há para onde ir: nada acontece.
+    */
+    LaunchedEffect(endedState, autoAdvance, nextEp) {
+        if (endedState && autoAdvance && nextEp != null && !autoAdvanced) {
+            autoAdvanced = true
+            onNext()
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             seek.cancel()
@@ -1538,6 +1695,7 @@ internal fun TvEmbedPlayer(
                                         positionState.value = o.optDouble("t", 0.0)
                                         durationState.value = o.optDouble("d", 0.0)
                                         hasVideo = o.optBoolean("ready", false)
+                                        endedState = o.optBoolean("ended", false)
                                         toggle.onState(p)
                                     }
                                     "novideo" -> hasVideo = false
@@ -1784,6 +1942,27 @@ internal fun TvEmbedPlayer(
                 visible = ui.visible,
             )
         }
+
+        /*
+          BOTÕES DE EPISÓDIO ANTERIOR / PRÓXIMO — modo EMBED.
+
+          Mesma regra do modo direto: aparecem com a barra, desabilitados nas
+          pontas, e o "próximo" ganha destaque nos últimos 15 s. Aqui a duração
+          vem do `<video>` do provedor (a ponte JS reporta `d`), então o cálculo
+          de "quase acabando" é real — não estimado.
+        */
+        if (!isFullscreen && ui.visible && (prevEp != null || nextEp != null)) {
+            val nearEnd = durationState.value > 0 &&
+                durationState.value - positionState.value <= 15 &&
+                durationState.value - positionState.value > 0
+            TvEpisodeButtons(
+                prevEp = prevEp,
+                nextEp = nextEp,
+                nearEnd = nearEnd,
+                onPrev = onPrev,
+                onNext = onNext,
+            )
+        }
     }
 }
 
@@ -1840,6 +2019,100 @@ private fun TvProgressBar(position: Double, duration: Double, visible: Boolean) 
                         .background(MfColors.Red, RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp)),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Botões de EPISÓDIO ANTERIOR / PRÓXIMO desenhados sobre o vídeo.
+ *
+ * Ficam no canto inferior direito, acima da barra de progresso. Não recebem
+ * foco do D-pad (o foco continua no Box do player), então a navegação por
+ * controle não muda: são atalhos de toque, como no site.
+ *
+ * Nas pontas o botão fica esmaecido e inerte — nunca inventamos um episódio.
+ * O "próximo" ganha um anel pulsante nos últimos 15 s (`nearEnd`).
+ */
+@Composable
+private fun TvEpisodeButtons(
+    prevEp: Pair<Int, Int>?,
+    nextEp: Pair<Int, Int>?,
+    nearEnd: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomEnd,
+    ) {
+        Row(
+            Modifier.padding(end = 24.dp, bottom = 40.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TvEpisodeButton(
+                label = "Ep. anterior",
+                sub = prevEp?.let { "T${it.first} E${it.second}" },
+                enabled = prevEp != null,
+                highlight = false,
+                onClick = onPrev,
+            )
+            TvEpisodeButton(
+                label = "Próximo ep.",
+                sub = nextEp?.let { "T${it.first} E${it.second}" },
+                enabled = nextEp != null,
+                highlight = nearEnd && nextEp != null,
+                onClick = onNext,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvEpisodeButton(
+    label: String,
+    sub: String?,
+    enabled: Boolean,
+    highlight: Boolean,
+    onClick: () -> Unit,
+) {
+    val bg = when {
+        !enabled -> Color(0x33FFFFFF)
+        highlight -> Color(0xE6FFFFFF)
+        else -> Color(0x99000000)
+    }
+    val fg = when {
+        !enabled -> Color(0x66FFFFFF)
+        highlight -> Color(0xFF0A0A0E)
+        else -> Color.White
+    }
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .then(
+                if (highlight) {
+                    Modifier.border(2.dp, MfColors.Red, RoundedCornerShape(12.dp))
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = label,
+            color = fg,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        if (sub != null) {
+            Text(
+                text = sub,
+                color = if (highlight) Color(0xCC0A0A0E) else Color(0xB3FFFFFF),
+                fontSize = 12.sp,
+            )
         }
     }
 }

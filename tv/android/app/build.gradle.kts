@@ -33,8 +33,8 @@ android {
           de ~580dp isso passa de 3 para 4 cards por linha. O cabeçalho também
           encolheu (título 20sp, busca 46dp, chips 14/4dp) para a grade subir.
         */
-        versionCode = 12
-        versionName = "1.0.10"
+        versionCode = 13
+        versionName = "1.0.11"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

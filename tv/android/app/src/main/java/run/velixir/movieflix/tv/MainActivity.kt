@@ -230,6 +230,18 @@ fun MovieFlixTvApp(
                             afterLogin = TvRoute.Player(r.title, r.season, r.episode)
                             route = TvRoute.Login
                         },
+                        /*
+                          TROCA DE EPISÓDIO (botões anterior/próximo e avanço
+                          automático).
+
+                          O player só PEDE a troca; quem navega é esta tela, que
+                          já é dona da rota. `replace` não existe aqui — a pilha
+                          é uma variável só, então a troca simplesmente substitui
+                          a rota atual, sem empilhar telas.
+                        */
+                        onEpisodeChange = { s, e ->
+                            route = TvRoute.Player(r.title, s, e)
+                        },
                     )
                 }
             }
