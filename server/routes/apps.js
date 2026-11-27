@@ -107,6 +107,19 @@ const publicRouter = Router()
 publicRouter.get('/', (_req, res) => {
   const apk = fileInfo(ANDROID_APK)
   const tv = fileInfo(tvApkPath())
+  /*
+    A versão da TV vem do MANIFESTO (storage/apps/tv-version.json), que o
+    workflow de build atualiza a partir do próprio APK compilado. Antes ela era
+    um literal aqui e ficava para trás a cada release (o site anunciava 1.0.14
+    enquanto o APK entregue já era 1.0.15). Lendo o manifesto, a área de
+    downloads nunca diverge do arquivo que o atualizador recebe.
+  */
+  let tvManifest = null
+  try {
+    tvManifest = JSON.parse(fs.readFileSync(TV_VERSION_FILE, 'utf8'))
+  } catch {
+    tvManifest = null
+  }
   res.set('Cache-Control', 'no-store')
   res.json({
     android: {
@@ -147,9 +160,9 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.14',
+      version: tvManifest?.version || '1.0.15',
       minAndroid: '8.0',
-      sizeBytes: tv.sizeBytes || 10906425,
+      sizeBytes: tv.sizeBytes || 10972593,
       updatedAt: tv.updatedAt,
       url: '/api/apps/tv/download',
       fallbackUrl: TV_APK_CDN,
