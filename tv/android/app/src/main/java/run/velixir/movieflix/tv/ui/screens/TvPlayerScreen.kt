@@ -621,6 +621,25 @@ private fun TvDirectPlayer(
                             doSeekDown(1, native.repeatCount)
                             true
                         }
+                        /*
+                          EPISÓDIO ANTERIOR / PRÓXIMO PELO CONTROLE.
+
+                          Na TV não existe toque: os botões desenhados na tela
+                          seriam inalcançáveis. Usamos o padrão de players de
+                          TV — CH+ / CH− (e as teclas de mídia Next/Previous
+                          quando o controle as tiver).
+
+                          Não conflita com nada: esquerda/direita continua
+                          sendo seek e OK continua sendo play/pause.
+                        */
+                        Key.ChannelUp, Key.MediaNext -> {
+                            if (native.repeatCount == 0) nextEp?.let { onNext() }
+                            true
+                        }
+                        Key.ChannelDown, Key.MediaPrevious -> {
+                            if (native.repeatCount == 0) prevEp?.let { onPrev() }
+                            true
+                        }
                         // ↑ ↓ não fazem nada: o player é só o vídeo e a barra.
                         // São consumidas para o foco não escapar do player.
                         Key.DirectionUp, Key.DirectionDown -> true
@@ -1592,6 +1611,25 @@ internal fun TvEmbedPlayer(
                             doSeekDown(1, native.repeatCount)
                             true
                         }
+                        /*
+                          EPISÓDIO ANTERIOR / PRÓXIMO PELO CONTROLE.
+
+                          Na TV não existe toque: os botões desenhados na tela
+                          seriam inalcançáveis. Usamos o padrão de players de
+                          TV — CH+ / CH− (e as teclas de mídia Next/Previous
+                          quando o controle as tiver).
+
+                          Não conflita com nada: esquerda/direita continua
+                          sendo seek e OK continua sendo play/pause.
+                        */
+                        Key.ChannelUp, Key.MediaNext -> {
+                            if (native.repeatCount == 0) nextEp?.let { onNext() }
+                            true
+                        }
+                        Key.ChannelDown, Key.MediaPrevious -> {
+                            if (native.repeatCount == 0) prevEp?.let { onPrev() }
+                            true
+                        }
                         // ↑ ↓ não fazem nada: o player é só o vídeo e a barra.
                         // São consumidas para o foco não escapar do player.
                         Key.DirectionUp, Key.DirectionDown -> true
@@ -2052,14 +2090,14 @@ private fun TvEpisodeButtons(
         ) {
             TvEpisodeButton(
                 label = "Ep. anterior",
-                sub = prevEp?.let { "T${it.first} E${it.second}" },
+                sub = prevEp?.let { "T${it.first} E${it.second} · CH−" },
                 enabled = prevEp != null,
                 highlight = false,
                 onClick = onPrev,
             )
             TvEpisodeButton(
                 label = "Próximo ep.",
-                sub = nextEp?.let { "T${it.first} E${it.second}" },
+                sub = nextEp?.let { "T${it.first} E${it.second} · CH+" },
                 enabled = nextEp != null,
                 highlight = nearEnd && nextEp != null,
                 onClick = onNext,
