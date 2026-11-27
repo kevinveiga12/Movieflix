@@ -42,9 +42,20 @@ android {
           verdade (janela de foco própria), o botão "ATUALIZAR AGORA" recebe o
           foco inicial e cada botão tem focusable() explícito. Antes, o D-pad
           continuava preso no conteúdo atrás do véu e o OK não fazia nada.
+
+          1.0.15 — a janela de atualização passa a ter o foco EXCLUSIVO do
+          controle remoto e o conteúdo rola de verdade. O Dialog do Compose não
+          transferia a posse do foco: o D-pad seguia navegando no MovieFlix
+          atrás do véu. Agora a janela é um overlay de tela cheia que pede o
+          foco para si E registra um tratador na raiz do app (UpdateKeyRouter),
+          que consome toda tecla antes de qualquer tela — duas camadas
+          independentes. O cartão é dimensionado pelo tamanho real da TV e o
+          corpo do texto vive num verticalScroll com os botões ancorados no
+          rodapé, então nada mais fica cortado embaixo e dá para descer até
+          "ATUALIZAR AGORA" / "DEPOIS" com as setas.
         */
-        versionCode = 16
-        versionName = "1.0.14"
+        versionCode = 17
+        versionName = "1.0.15"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

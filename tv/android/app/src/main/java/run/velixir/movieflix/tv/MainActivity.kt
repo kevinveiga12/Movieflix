@@ -23,6 +23,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +50,7 @@ import run.velixir.movieflix.tv.ui.screens.TvSidebar
 import run.velixir.movieflix.tv.ui.theme.MfColors
 import run.velixir.movieflix.tv.ui.theme.MovieFlixTheme
 import run.velixir.movieflix.tv.update.UpdateDialog
+import run.velixir.movieflix.tv.update.UpdateKeyRouter
 import run.velixir.movieflix.tv.update.UpdateManager
 
 class MainActivity : ComponentActivity() {
@@ -207,6 +209,19 @@ fun MovieFlixTvApp(
     Box(
         Modifier
             .fillMaxSize()
+            .onPreviewKeyEvent { ev ->
+                /*
+                  A janela de atualização tem prioridade ABSOLUTA.
+
+                  Enquanto ela estiver aberta, `UpdateKeyRouter` tem um tratador
+                  registrado e consome toda tecla aqui, na raiz, antes de
+                  qualquer tela. É o que impede o controle remoto de continuar
+                  mexendo no MovieFlix que está atrás do véu — inclusive quando
+                  o foco do Compose não foi para a janela.
+                */
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                UpdateKeyRouter.dispatch(ev.key)
+            }
             .onKeyEvent { ev ->
                 if (ev.type != KeyEventType.KeyDown || ev.key != Key.Back) return@onKeyEvent false
                 when (val r = route) {

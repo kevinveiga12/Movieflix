@@ -266,7 +266,7 @@ export function PlansPage() {
                   */}
                   {pixEnabled ? (
                     <button
-                      className="btn btn--primary"
+                      className="btn btn--primary btn--plan"
                       onClick={() =>
                         navigate(
                           `/pagamento/pix?plano=${encodeURIComponent(p.code)}&periodo=${encodeURIComponent(period)}`,
@@ -277,7 +277,7 @@ export function PlansPage() {
                     </button>
                   ) : (
                     <a
-                      className="btn btn--primary"
+                      className="btn btn--primary btn--plan"
                       href={
                         chosen?.whatsapp_url ??
                         p.whatsapp_url ??

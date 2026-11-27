@@ -388,6 +388,33 @@ h4 {
   width: 100%;
 }
 
+/*
+  ── CTA do cartão de plano ──────────────────────────────────────────────────
+  O rótulo "Pagar com Pix ou cartão de crédito" é longo e o `.btn` base usa
+  `white-space: nowrap`: dentro de uma coluna de ~260px o texto passava da
+  borda do retângulo vermelho.
+
+  Aqui o botão ocupa a largura inteira do cartão, o texto PODE quebrar em duas
+  linhas e o `line-height` acompanha. Nada de fonte menor para "esconder" o
+  problema: o texto continua no mesmo tamanho legível e cabe porque quebra.
+
+  Cores, gradiente, sombra e o hover continuam vindo de `.btn--primary` — esta
+  classe só mexe em caixa e tipografia.
+*/
+.btn--plan {
+  width: 100%;
+  min-height: 52px;
+  padding: 13px 18px;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
+}
+
 /* ============================ Hero ============================ */
 
 .hero {
