@@ -51,11 +51,12 @@ export function PlansPage() {
   /*
     Cartão habilitado no servidor?
 
-    Depende de DUAS credenciais (MP_ACCESS_TOKEN + MP_PUBLIC_KEY). Quando está
-    ligado, o botão do card passa a ser "Pagar com Pix ou cartão" e a escolha
-    acontece na tela de pagamento — é o fluxo que o proprietário pediu. Quando
-    está desligado, o botão continua "Pagar com Pix" e a tela de pagamento
-    explica o que falta, em vez de esconder a opção sem explicação.
+    Depende de DUAS credenciais (MP_ACCESS_TOKEN + MP_PUBLIC_KEY). O texto do
+    botão é SEMPRE "Pagar com Pix ou cartão de crédito" — é o rótulo que o
+    proprietário pediu, e a escolha entre Pix e cartão acontece na tela de
+    pagamento, que já tem o seletor. Quando o cartão está desligado no servidor,
+    a tela de pagamento explica o que falta, em vez de esconder a opção sem
+    explicação. O estado `cardEnabled` continua sendo lido para esse aviso.
   */
   const [cardEnabled, setCardEnabled] = useState(false)
 
@@ -272,7 +273,7 @@ export function PlansPage() {
                         )
                       }
                     >
-                      {cardEnabled ? 'Pagar com Pix ou cartão' : 'Pagar com Pix'}
+                      Pagar com Pix ou cartão de crédito
                     </button>
                   ) : (
                     <a
