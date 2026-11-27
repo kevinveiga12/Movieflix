@@ -86,6 +86,8 @@ export async function fetchPaymentStatus(paymentId: string): Promise<PixCharge> 
 export async function fetchPixConfig(): Promise<{
   pix_enabled: boolean
   card_enabled?: boolean
+  /** Por que o cartão está desligado: 'missing_access_token' | 'missing_public_key'. */
+  card_reason?: string | null
   public_key?: string | null
   mode: string
 }> {

@@ -147,7 +147,7 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.13',
+      version: '1.0.14',
       minAndroid: '8.0',
       sizeBytes: tv.sizeBytes || 10906425,
       updatedAt: tv.updatedAt,
@@ -158,7 +158,7 @@ publicRouter.get('/', (_req, res) => {
         tela e atualizador integrado. O selo "beta" foi removido — o app não é
         mais apresentado como em desenvolvimento.
       */
-      updateNote: 'pagamento por cartão de crédito e débito, além do Pix',
+      updateNote: 'diálogo de atualização navegável pelo controle remoto',
       platforms: ['Android TV', 'Google TV', 'TV Box'],
     },
   })

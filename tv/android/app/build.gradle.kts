@@ -37,9 +37,14 @@ android {
           ganhou o seletor "Pix / Cartão" e uma tela de digitação própria para
           o D-pad. O cartão é tokenizado direto no Mercado Pago: o app nunca
           envia número, CVV ou validade ao nosso servidor.
+
+          1.0.14 — diálogo de atualização navegável. A janela virou um Dialog de
+          verdade (janela de foco própria), o botão "ATUALIZAR AGORA" recebe o
+          foco inicial e cada botão tem focusable() explícito. Antes, o D-pad
+          continuava preso no conteúdo atrás do véu e o OK não fazia nada.
         */
-        versionCode = 15
-        versionName = "1.0.13"
+        versionCode = 16
+        versionName = "1.0.14"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

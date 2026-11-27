@@ -51,6 +51,7 @@ export function PixPaymentPage() {
   */
   const [method, setMethod] = useState<'pix' | 'card'>('pix')
   const [cardEnabled, setCardEnabled] = useState(false)
+  const [cardReason, setCardReason] = useState<string | null>(null)
   const [publicKey, setPublicKey] = useState<string | null>(null)
   const [cardApproved, setCardApproved] = useState(false)
 
@@ -61,6 +62,7 @@ export function PixPaymentPage() {
       const cfg = await fetchPixConfig()
       if (!active) return
       setCardEnabled(Boolean(cfg.card_enabled))
+      setCardReason(cfg.card_reason ?? null)
       setPublicKey(cfg.public_key ?? null)
     })()
     return () => {
@@ -90,6 +92,19 @@ export function PixPaymentPage() {
       return
     }
 
+    /*
+      Só cria a cobrança Pix quando o Pix é o meio escolhido.
+
+      Antes, a cobrança era criada assim que a tela abria — mesmo que a pessoa
+      fosse pagar com cartão. Isso gerava um Pix pendente inútil no Mercado
+      Pago e no histórico do cliente. Agora a cobrança nasce quando o Pix é
+      realmente escolhido (o padrão), e trocar para cartão não cria nada.
+    */
+    if (method !== 'pix') {
+      setLoading(false)
+      return
+    }
+
     let active = true
     setLoading(true)
     ;(async () => {
@@ -106,7 +121,7 @@ export function PixPaymentPage() {
     return () => {
       active = false
     }
-  }, [user, planCode, period, navigate])
+  }, [user, planCode, period, navigate, method])
 
   /* ── Polling do status ───────────────────────────────────────────────── */
   const poll = useCallback(async () => {
@@ -185,11 +200,13 @@ export function PixPaymentPage() {
       {/*
         Escolha do meio de pagamento.
 
-        Só aparece quando há mais de um meio disponível: com o cartão desligado
-        no servidor, uma aba que leva a "indisponível" é ruído. O Pix continua
-        sendo o padrão.
+        Aparece SEMPRE que o Pix está ativo — é o botão "Pagar com Pix ou
+        cartão" que o proprietário pediu. Quando o cartão está desligado no
+        servidor, a aba continua visível mas explica o motivo exato (falta
+        MP_PUBLIC_KEY ou MP_ACCESS_TOKEN) em vez de sumir sem explicação: uma
+        opção que desaparece é indistinguível de um bug.
       */}
-      {cardEnabled && !approved && (
+      {!approved && (
         <div className="inline" style={{ gap: 8, margin: '14px 0 4px' }}>
           <button
             className={`btn ${method === 'pix' ? 'btn--primary' : 'btn--outline'} btn--sm`}
@@ -205,6 +222,22 @@ export function PixPaymentPage() {
           >
             Cartão de crédito ou débito
           </button>
+        </div>
+      )}
+
+      {/* Cartão desligado: diz o que falta, sem prometer o que não existe. */}
+      {method === 'card' && !cardEnabled && !approved && (
+        <div className="alert alert--info" style={{ marginTop: 20 }}>
+          <InfoIcon size={18} />
+          <span>
+            O pagamento com cartão ainda não está ativo nesta conta.
+            {cardReason === 'missing_public_key'
+              ? ' Falta configurar a chave pública do Mercado Pago (MP_PUBLIC_KEY) no servidor.'
+              : cardReason === 'missing_access_token'
+                ? ' Falta configurar o Access Token do Mercado Pago (MP_ACCESS_TOKEN) no servidor.'
+                : ' Fale com o suporte pelo WhatsApp.'}
+            {' '}Você pode pagar com Pix agora mesmo.
+          </span>
         </div>
       )}
 

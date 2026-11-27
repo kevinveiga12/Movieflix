@@ -48,6 +48,16 @@ export function PlansPage() {
    * pelo caminho que funciona do que mostrar um botão que dá erro.
    */
   const [pixEnabled, setPixEnabled] = useState(false)
+  /*
+    Cartão habilitado no servidor?
+
+    Depende de DUAS credenciais (MP_ACCESS_TOKEN + MP_PUBLIC_KEY). Quando está
+    ligado, o botão do card passa a ser "Pagar com Pix ou cartão" e a escolha
+    acontece na tela de pagamento — é o fluxo que o proprietário pediu. Quando
+    está desligado, o botão continua "Pagar com Pix" e a tela de pagamento
+    explica o que falta, em vez de esconder a opção sem explicação.
+  */
+  const [cardEnabled, setCardEnabled] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -57,7 +67,10 @@ export function PlansPage() {
         if (!active) return
         setPlans(data.plans)
         const cfg = await fetchPixConfig()
-        if (active) setPixEnabled(cfg.pix_enabled)
+        if (active) {
+          setPixEnabled(cfg.pix_enabled)
+          setCardEnabled(Boolean(cfg.card_enabled))
+        }
         if (user) {
           const s = await fetchSubscription()
           if (active) {
@@ -259,7 +272,7 @@ export function PlansPage() {
                         )
                       }
                     >
-                      Pagar com Pix
+                      {cardEnabled ? 'Pagar com Pix ou cartão' : 'Pagar com Pix'}
                     </button>
                   ) : (
                     <a

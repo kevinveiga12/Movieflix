@@ -492,22 +492,39 @@ router.get('/mine', async (req, res, next) => {
   }
 })
 
-/** GET /api/payments/config — o app descobre quais meios de pagamento existem. */
+/**
+ * GET /api/payments/config — o app descobre quais meios de pagamento existem.
+ *
+ * `card_reason` existe para o diagnóstico não depender de adivinhação: quando o
+ * cartão está desligado, a tela consegue dizer POR QUE (falta o token, falta a
+ * chave pública, ou as duas) em vez de simplesmente esconder a opção. É o que
+ * transforma "o cartão não funciona" em "falta configurar MP_PUBLIC_KEY".
+ */
 router.get('/config', (_req, res) => {
+  const hasToken = mpConfigured()
+  const hasPublicKey = Boolean(mpPublicKey())
+  const cardOn = cardConfigured()
+
+  res.set('Cache-Control', 'no-store')
   res.json({
-    pix_enabled: mpConfigured(),
+    pix_enabled: hasToken,
     /*
       Cartão exige DUAS credenciais: o Access Token (cobrar) e a Public Key
       (tokenizar no cliente). Só com o token, o botão de cartão apareceria e
       falharia no primeiro toque — por isso a checagem é conjunta.
     */
-    card_enabled: cardConfigured(),
+    card_enabled: cardOn,
+    card_reason: cardOn
+      ? null
+      : !hasToken
+        ? 'missing_access_token'
+        : 'missing_public_key',
     /*
       A Public Key é PÚBLICA por definição: ela autoriza tokenizar, não cobrar.
       É a única credencial do Mercado Pago que pode sair do servidor, e precisa
       sair — o site e os apps tokenizam o cartão direto no Mercado Pago.
     */
-    public_key: cardConfigured() ? mpPublicKey() : null,
+    public_key: cardOn ? mpPublicKey() : null,
     mode: mpMode(),
     // O Access Token NUNCA sai daqui. Só o modo, para o painel avisar se está em teste.
   })
@@ -583,6 +600,22 @@ adminRouter.get('/health', async (_req, res, next) => {
       },
       webhook_url: 'https://movieflix.velixir.run/api/mercadopago/webhook',
       pix_enabled: mpConfigured(),
+      /*
+        Cartão: o painel precisa mostrar as DUAS credenciais separadamente.
+        "card_enabled: false" sozinho não diz o que colar no painel da Velixir;
+        com `public_key.present` o dono do projeto sabe que falta exatamente
+        MP_PUBLIC_KEY (a chave pública da conta, em Credenciais de produção).
+      */
+      card: {
+        enabled: cardConfigured(),
+        access_token_present: mpConfigured(),
+        public_key_present: Boolean(mpPublicKey()),
+        reason: cardConfigured()
+          ? null
+          : !mpConfigured()
+            ? 'missing_access_token'
+            : 'missing_public_key',
+      },
       mode: mpMode(),
     })
   } catch (e) {
