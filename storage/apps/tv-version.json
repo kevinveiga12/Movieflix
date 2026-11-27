@@ -1,8 +1,8 @@
 {
-  "version": "1.0.13",
-  "versionCode": 15,
+  "version": "1.0.14",
+  "versionCode": 16,
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
-  "sha256": "a01a92e42c6b21daa2411f518dd18b14d3813f147b38f1bf2eb7e1299bee7419",
+  "sha256": "cd1e721325c69ce5fae9e84bc15eceb9c8a6383b5fc69e9e55decaa8e1c2ea51",
   "notes": [
     "Agora com pagamento por cartão de crédito e débito, além do Pix",
     "Escolha entre Pix e cartão na tela de planos, tudo pelo controle remoto",
@@ -16,6 +16,6 @@
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
-  "publishedAt": "2026-11-27T16:50:57Z",
+  "publishedAt": "2026-11-27T18:00:09Z",
   "minSupportedVersionCode": 0
 }
