@@ -174,11 +174,11 @@ const FALLBACK: AppInfo = {
   ios: { available: true, minIos: '16.0', install: 'pwa' },
   tv: {
     available: true,
-    version: '1.0.10',
+    version: '1.0.11',
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',
-    updateNote: 'layout dos cards de Filmes e Séries: agora aparecem inteiros, com capa e nome, ao navegar com o controle remoto',
+    updateNote: 'botões de episódio anterior/próximo no player, avanço automático para o próximo episódio e destaque do "próximo" nos últimos 15 segundos',
     platforms: ['Android TV', 'Google TV', 'TV Box'],
   },
 }

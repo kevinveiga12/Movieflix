@@ -147,7 +147,7 @@ publicRouter.get('/', (_req, res) => {
         Ao gerar um APK novo, atualize aqui, em src/pages/SettingsPages.tsx e o
         versionName em tv/android/app/build.gradle.kts — os três.
       */
-      version: '1.0.10',
+      version: '1.0.11',
       minAndroid: '8.0',
       sizeBytes: tv.sizeBytes || 10906425,
       updatedAt: tv.updatedAt,
@@ -158,7 +158,7 @@ publicRouter.get('/', (_req, res) => {
         tela e atualizador integrado. O selo "beta" foi removido — o app não é
         mais apresentado como em desenvolvimento.
       */
-      updateNote: 'cards menores e mais colunas em Filmes e Séries: capas completas, nomes inteiros e mais títulos visíveis por linha',
+      updateNote: 'botões de episódio anterior/próximo no player, avanço automático para o próximo episódio e destaque do "próximo" nos últimos 15 segundos',
       platforms: ['Android TV', 'Google TV', 'TV Box'],
     },
   })
