@@ -1,8 +1,8 @@
 {
-  "version": "1.0.15",
-  "versionCode": 17,
+  "version": "1.0.16",
+  "versionCode": 18,
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
-  "sha256": "94e0b8c1b05748f10c7bb38aa87130bc02690283103875fb9fd28210dd33153d",
+  "sha256": "1f65b13d00a323b522f3109345d4787ee3a4af83874c48082620adcdb6d6c3dd",
   "notes": [
     "Janela de atualização corrigida: agora o controle remoto controla SÓ a janela, com o MovieFlix de trás bloqueado",
     "A janela de atualização rola com as setas para cima e para baixo: dá para ler tudo e chegar aos botões ATUALIZAR AGORA e DEPOIS",
@@ -19,6 +19,6 @@
     "Sistema integrado de atualizações"
   ],
   "mandatory": false,
-  "publishedAt": "2026-11-27T21:19:13Z",
+  "publishedAt": "2026-11-27T21:59:55Z",
   "minSupportedVersionCode": 0
 }
