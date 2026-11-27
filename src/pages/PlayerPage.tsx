@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom'
 import Hls from 'hls.js'
 import { loadCatalog, getById } from '../lib/catalog'
-import { nextEpisode, formatTime } from '../lib/player'
+import { nextEpisode, prevEpisode, formatTime } from '../lib/player'
 import { authorizePlayback } from '../lib/access'
 import {
   consumeAutoFullscreen,
@@ -685,6 +685,32 @@ export function PlayerPage() {
   }
 
   const next = title && type === 'tv' ? nextEpisode(title, season, episode) : null
+  const prev = title && type === 'tv' ? prevEpisode(title, season, episode) : null
+
+  /**
+   * Vai para um episódio (anterior ou próximo).
+   *
+   * `replace: false` de propósito: o histórico do navegador guarda a troca, e o
+   * botão Voltar devolve o episódio que estava tocando — é o que o cliente
+   * espera depois de pular um episódio sem querer.
+   */
+  function goToEpisode(ep: { season: number; episode: number }) {
+    navigate(`/assistir/${title?.tmdb_id}?type=tv&season=${ep.season}&episode=${ep.episode}`)
+  }
+
+  /**
+   * FALTA POUCO PARA ACABAR?
+   *
+   * O pedido é que os botões de episódio apareçam "com um tempinho de
+   * antecedência antes de o episódio acabar". 15 s é o suficiente para a pessoa
+   * ver o botão, decidir e agir antes do corte — e não tão cedo que atrapalhe.
+   *
+   * Só é calculável no modo DIRETO: no embed o `<video>` é de outra origem e
+   * não expõe `duration`. Ali os botões ficam sempre visíveis na barra, sem
+   * destaque de "quase acabando" — não inventamos um tempo que não sabemos.
+   */
+  const nearEnd = duration > 0 && duration - current <= 15 && duration - current > 0
+
   const pct = duration ? (current / duration) * 100 : 0
   const bufPct = duration ? (buffered / duration) * 100 : 0
 
@@ -1010,6 +1036,45 @@ export function PlayerPage() {
                 <span className="player-time">
                   {formatTime(embedTime)} / --:--
                 </span>
+
+                {/*
+                  EPISÓDIO ANTERIOR / PRÓXIMO — MODO EMBED.
+
+                  Aqui NÃO há "quase acabando": o `<video>` é de outra origem e
+                  não expõe `duration`, então não existe um instante honesto
+                  para calcular os últimos 15 s. Os botões ficam sempre
+                  visíveis na barra, sem destaque. Inventar um tempo seria
+                  mentir para o cliente.
+
+                  Pelo mesmo motivo o AVANÇO AUTOMÁTICO não funciona no embed:
+                  o navegador não nos entrega o evento `ended` de um `<video>`
+                  de outra origem. Ele funciona no modo direto (MP4/HLS), no
+                  app Android e na TV — onde o player é nosso.
+                */}
+                {type === 'tv' && (
+                  <>
+                    <button
+                      className="player-btn player-btn--ep"
+                      onClick={() => prev && goToEpisode(prev)}
+                      disabled={!prev}
+                      aria-label="Episódio anterior"
+                      title={prev ? `T${prev.season} E${prev.episode}` : 'Primeiro episódio'}
+                    >
+                      <SkipBack size={17} />
+                      <span className="player-btn-label">Ep. anterior</span>
+                    </button>
+                    <button
+                      className="player-btn player-btn--ep"
+                      onClick={() => next && goToEpisode(next)}
+                      disabled={!next}
+                      aria-label="Próximo episódio"
+                      title={next ? `T${next.season} E${next.episode}` : 'Último episódio'}
+                    >
+                      <SkipForward size={17} />
+                      <span className="player-btn-label">Próximo ep.</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -1102,6 +1167,39 @@ export function PlayerPage() {
                 >
                   <SkipForward size={19} />
                 </button>
+
+                {/*
+                  EPISÓDIO ANTERIOR / PRÓXIMO.
+
+                  Só em série (`type === 'tv'`). O botão fica DESABILITADO quando
+                  não existe episódio naquela direção — nunca inventamos um
+                  destino. `nearEnd` destaca o "próximo" nos últimos 15 s, que é
+                  o "tempinho de antecedência" pedido.
+                */}
+                {type === 'tv' && (
+                  <>
+                    <button
+                      className="player-btn player-btn--ep"
+                      onClick={() => prev && goToEpisode(prev)}
+                      disabled={!prev}
+                      aria-label="Episódio anterior"
+                      title={prev ? `T${prev.season} E${prev.episode}` : 'Primeiro episódio'}
+                    >
+                      <SkipBack size={17} />
+                      <span className="player-btn-label">Ep. anterior</span>
+                    </button>
+                    <button
+                      className={`player-btn player-btn--ep ${nearEnd ? 'player-btn--next-hint' : ''}`}
+                      onClick={() => next && goToEpisode(next)}
+                      disabled={!next}
+                      aria-label="Próximo episódio"
+                      title={next ? `T${next.season} E${next.episode}` : 'Último episódio'}
+                    >
+                      <SkipForward size={17} />
+                      <span className="player-btn-label">Próximo ep.</span>
+                    </button>
+                  </>
+                )}
 
                 <span className="player-time">
                   {formatTime(current)} / {formatTime(duration)}

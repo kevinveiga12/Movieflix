@@ -129,6 +129,26 @@ export function nextEpisode(
   return { season: s, episode: e }
 }
 
+/**
+ * Episódio ANTERIOR na ordem real da temporada.
+ *
+ * Espelho exato de `nextEpisode`: usa a MESMA lista `episodes_available`, que
+ * já vem ordenada por temporada/episódio. Não inventamos "T1 E0" nem pulamos
+ * para a temporada anterior quando o episódio é o primeiro — nesse caso não há
+ * anterior, e o botão fica desabilitado.
+ */
+export function prevEpisode(
+  t: Title,
+  season: number,
+  episode: number,
+): { season: number; episode: number } | null {
+  const available = t.episodes_available ?? []
+  const idx = available.indexOf(`${season}/${episode}`)
+  if (idx <= 0) return null
+  const [s, e] = available[idx - 1].split('/').map(Number)
+  return { season: s, episode: e }
+}
+
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
   const h = Math.floor(seconds / 3600)

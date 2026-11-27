@@ -1875,6 +1875,62 @@ h4 {
   background: #e8e8ee;
 }
 
+/*
+  BOTÕES DE EPISÓDIO (anterior / próximo).
+
+  `.player-btn` é um círculo de 46px com `place-items: center` — um rótulo de
+  texto dentro dele estouraria a forma. Aqui o botão vira uma pílula: ícone e
+  rótulo lado a lado, altura preservada. O rótulo some em telas estreitas para
+  não empurrar a barra de progresso.
+*/
+.player-btn--ep {
+  width: auto;
+  min-width: 46px;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 23px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.player-btn--ep:disabled {
+  opacity: 0.35;
+  cursor: default;
+  transform: none;
+}
+.player-btn--ep:disabled:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: none;
+}
+.player-btn-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/*
+  DESTAQUE DO "PRÓXIMO" NOS ÚLTIMOS 15 SEGUNDOS.
+
+  É o "tempinho de antecedência" pedido: o botão pulsa suavemente para a
+  pessoa notar que o episódio está acabando e que há para onde ir. Só animação
+  de opacidade — nada que capture o toque ou cubra o vídeo.
+*/
+.player-btn--next-hint {
+  background: rgba(255, 255, 255, 0.26);
+  animation: player-next-pulse 1.6s ease-in-out infinite;
+}
+@keyframes player-next-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); }
+}
+@media (max-width: 560px) {
+  .player-btn-label { display: none; }
+  .player-btn--ep { padding: 0; width: 46px; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-btn--next-hint { animation: none; }
+}
+
 .player-time {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
