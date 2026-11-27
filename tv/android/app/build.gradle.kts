@@ -32,9 +32,14 @@ android {
           1.0.10 — 4 colunas. A célula caiu de 150dp para 130dp: com a área útil
           de ~580dp isso passa de 3 para 4 cards por linha. O cabeçalho também
           encolheu (título 20sp, busca 46dp, chips 14/4dp) para a grade subir.
+
+          1.0.13 — pagamento com cartão de crédito e débito. A tela de planos
+          ganhou o seletor "Pix / Cartão" e uma tela de digitação própria para
+          o D-pad. O cartão é tokenizado direto no Mercado Pago: o app nunca
+          envia número, CVV ou validade ao nosso servidor.
         */
-        versionCode = 14
-        versionName = "1.0.12"
+        versionCode = 15
+        versionName = "1.0.13"
 
         val api = (project.findProperty("movieflixApi") as String?) ?: "https://movieflix.velixir.run"
         buildConfigField("String", "API_BASE_URL", "\"$api\"")

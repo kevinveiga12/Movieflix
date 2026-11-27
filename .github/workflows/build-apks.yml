@@ -104,6 +104,15 @@ jobs:
       - name: Testes da integração Pix
         run: node scripts/test-pix.mjs
 
+      # ── Testes do pagamento com cartão (Mercado Pago) ──────────────────────
+      #
+      # O teste que mais importa: intercepta o fetch e confere que o corpo
+      # enviado ao Mercado Pago NÃO contém número, CVV nem validade. O pedido
+      # proíbe que dado de cartão passe pelo backend; se alguém adicionar
+      # `card_number` à função, este passo falha antes de chegar em produção.
+      - name: Testes do pagamento com cartão
+        run: node scripts/test-card.mjs
+
       # ── Testes da rota de capas (histórico/favoritos da TV) ────────────────
       #
       # Sobe o Express e confere que `/api/catalog/posters` resolve capa de

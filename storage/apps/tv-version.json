@@ -4,6 +4,9 @@
   "apkUrl": "https://movieflix.velixir.run/api/apps/tv/download",
   "sha256": "ec4f88bfff4cf377f16d8d4def89c41d2ce90a0093e565b0418c275b33ce4ae2",
   "notes": [
+    "Agora com pagamento por cartão de crédito e débito, além do Pix",
+    "Escolha entre Pix e cartão na tela de planos, tudo pelo controle remoto",
+    "Digitação dos dados do cartão com teclado na tela, com foco visível",
     "Cards menores e mais colunas nas páginas de Filmes e Séries: 4 cards por linha em vez de 3, com capa completa e nome inteiro",
     "Cabeçalho mais compacto (título, busca e chips): a grade de cards sobe e mostra mais títulos sem rolar",
     "Melhoria do layout dos cards das páginas de Filmes e Séries: os cards agora aparecem inteiros, com capa e nome, ao navegar com o controle remoto",

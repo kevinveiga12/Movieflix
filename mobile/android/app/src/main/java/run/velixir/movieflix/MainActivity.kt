@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import run.velixir.movieflix.data.Title
 import run.velixir.movieflix.ui.screens.AccountScreen
 import run.velixir.movieflix.ui.screens.AdminScreen
+import run.velixir.movieflix.ui.screens.CardScreen
 import run.velixir.movieflix.ui.screens.CatalogScreen
 import run.velixir.movieflix.ui.screens.DetailScreen
 import run.velixir.movieflix.ui.screens.EmbedPlayer
@@ -98,6 +99,18 @@ sealed interface Route {
     data object Settings : Route
     data object Plans : Route
     data object Pix : Route
+
+    /**
+     * Pagamento com cartão. Carrega os dados do pedido porque a tela precisa
+     * mostrar o que está sendo cobrado antes de o cliente digitar o cartão.
+     */
+    data class Card(
+        val planCode: String,
+        val period: String,
+        val planName: String,
+        val periodLabel: String,
+        val amountLabel: String,
+    ) : Route
     data object Admin : Route
     data object Login : Route
     data object Signup : Route
@@ -191,8 +204,23 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) 
                 )
                 Route.Profiles -> ProfilesScreen(vm) { route = Route.Account }
                 Route.Settings -> SettingsScreen(vm) { route = Route.Account }
-                Route.Plans -> PlansScreen(vm) { route = Route.Pix }
+                Route.Plans -> PlansScreen(
+                    vm,
+                    onOpenPix = { route = Route.Pix },
+                    onOpenCard = { pc, pd, pn, pl, am ->
+                        route = Route.Card(pc, pd, pn, pl, am)
+                    },
+                )
                 Route.Pix -> PixScreen(vm) { route = Route.Plans }
+                is Route.Card -> CardScreen(
+                    vm = vm,
+                    planCode = r.planCode,
+                    period = r.period,
+                    planName = r.planName,
+                    periodLabel = r.periodLabel,
+                    amountLabel = r.amountLabel,
+                    onBack = { route = Route.Plans },
+                )
                 Route.Admin -> AdminScreen(vm) { route = Route.Account }
                 Route.Login -> LoginScreen(
                     vm,

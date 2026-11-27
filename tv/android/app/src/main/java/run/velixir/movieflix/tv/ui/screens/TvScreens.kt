@@ -684,13 +684,24 @@ fun TvHistoryScreen(vm: TvViewModel, onOpen: (Title) -> Unit) {
  * `server/routes/plans.js`. O app não remonta a mensagem para não divergir.
  */
 @Composable
-fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
+fun TvPlansScreen(
+    vm: TvViewModel,
+    onOpenPix: () -> Unit = {},
+    onOpenCard: (planCode: String, period: String, planName: String, periodLabel: String, amountLabel: String) -> Unit = { _, _, _, _, _ -> },
+) {
     val s by vm.state.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(Unit) { vm.loadPlans() }
 
     // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
     var period by remember { mutableStateOf("1m") }
+
+    /*
+      Meio de pagamento. Só aparece quando o CARTÃO está disponível: com apenas
+      Pix, um seletor de uma opção só ocupa espaço e confunde o D-pad. O padrão
+      é Pix porque não exige digitar nada.
+    */
+    var method by remember { mutableStateOf("pix") }
 
     // QR Code de contratação. Na TV o controle remoto não digita, então em vez
     // de abrir o WhatsApp direto mostramos o QR para o cliente ler com o
@@ -706,7 +717,8 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
     Column(Modifier.fillMaxSize()) {
         TvPageTitle("Planos")
         Text(
-            "Escolha o plano e fale com a gente pelo WhatsApp.",
+            if (s.cardEnabled) "Escolha o plano e pague com Pix ou cartão."
+            else "Escolha o plano e fale com a gente pelo WhatsApp.",
             color = MfColors.TextMuted,
             fontFamily = MfSans,
             fontSize = 14.sp,
@@ -716,6 +728,54 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
         if (s.plans.isEmpty()) {
             TvEmpty("Carregando planos…", "💳")
             return@Column
+        }
+
+        /*
+          Meio de pagamento — só quando o cartão está habilitado no servidor.
+          Mesmo padrão visual dos chips de período: o foco acende a borda
+          vermelha brilhante, o selecionado fica vermelho cheio.
+        */
+        if (s.cardEnabled && s.pixEnabled) {
+            Row(
+                modifier = Modifier.padding(start = 48.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Pagar com:",
+                    color = MfColors.TextDim,
+                    fontFamily = MfSans,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(end = 4.dp),
+                )
+                listOf("pix" to "Pix", "card" to "Cartão de crédito ou débito").forEach { (code, label) ->
+                    var f by remember { mutableStateOf(false) }
+                    val on = method == code
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (on) MfColors.Red else MfColors.BgCard)
+                            .then(
+                                when {
+                                    f -> Modifier.border(3.dp, MfColors.RedBright, RoundedCornerShape(8.dp))
+                                    !on -> Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(8.dp))
+                                    else -> Modifier
+                                },
+                            )
+                            .onFocusChanged { f = it.isFocused }
+                            .clickable { method = code }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            label,
+                            color = if (on || f) Color.White else MfColors.TextSoft,
+                            fontFamily = MfSans,
+                            fontSize = 14.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
         }
 
         // Seletor de período — .btn--sm do site, navegável pelo D-pad.
@@ -851,6 +911,9 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
                     // existindo para suporte.
                     val waUrl = chosen?.whatsappUrl.orEmpty()
                     val pixOn = s.pixEnabled
+                    // Cartão só vale se o servidor tiver Access Token + Public Key.
+                    val cardOn = s.cardEnabled && !s.cardPublicKey.isNullOrBlank()
+                    val payOn = if (method == "card") cardOn else pixOn
                     var btnFocused by remember { mutableStateOf(false) }
                     Box(
                         modifier = Modifier
@@ -858,7 +921,7 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
                             .clip(RoundedCornerShape(10.dp))
                             .background(
                                 when {
-                                    !pixOn && waUrl.isBlank() -> MfColors.BgHover
+                                    !payOn && waUrl.isBlank() -> MfColors.BgHover
                                     btnFocused -> MfColors.RedBright
                                     else -> MfColors.Red
                                 },
@@ -869,31 +932,54 @@ fun TvPlansScreen(vm: TvViewModel, onOpenPix: () -> Unit = {}) {
                                 } else Modifier,
                             )
                             .onFocusChanged { btnFocused = it.isFocused }
-                            .clickable(enabled = pixOn || waUrl.isNotBlank()) {
-                                if (pixOn) {
-                                    // O CPF da cobrança é o fixo do dono da conta,
-                                    // preenchido no servidor. O cliente não digita nada.
-                                    vm.createPix(plan.code, chosen?.code ?: period)
-                                    onOpenPix()
-                                } else {
-                                    // Na TV mostramos o QR Code; o celular lê e
-                                    // abre o WhatsApp já com a mensagem.
-                                    qr = QrTarget(
-                                        planCode = plan.code,
-                                        planName = plan.name,
-                                        periodCode = chosen?.code ?: period,
-                                        periodLabel = chosen?.label ?: "",
-                                        priceLabel = chosen?.priceLabel ?: plan.priceLabel,
-                                        waUrl = waUrl,
-                                    )
+                            .clickable(enabled = payOn || waUrl.isNotBlank()) {
+                                when {
+                                    method == "card" && cardOn -> {
+                                        /*
+                                          Cartão: leva à tela de digitação. Nenhum
+                                          dado é coletado aqui — a tela é que
+                                          tokeniza direto no Mercado Pago.
+                                        */
+                                        onOpenCard(
+                                            plan.code,
+                                            chosen?.code ?: period,
+                                            plan.name,
+                                            chosen?.label ?: "",
+                                            chosen?.priceLabel ?: plan.priceLabel,
+                                        )
+                                    }
+
+                                    pixOn -> {
+                                        // O CPF da cobrança é o fixo do dono da
+                                        // conta, preenchido no servidor.
+                                        vm.createPix(plan.code, chosen?.code ?: period)
+                                        onOpenPix()
+                                    }
+
+                                    else -> {
+                                        // Na TV mostramos o QR Code; o celular
+                                        // lê e abre o WhatsApp já com a mensagem.
+                                        qr = QrTarget(
+                                            planCode = plan.code,
+                                            planName = plan.name,
+                                            periodCode = chosen?.code ?: period,
+                                            periodLabel = chosen?.label ?: "",
+                                            priceLabel = chosen?.priceLabel ?: plan.priceLabel,
+                                            waUrl = waUrl,
+                                        )
+                                    }
                                 }
                             }
                             .padding(vertical = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            if (pixOn) "Pagar com Pix" else "Assinar pelo WhatsApp",
-                            color = if (!pixOn && waUrl.isBlank()) MfColors.TextDim else Color.White,
+                            when {
+                                method == "card" && cardOn -> "Pagar com cartão"
+                                pixOn -> "Pagar com Pix"
+                                else -> "Assinar pelo WhatsApp"
+                            },
+                            color = if (!payOn && waUrl.isBlank()) MfColors.TextDim else Color.White,
                             fontFamily = MfSans,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,

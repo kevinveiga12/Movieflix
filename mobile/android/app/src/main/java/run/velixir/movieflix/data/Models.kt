@@ -198,7 +198,42 @@ data class PixPeriodRef(val code: String = "", val label: String = "")
 @Serializable
 data class PixConfig(
     @SerialName("pix_enabled") val pixEnabled: Boolean = false,
+    @SerialName("card_enabled") val cardEnabled: Boolean = false,
+    @SerialName("public_key") val publicKey: String? = null,
     val mode: String = "unconfigured",
+)
+
+/**
+ * Resultado da tokenização do cartão no Mercado Pago.
+ *
+ * `token` é o único campo que segue para o nosso servidor.
+ */
+data class CardTokenResult(
+    val token: String,
+    val paymentMethodId: String?,
+    val issuerId: String?,
+)
+
+/**
+ * Resultado de POST /api/payments/card.
+ *
+ * Não há campo de cartão: o servidor nunca recebe número, CVV ou validade.
+ */
+@Serializable
+data class CardCharge(
+    @SerialName("payment_id") val paymentId: String = "",
+    val status: String = "",
+    @SerialName("status_detail") val statusDetail: String? = null,
+    @SerialName("amount_cents") val amountCents: Int = 0,
+    @SerialName("amount_label") val amountLabel: String = "",
+    val plan: PixPlanRef = PixPlanRef(),
+    val period: PixPeriodRef = PixPeriodRef(),
+    val approved: Boolean = false,
+    val activated: Boolean = false,
+    @SerialName("plan_expires_at") val planExpiresAt: String? = null,
+    @SerialName("card_last4") val cardLast4: String? = null,
+    @SerialName("card_brand") val cardBrand: String? = null,
+    val message: String? = null,
 )
 
 /**

@@ -130,6 +130,80 @@ export async function createPixPayment({
   })
 }
 
+/**
+ * Chave PÚBLICA do Mercado Pago.
+ *
+ * Diferente do Access Token, esta chave é feita para ir ao cliente: é ela que
+ * autoriza a tokenização do cartão no navegador/app. Ela NÃO permite cobrar,
+ * consultar pagamentos nem ler dados da conta — só criar um token de cartão.
+ *
+ * Sem ela, o pagamento por cartão fica desligado: não há como tokenizar, e
+ * mandar o número do cartão para o nosso servidor é exatamente o que o pedido
+ * proíbe.
+ */
+export function mpPublicKey() {
+  return process.env.MP_PUBLIC_KEY ?? ''
+}
+
+/** O pagamento por cartão está disponível? Exige token E chave pública. */
+export function cardConfigured() {
+  return Boolean(process.env.MP_ACCESS_TOKEN && process.env.MP_PUBLIC_KEY)
+}
+
+/**
+ * Cria um pagamento com CARTÃO a partir de um token.
+ *
+ * O QUE ESTE SERVIDOR NUNCA VÊ
+ * Número do cartão, CVV, validade e nome do titular NÃO passam por aqui. O
+ * cliente tokeniza direto no Mercado Pago (SDK JS no site, `/v1/card_tokens`
+ * com a chave pública no app) e envia apenas o `token` — um identificador de
+ * uso único, válido por poucos minutos, que não permite reconstruir o cartão.
+ *
+ * Se algum dia alguém adicionar `card_number` a este corpo, o Mercado Pago
+ * recusa a requisição: o endpoint de pagamento com token não aceita PAN.
+ *
+ * `installments` é limitado a 1 de propósito: o MovieFlix vende assinatura
+ * pré-paga, não parcelamento. Parcelar exigiria juros e mudaria o valor
+ * cobrado — o que o pedido proíbe.
+ */
+export async function createCardPayment({
+  token: cardToken,
+  paymentMethodId,
+  issuerId,
+  amountCents,
+  description,
+  email,
+  firstName,
+  lastName,
+  identification,
+  externalReference,
+  idempotencyKey,
+}) {
+  const body = {
+    transaction_amount: Number((amountCents / 100).toFixed(2)),
+    token: cardToken,
+    description,
+    installments: 1,
+    payment_method_id: paymentMethodId,
+    external_reference: externalReference,
+    ...(issuerId ? { issuer_id: String(issuerId) } : {}),
+    payer: {
+      email,
+      ...(firstName ? { first_name: firstName } : {}),
+      ...(lastName ? { last_name: lastName } : {}),
+      ...(identification?.number
+        ? { identification: { type: identification.type ?? 'CPF', number: identification.number } }
+        : {}),
+    },
+  }
+
+  return mpFetch('/v1/payments', {
+    method: 'POST',
+    headers: idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {},
+    body: JSON.stringify(body),
+  })
+}
+
 /** Consulta um pagamento direto na API oficial (fonte da verdade). */
 export async function getPayment(id) {
   return mpFetch(`/v1/payments/${encodeURIComponent(String(id))}`)

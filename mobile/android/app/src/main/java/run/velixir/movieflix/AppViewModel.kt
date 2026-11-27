@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import run.velixir.movieflix.data.AdminStats
 import run.velixir.movieflix.data.ApiException
+import run.velixir.movieflix.data.CardCharge
 import run.velixir.movieflix.data.FavoriteRow
 import run.velixir.movieflix.data.HistoryRow
 import run.velixir.movieflix.data.MovieFlixApi
@@ -32,6 +33,11 @@ data class UiState(
     val history: List<HistoryRow> = emptyList(),
     val plans: List<Plan> = emptyList(),
     val pixEnabled: Boolean = false,
+    val cardEnabled: Boolean = false,
+    val cardPublicKey: String? = null,
+    val cardCharge: CardCharge? = null,
+    val cardLoading: Boolean = false,
+    val cardError: String? = null,
     val pixCharge: PixCharge? = null,
     val pixLoading: Boolean = false,
     val pixError: String? = null,
@@ -255,9 +261,76 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(
                     plans = p?.plans ?: emptyList(),
                     pixEnabled = cfg?.pixEnabled == true,
+                    cardEnabled = cfg?.cardEnabled == true,
+                    cardPublicKey = cfg?.publicKey,
                 )
             }
         }
+    }
+
+    /**
+     * Paga com cartão — tokeniza no Mercado Pago e cobra pelo token.
+     *
+     * O número e o CVV saem daqui direto para `api.mercadopago.com`; não sobem
+     * para o `AppUiState` nem para disco.
+     */
+    fun payWithCard(
+        planCode: String,
+        period: String,
+        number: String,
+        month: Int,
+        year: Int,
+        cvv: String,
+        holder: String,
+    ) {
+        val pk = _state.value.cardPublicKey
+        if (pk.isNullOrBlank()) {
+            update { it.copy(cardError = "Pagamento com cartão indisponível no momento.") }
+            return
+        }
+        update { it.copy(cardLoading = true, cardError = null, cardCharge = null) }
+
+        viewModelScope.launch {
+            try {
+                val tok = api.tokenizeCard(
+                    publicKey = pk,
+                    cardNumber = number.replace(" ", ""),
+                    month = month,
+                    year = year,
+                    cvv = cvv,
+                    holderName = holder,
+                )
+                val pm = tok.paymentMethodId
+                    ?: throw IllegalStateException("Bandeira do cartão não identificada.")
+
+                val charge = api.createCardCharge(
+                    planCode = planCode,
+                    period = period,
+                    token = tok.token,
+                    paymentMethodId = pm,
+                    issuerId = tok.issuerId,
+                )
+                update { it.copy(cardCharge = charge, cardLoading = false) }
+                if (charge.approved) loadSubscription()
+            } catch (e: Exception) {
+                update { it.copy(cardLoading = false, cardError = friendlyCard(e)) }
+            }
+        }
+    }
+
+    fun clearCard() =
+        update { it.copy(cardCharge = null, cardError = null, cardLoading = false) }
+
+    /** Traduz o erro técnico em uma frase útil para o cliente. */
+    private fun friendlyCard(e: Exception): String = when {
+        e is ApiException && e.body.contains("card_token_failed") ->
+            "Não foi possível validar o cartão. Confira número, validade e CVV."
+        e is ApiException && e.body.contains("card_unconfigured") ->
+            "Pagamento com cartão indisponível no momento. Use o Pix."
+        e is ApiException && e.status == 502 ->
+            "O banco não autorizou o pagamento. Tente outro cartão ou use o Pix."
+        e.message?.contains("Bandeira") == true -> e.message!!
+        else -> "Não foi possível processar o cartão. Tente novamente."
     }
 
     /**

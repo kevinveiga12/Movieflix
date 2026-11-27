@@ -244,6 +244,87 @@ class MovieFlixApi(
     }
 
     /**
+     * Tokeniza o cartão DIRETO no Mercado Pago.
+     *
+     * ── O QUE NÃO PASSA POR AQUI ─────────────────────────────────────────────
+     * O número do cartão, o CVV, a validade e o nome do titular vão desta tela
+     * para `api.mercadopago.com` — nunca para o backend do MovieFlix. Esta
+     * função monta o corpo e o envia ao Mercado Pago com a chave PÚBLICA; o que
+     * volta é um `token` de uso único.
+     *
+     * O token resultante existe só na memória (estado do ViewModel) até ser
+     * usado em [createCardCharge]. Não é gravado no SessionStore nem em disco.
+     *
+     * ── POR QUE NÃO USAMOS O SDK ANDROID DO MERCADO PAGO ─────────────────────
+     * O SDK oficial de cartão é para Android de celular e traz a UI dele. Numa
+     * TV o cliente digita com o D-pad, então a UI é nossa. O endpoint de
+     * tokenização (`POST /v1/card_tokens?public_key=...`) é público e estável —
+     * é o mesmo que o SDK chama por baixo.
+     */
+    suspend fun tokenizeCard(
+        publicKey: String,
+        cardNumber: String,
+        month: Int,
+        year: Int,
+        cvv: String,
+        holderName: String,
+    ): CardTokenResult = withContext(Dispatchers.IO) {
+        val body = buildString {
+            append("{")
+            append("\"card_number\":").append(str(cardNumber))
+            append(",\"expiration_month\":").append(month)
+            append(",\"expiration_year\":").append(year)
+            append(",\"security_code\":").append(str(cvv))
+            append(",\"cardholder\":{\"name\":").append(str(holderName)).append("}")
+            append("}")
+        }
+
+        val req = Request.Builder()
+            .url("https://api.mercadopago.com/v1/card_tokens?public_key=${enc(publicKey)}")
+            .post(body.toRequestBody(jsonMedia))
+            .build()
+
+        client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                // Mensagem técnica do provedor não ajuda na TV; a tela traduz.
+                throw ApiException(resp.code, "card_token_failed")
+            }
+            val obj = json.parseToJsonElement(text).jsonObject
+            CardTokenResult(
+                token = obj["id"]?.jsonPrimitive?.contentOrNull ?: throw ApiException(400, "no_token"),
+                paymentMethodId = obj["payment_method"]
+                    ?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull,
+                issuerId = obj["issuer"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull,
+                last4 = obj["last_four_digits"]?.jsonPrimitive?.contentOrNull,
+            )
+        }
+    }
+
+    /**
+     * Cobra o cartão pelo token. O corpo tem só o token e a bandeira — nenhum
+     * dado de cartão. O valor é resolvido no servidor.
+     */
+    suspend fun createCardCharge(
+        planCode: String,
+        period: String,
+        token: String,
+        paymentMethodId: String,
+        issuerId: String?,
+    ): CardCharge {
+        val body = buildString {
+            append("{")
+            append("\"plan_code\":").append(str(planCode))
+            append(",\"period\":").append(str(period))
+            append(",\"token\":").append(str(token))
+            append(",\"payment_method_id\":").append(str(paymentMethodId))
+            if (!issuerId.isNullOrBlank()) append(",\"issuer_id\":").append(str(issuerId))
+            append("}")
+        }
+        return json.decodeFromString(post("/api/payments/card", body, auth = true))
+    }
+
+    /**
      * Status do pagamento — a TV consulta em intervalos até aprovar.
      *
      * No servidor esta rota também reconcilia: se o webhook se perdeu, é esta
@@ -436,3 +517,16 @@ class MovieFlixApi(
 
 class ApiException(val status: Int, val body: String) :
     Exception("HTTP $status: ${body.take(200)}")
+
+/**
+ * Resultado da tokenização do cartão no Mercado Pago.
+ *
+ * `token` é o único dado que segue para o nosso servidor. `last4` serve só
+ * para a tela confirmar qual cartão foi usado — não é o número.
+ */
+data class CardTokenResult(
+    val token: String,
+    val paymentMethodId: String?,
+    val issuerId: String?,
+    val last4: String?,
+)

@@ -780,13 +780,23 @@ private fun openExternal(context: android.content.Context, url: String) {
 
 /** Planos — a rota /planos do site, com os descontos de 3 meses e 1 ano. */
 @Composable
-fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
+fun PlansScreen(
+    vm: AppViewModel,
+    onOpenPix: () -> Unit = {},
+    onOpenCard: (planCode: String, period: String, planName: String, periodLabel: String, amountLabel: String) -> Unit = { _, _, _, _, _ -> },
+) {
     val s by vm.state.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(Unit) { vm.loadPlans() }
 
     // Período escolhido — o mesmo seletor "1 mês / 3 meses / 1 ano" do site.
     var period by remember { mutableStateOf("1m") }
+
+    /*
+      Meio de pagamento. Só aparece quando o CARTÃO está disponível: com apenas
+      Pix, um seletor de uma opção só ocupa espaço. O padrão é Pix.
+    */
+    var method by remember { mutableStateOf("pix") }
 
     Column(
         modifier = Modifier
@@ -805,7 +815,8 @@ fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "Escolha o plano e fale com a gente pelo WhatsApp.",
+            if (s.cardEnabled) "Escolha o plano e pague com Pix ou cartão."
+            else "Escolha o plano e fale com a gente pelo WhatsApp.",
             color = MfColors.TextMuted,
             fontFamily = MfSans,
             fontSize = 12.sp,
@@ -819,6 +830,47 @@ fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
                 fontFamily = MfSans,
                 fontSize = 13.sp,
             )
+        }
+
+        /*
+          Meio de pagamento — só quando o cartão está habilitado no servidor.
+          Mesmo padrão visual dos chips de período.
+        */
+        if (s.plans.isNotEmpty() && s.cardEnabled && s.pixEnabled) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Pagar com:",
+                    color = MfColors.TextDim,
+                    fontFamily = MfSans,
+                    fontSize = 12.sp,
+                )
+                listOf("pix" to "Pix", "card" to "Cartão").forEach { (code, label) ->
+                    val on = method == code
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (on) MfColors.Red else MfColors.BgCard)
+                            .then(
+                                if (!on) Modifier.border(1.dp, MfColors.Border, RoundedCornerShape(8.dp))
+                                else Modifier,
+                            )
+                            .clickable { method = code }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            label,
+                            color = if (on) Color.White else MfColors.TextSoft,
+                            fontFamily = MfSans,
+                            fontSize = 12.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
         }
 
         // Seletor de período — .btn--sm do site.
@@ -945,29 +997,53 @@ fun PlansScreen(vm: AppViewModel, onOpenPix: () -> Unit = {}) {
                     // continua existindo para suporte.
                     val waUrl = chosen?.whatsappUrl.orEmpty()
                     val pixOn = s.pixEnabled
+                    // Cartão só vale se o servidor tiver Access Token + Public Key.
+                    val cardOn = s.cardEnabled && !s.cardPublicKey.isNullOrBlank()
+                    val payOn = if (method == "card") cardOn else pixOn
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(
-                                if (!pixOn && waUrl.isBlank()) MfColors.BgHover else MfColors.Red,
+                                if (!payOn && waUrl.isBlank()) MfColors.BgHover else MfColors.Red,
                             )
-                            .clickable(enabled = pixOn || waUrl.isNotBlank()) {
-                                if (pixOn) {
-                                    // O CPF da cobrança é o fixo do dono da conta,
-                                    // preenchido no servidor. O cliente não digita nada.
-                                    vm.createPix(p.code, period)
-                                    onOpenPix()
-                                } else {
-                                    openExternal(context, waUrl)
+                            .clickable(enabled = payOn || waUrl.isNotBlank()) {
+                                when {
+                                    method == "card" && cardOn -> {
+                                        /*
+                                          Cartão: leva à tela de digitação. Nenhum
+                                          dado é coletado aqui — a tela tokeniza
+                                          direto no Mercado Pago.
+                                        */
+                                        onOpenCard(
+                                            p.code,
+                                            chosen?.code ?: period,
+                                            p.name,
+                                            chosen?.label ?: "",
+                                            chosen?.priceLabel ?: p.priceLabel,
+                                        )
+                                    }
+
+                                    pixOn -> {
+                                        // O CPF da cobrança é o fixo do dono da conta,
+                                        // preenchido no servidor. O cliente não digita nada.
+                                        vm.createPix(p.code, chosen?.code ?: period)
+                                        onOpenPix()
+                                    }
+
+                                    else -> openExternal(context, waUrl)
                                 }
                             }
                             .padding(vertical = 13.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            if (pixOn) "Pagar com Pix" else "Assinar pelo WhatsApp",
-                            color = if (!pixOn && waUrl.isBlank()) MfColors.TextDim else Color.White,
+                            when {
+                                method == "card" && cardOn -> "Pagar com cartão"
+                                pixOn -> "Pagar com Pix"
+                                else -> "Assinar pelo WhatsApp"
+                            },
+                            color = if (!payOn && waUrl.isBlank()) MfColors.TextDim else Color.White,
                             fontFamily = MfSans,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,

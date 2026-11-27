@@ -38,6 +38,7 @@ import run.velixir.movieflix.tv.ui.screens.TvGenresScreen
 import run.velixir.movieflix.tv.ui.screens.TvHistoryScreen
 import run.velixir.movieflix.tv.ui.screens.TvHomeScreen
 import run.velixir.movieflix.tv.ui.screens.TvLoginScreen
+import run.velixir.movieflix.tv.ui.screens.TvCardScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlansScreen
 import run.velixir.movieflix.tv.ui.screens.TvPixScreen
 import run.velixir.movieflix.tv.ui.screens.TvPlayerScreen
@@ -87,6 +88,22 @@ sealed interface TvRoute {
     data object History : TvRoute
     data object Plans : TvRoute
     data object Pix : TvRoute
+
+    /**
+     * Pagamento com cartão.
+     *
+     * Carrega os dados do pedido porque a tela de cartão precisa mostrar o que
+     * está sendo cobrado antes de o cliente digitar 16 dígitos no D-pad — e
+     * porque o `cardCharge` do ViewModel pode estar vazio (a cobrança ainda não
+     * aconteceu).
+     */
+    data class Card(
+        val planCode: String,
+        val period: String,
+        val planName: String,
+        val periodLabel: String,
+        val amountLabel: String,
+    ) : TvRoute
     data object Account : TvRoute
     data object Profiles : TvRoute
     data object Settings : TvRoute
@@ -302,8 +319,23 @@ fun MovieFlixTvApp(
                         TvRoute.Search -> TvSearchScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.Favorites -> TvFavoritesScreen(vm) { route = TvRoute.Detail(it) }
                         TvRoute.History -> TvHistoryScreen(vm) { route = TvRoute.Detail(it) }
-                        TvRoute.Plans -> TvPlansScreen(vm) { route = TvRoute.Pix }
+                        TvRoute.Plans -> TvPlansScreen(
+                            vm,
+                            onOpenPix = { route = TvRoute.Pix },
+                            onOpenCard = { pc, pd, pn, pl, am ->
+                                route = TvRoute.Card(pc, pd, pn, pl, am)
+                            },
+                        )
                         TvRoute.Pix -> TvPixScreen(vm) { route = TvRoute.Plans }
+                        is TvRoute.Card -> TvCardScreen(
+                            vm = vm,
+                            planCode = r.planCode,
+                            period = r.period,
+                            planName = r.planName,
+                            periodLabel = r.periodLabel,
+                            amountLabel = r.amountLabel,
+                            onBack = { route = TvRoute.Plans },
+                        )
                         TvRoute.Account -> TvAccountScreen(vm) { route = TvRoute.Login }
                         TvRoute.Profiles -> TvProfilesScreen(vm) { route = TvRoute.Login }
                         TvRoute.Settings -> TvSettingsScreen(vm)

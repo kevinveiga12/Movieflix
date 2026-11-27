@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { createPixCharge, fetchPaymentStatus, whatsappUrl } from '../lib/access'
+import { createPixCharge, fetchPaymentStatus, fetchPixConfig, whatsappUrl } from '../lib/access'
 import type { PixCharge } from '../lib/types'
+import { CardPaymentForm } from '../components/CardPaymentForm'
 import { CheckIcon, InfoIcon, ArrowLeft } from '../components/Icons'
 
 /**
@@ -43,6 +44,29 @@ export function PixPaymentPage() {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
+
+  /*
+    Meio de pagamento escolhido. O padrão é Pix porque é o que já existia e o
+    que não exige digitar nada — na dúvida, o caminho mais curto.
+  */
+  const [method, setMethod] = useState<'pix' | 'card'>('pix')
+  const [cardEnabled, setCardEnabled] = useState(false)
+  const [publicKey, setPublicKey] = useState<string | null>(null)
+  const [cardApproved, setCardApproved] = useState(false)
+
+  /* ── Descobre quais meios existem neste servidor ──────────────────────── */
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      const cfg = await fetchPixConfig()
+      if (!active) return
+      setCardEnabled(Boolean(cfg.card_enabled))
+      setPublicKey(cfg.public_key ?? null)
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
 
   /**
    * Gera o Pix direto, sem pedir CPF.
@@ -145,7 +169,7 @@ export function PixPaymentPage() {
     }
   }
 
-  const approved = Boolean(charge?.approved)
+  const approved = Boolean(charge?.approved) || cardApproved
   const expired = charge?.status === 'expired' || secondsLeft === 0
 
   return (
@@ -155,19 +179,60 @@ export function PixPaymentPage() {
       </button>
 
       <h1 className="section-title" style={{ fontSize: 'clamp(1.5rem,3vw,2.1rem)', marginBottom: 6 }}>
-        Pagamento por Pix
+        Pagamento
       </h1>
 
-      {loading && <div className="skeleton" style={{ height: 320, marginTop: 20 }} />}
+      {/*
+        Escolha do meio de pagamento.
 
-      {error && (
+        Só aparece quando há mais de um meio disponível: com o cartão desligado
+        no servidor, uma aba que leva a "indisponível" é ruído. O Pix continua
+        sendo o padrão.
+      */}
+      {cardEnabled && !approved && (
+        <div className="inline" style={{ gap: 8, margin: '14px 0 4px' }}>
+          <button
+            className={`btn ${method === 'pix' ? 'btn--primary' : 'btn--outline'} btn--sm`}
+            onClick={() => setMethod('pix')}
+            aria-pressed={method === 'pix'}
+          >
+            Pix
+          </button>
+          <button
+            className={`btn ${method === 'card' ? 'btn--primary' : 'btn--outline'} btn--sm`}
+            onClick={() => setMethod('card')}
+            aria-pressed={method === 'card'}
+          >
+            Cartão de crédito ou débito
+          </button>
+        </div>
+      )}
+
+      {/* ── Cartão ─────────────────────────────────────────────────────── */}
+      {method === 'card' && cardEnabled && publicKey && !approved && (
+        <div style={{ marginTop: 20 }}>
+          <CardPaymentForm
+            planCode={planCode}
+            period={period}
+            planName={charge?.plan.name ?? 'Plano'}
+            periodLabel={charge?.period.label ?? ''}
+            amountLabel={charge?.amount_label ?? ''}
+            publicKey={publicKey}
+            onApproved={() => setCardApproved(true)}
+          />
+        </div>
+      )}
+
+      {loading && method === 'pix' && <div className="skeleton" style={{ height: 320, marginTop: 20 }} />}
+
+      {error && method === 'pix' && (
         <div className="alert alert--error" style={{ marginTop: 20 }}>
           <InfoIcon size={18} />
           <span>{error}</span>
         </div>
       )}
 
-      {!loading && error && (
+      {!loading && error && method === 'pix' && (
         <div className="panel" style={{ marginTop: 16 }}>
           <p className="panel-sub" style={{ marginBottom: 14 }}>
             Se o Pix não estiver disponível, você pode contratar pelo WhatsApp — respondemos por lá.
@@ -183,7 +248,7 @@ export function PixPaymentPage() {
         </div>
       )}
 
-      {charge && !approved && (
+      {charge && !approved && method === 'pix' && (
         <>
           <div className="panel" style={{ marginTop: 20 }}>
             <div className="row-between" style={{ marginBottom: 4 }}>

@@ -158,7 +158,7 @@ publicRouter.get('/', (_req, res) => {
         tela e atualizador integrado. O selo "beta" foi removido — o app não é
         mais apresentado como em desenvolvimento.
       */
-      updateNote: 'botões de episódio anterior/próximo no player, avanço automático para o próximo episódio e destaque do "próximo" nos últimos 15 segundos',
+      updateNote: 'pagamento por cartão de crédito e débito, além do Pix',
       platforms: ['Android TV', 'Google TV', 'TV Box'],
     },
   })

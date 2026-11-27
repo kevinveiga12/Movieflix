@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import run.velixir.movieflix.tv.data.AdminStats
 import run.velixir.movieflix.tv.data.ApiException
+import run.velixir.movieflix.tv.data.CardCharge
 import run.velixir.movieflix.tv.data.FavoriteRow
 import run.velixir.movieflix.tv.data.HistoryRow
 import run.velixir.movieflix.tv.data.MovieFlixApi
@@ -33,6 +34,13 @@ data class TvState(
     val genres: List<String> = emptyList(),
     val plans: List<Plan> = emptyList(),
     val pixEnabled: Boolean = false,
+    /** Cartão exige Access Token + Public Key no servidor. */
+    val cardEnabled: Boolean = false,
+    /** Chave pública para tokenizar — só preenchida quando o cartão está ativo. */
+    val cardPublicKey: String? = null,
+    val cardCharge: CardCharge? = null,
+    val cardLoading: Boolean = false,
+    val cardError: String? = null,
     val pixCharge: PixCharge? = null,
     val pixLoading: Boolean = false,
     val pixError: String? = null,
@@ -502,9 +510,102 @@ class TvViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(
                     plans = p?.plans ?: emptyList(),
                     pixEnabled = cfg?.pixEnabled == true,
+                    cardEnabled = cfg?.cardEnabled == true,
+                    cardPublicKey = cfg?.publicKey,
                 )
             }
         }
+    }
+
+    /**
+     * Paga com cartão: tokeniza e cobra.
+     *
+     * ── ONDE OS DADOS DO CARTÃO VÃO ──────────────────────────────────────────
+     * Os parâmetros `number`, `cvv` entram nesta função e saem em
+     * [MovieFlixApi.tokenizeCard], que fala com `api.mercadopago.com`. Eles NÃO
+     * são guardados no `TvUiState`, para não ficarem em memória depois do uso, e
+     * não entram em nenhum log.
+     *
+     * O que fica no estado é só `cardCharge` (o resultado da cobrança) — que
+     * contém bandeira e últimos 4 dígitos, nunca o número.
+     *
+     * ── POR QUE NÃO ATIVA AQUI ───────────────────────────────────────────────
+     * Quem ativa é o servidor, em `activateFromPayment`, depois de consultar a
+     * API oficial. A TV só reflete o resultado e, se aprovado, recarrega a
+     * assinatura para o acesso valer sem reinstalar.
+     */
+    fun payWithCard(
+        planCode: String,
+        period: String,
+        number: String,
+        month: Int,
+        year: Int,
+        cvv: String,
+        holder: String,
+    ) {
+        val pk = _state.value.cardPublicKey
+        if (pk.isNullOrBlank()) {
+            update { it.copy(cardError = "Pagamento com cartão indisponível no momento.") }
+            return
+        }
+
+        update { it.copy(cardLoading = true, cardError = null, cardCharge = null) }
+
+        viewModelScope.launch {
+            try {
+                val tok = api.tokenizeCard(
+                    publicKey = pk,
+                    cardNumber = number.replace(" ", ""),
+                    month = month,
+                    year = year,
+                    cvv = cvv,
+                    holderName = holder,
+                )
+                val pm = tok.paymentMethodId
+                    ?: throw IllegalStateException(
+                        "Bandeira do cartão não identificada. Confira o número.",
+                    )
+
+                val charge = api.createCardCharge(
+                    planCode = planCode,
+                    period = period,
+                    token = tok.token,
+                    paymentMethodId = pm,
+                    issuerId = tok.issuerId,
+                )
+
+                update { it.copy(cardCharge = charge, cardLoading = false) }
+
+                // Aprovado: recarrega a assinatura para o acesso valer na hora.
+                if (charge.approved) loadSubscription()
+            } catch (e: Exception) {
+                update {
+                    it.copy(cardLoading = false, cardError = friendlyCardError(e))
+                }
+            }
+        }
+    }
+
+    /** Limpa o estado do cartão ao sair da tela. */
+    fun clearCard() =
+        update { it.copy(cardCharge = null, cardError = null, cardLoading = false) }
+
+    /**
+     * Traduz o erro em algo que a pessoa entende na TV.
+     *
+     * A exceção crua do OkHttp é "HTTP 401: card_token_failed" — inútil para
+     * quem está com o controle na mão. O que importa é: o cartão foi recusado,
+     * os dados estão errados, ou o serviço está fora.
+     */
+    private fun friendlyCardError(e: Exception): String = when {
+        e is ApiException && e.body.contains("card_token_failed") ->
+            "Não foi possível validar o cartão. Confira número, validade e CVV."
+        e is ApiException && e.body.contains("card_unconfigured") ->
+            "Pagamento com cartão indisponível no momento. Use o Pix."
+        e is ApiException && e.status == 502 ->
+            "O banco não autorizou o pagamento. Tente outro cartão ou use o Pix."
+        e.message?.contains("Bandeira") == true -> e.message!!
+        else -> "Não foi possível processar o cartão. Tente novamente."
     }
 
     /**

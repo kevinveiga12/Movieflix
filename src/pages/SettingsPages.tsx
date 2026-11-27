@@ -178,7 +178,7 @@ const FALLBACK: AppInfo = {
     minAndroid: '8.0',
     sizeBytes: 0,
     url: '/api/apps/tv/download',
-    updateNote: 'botões de episódio anterior/próximo no player, avanço automático para o próximo episódio e destaque do "próximo" nos últimos 15 segundos',
+    updateNote: 'pagamento por cartão de crédito e débito, além do Pix',
     platforms: ['Android TV', 'Google TV', 'TV Box'],
   },
 }
@@ -326,8 +326,7 @@ export function DownloadPage() {
                     {mb(info.tv.sizeBytes) ? ` · ${mb(info.tv.sizeBytes)}` : ''}
                   </p>
                   <p className="muted" style={{ margin: '6px 0 0', fontSize: '0.82rem' }}>
-                    Atualização: cards completos, ordenação cronológica correta e pesquisa funcional
-                    em Filmes e Séries.
+                    Atualização: pagamento por cartão de crédito e débito, além do Pix.
                   </p>
                 </div>
               </div>

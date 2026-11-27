@@ -272,9 +272,13 @@ fun TvPixScreen(vm: TvViewModel, onBack: () -> Unit) {
  *
  * O anel branco de 3 dp é o mesmo padrão das outras telas da TV — sem ele o
  * cliente não sabe onde está o foco no D-pad.
+ *
+ * `internal` (não `private`) porque a tela de cartão também usa: os dois fluxos
+ * de pagamento precisam do botão idêntico, senão o foco muda de aparência ao
+ * trocar de Pix para cartão.
  */
 @Composable
-private fun TvPixButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun TvPixButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier

@@ -3,6 +3,9 @@ package run.velixir.movieflix.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -157,6 +160,68 @@ class MovieFlixApi(
     suspend fun createPix(planCode: String, period: String): PixCharge {
         val body = """{"plan_code":${str(planCode)},"period":${str(period)}}"""
         return json.decodeFromString(post("/api/payments/pix", body, auth = true))
+    }
+
+    /**
+     * Tokeniza o cartão DIRETO no Mercado Pago.
+     *
+     * O número, o CVV e a validade vão desta função para `api.mercadopago.com`
+     * com a chave PÚBLICA — nunca para o backend do MovieFlix. Volta um `token`
+     * de uso único, que é a ÚNICA coisa enviada ao nosso servidor.
+     */
+    suspend fun tokenizeCard(
+        publicKey: String,
+        cardNumber: String,
+        month: Int,
+        year: Int,
+        cvv: String,
+        holderName: String,
+    ): CardTokenResult = withContext(Dispatchers.IO) {
+        val body = buildString {
+            append("{")
+            append("\"card_number\":").append(str(cardNumber))
+            append(",\"expiration_month\":").append(month)
+            append(",\"expiration_year\":").append(year)
+            append(",\"security_code\":").append(str(cvv))
+            append(",\"cardholder\":{\"name\":").append(str(holderName)).append("}")
+            append("}")
+        }
+        val req = Request.Builder()
+            .url("https://api.mercadopago.com/v1/card_tokens?public_key=${enc(publicKey)}")
+            .post(body.toRequestBody(jsonMedia))
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ApiException(resp.code, "card_token_failed")
+            val obj = json.parseToJsonElement(text).jsonObject
+            CardTokenResult(
+                token = obj["id"]?.jsonPrimitive?.contentOrNull
+                    ?: throw ApiException(400, "no_token"),
+                paymentMethodId = obj["payment_method"]
+                    ?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull,
+                issuerId = obj["issuer"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull,
+            )
+        }
+    }
+
+    /** Cobra o cartão pelo token — o corpo não tem nenhum dado de cartão. */
+    suspend fun createCardCharge(
+        planCode: String,
+        period: String,
+        token: String,
+        paymentMethodId: String,
+        issuerId: String?,
+    ): CardCharge {
+        val body = buildString {
+            append("{")
+            append("\"plan_code\":").append(str(planCode))
+            append(",\"period\":").append(str(period))
+            append(",\"token\":").append(str(token))
+            append(",\"payment_method_id\":").append(str(paymentMethodId))
+            if (!issuerId.isNullOrBlank()) append(",\"issuer_id\":").append(str(issuerId))
+            append("}")
+        }
+        return json.decodeFromString(post("/api/payments/card", body, auth = true))
     }
 
     /**

@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Plan, Subscription, PlaybackAuth, DbSeason, Title, PixCharge } from './types'
+import type { Plan, Subscription, PlaybackAuth, DbSeason, Title, PixCharge, CardCharge } from './types'
 
 /**
  * Acesso a conteúdo e planos — sempre via backend.
@@ -83,12 +83,112 @@ export async function fetchPaymentStatus(paymentId: string): Promise<PixCharge> 
 }
 
 /** O Pix está disponível neste servidor? (MP_ACCESS_TOKEN configurado) */
-export async function fetchPixConfig(): Promise<{ pix_enabled: boolean; mode: string }> {
+export async function fetchPixConfig(): Promise<{
+  pix_enabled: boolean
+  card_enabled?: boolean
+  public_key?: string | null
+  mode: string
+}> {
   try {
     return await getJson('/api/payments/config')
   } catch {
-    return { pix_enabled: false, mode: 'unconfigured' }
+    return { pix_enabled: false, card_enabled: false, public_key: null, mode: 'unconfigured' }
   }
+}
+
+/**
+ * Tokeniza o cartão DIRETO no Mercado Pago.
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ * POR QUE ISTO ACONTECE NO NAVEGADOR E NÃO NO NOSSO SERVIDOR
+ * ══════════════════════════════════════════════════════════════════════════════
+ * O número do cartão, o CVV e a validade NUNCA passam pelo backend do MovieFlix.
+ * Esta função fala com `api.mercadopago.com/v1/card_tokens` usando a chave
+ * PÚBLICA, e o que volta é um `token` de uso único — um identificador que não
+ * permite reconstruir o cartão e expira em minutos.
+ *
+ * É o caminho oficial do Mercado Pago para Checkout Transparente. Mandar o PAN
+ * para o nosso servidor seria violar o pedido e o PCI-DSS.
+ *
+ * Nada aqui é gravado: nem em localStorage, nem em estado global, nem em log.
+ * O objeto do cartão existe só na memória do formulário até virar token.
+ */
+export async function tokenizeCard(args: {
+  publicKey: string
+  cardNumber: string
+  expirationMonth: string
+  expirationYear: string
+  securityCode: string
+  cardholderName: string
+  identificationType?: string
+  identificationNumber?: string
+}): Promise<{ token: string; paymentMethodId: string | null; issuerId: string | null; last4: string | null }> {
+  const body = {
+    card_number: args.cardNumber.replace(/\s+/g, ''),
+    expiration_month: Number(args.expirationMonth),
+    expiration_year: Number(args.expirationYear),
+    security_code: args.securityCode,
+    cardholder: {
+      name: args.cardholderName,
+      ...(args.identificationNumber
+        ? {
+            identification: {
+              type: args.identificationType ?? 'CPF',
+              number: args.identificationNumber,
+            },
+          }
+        : {}),
+    },
+  }
+
+  const res = await fetch(
+    `https://api.mercadopago.com/v1/card_tokens?public_key=${encodeURIComponent(args.publicKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+
+  const data = await res.json().catch(() => null)
+  if (!res.ok || !data?.id) {
+    // A mensagem do provedor é técnica; a tela mostra a nossa.
+    throw new Error('Não foi possível validar o cartão. Confira os dados e tente de novo.')
+  }
+
+  return {
+    token: String(data.id),
+    paymentMethodId: data.payment_method?.id ?? null,
+    issuerId: data.issuer?.id ? String(data.issuer.id) : null,
+    last4: data.last_four_digits ?? null,
+  }
+}
+
+/**
+ * Envia o TOKEN do cartão ao nosso servidor para cobrar.
+ *
+ * O corpo tem apenas o token e a bandeira — nenhum dado do cartão. O valor é
+ * resolvido no servidor, como no Pix.
+ */
+export async function createCardCharge(args: {
+  planCode: string
+  period: string
+  token: string
+  paymentMethodId: string
+  issuerId?: string | null
+}): Promise<CardCharge> {
+  const headers = await authHeader()
+  return getJson<CardCharge>('/api/payments/card', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      plan_code: args.planCode,
+      period: args.period,
+      token: args.token,
+      payment_method_id: args.paymentMethodId,
+      issuer_id: args.issuerId ?? undefined,
+    }),
+  })
 }
 
 /** Planos reais (preços vêm do banco). */

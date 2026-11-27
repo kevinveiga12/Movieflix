@@ -199,7 +199,33 @@ data class PixPeriodRef(val code: String = "", val label: String = "")
 @Serializable
 data class PixConfig(
     @SerialName("pix_enabled") val pixEnabled: Boolean = false,
+    @SerialName("card_enabled") val cardEnabled: Boolean = false,
+    @SerialName("public_key") val publicKey: String? = null,
     val mode: String = "unconfigured",
+)
+
+/**
+ * Resultado de POST /api/payments/card.
+ *
+ * NÃO tem campo de cartão: o servidor nunca recebe número, CVV ou validade, e
+ * portanto não tem o que devolver. `cardLast4` e `cardBrand` vêm do Mercado
+ * Pago só para o cliente reconhecer a cobrança.
+ */
+@Serializable
+data class CardCharge(
+    @SerialName("payment_id") val paymentId: String = "",
+    val status: String = "",
+    @SerialName("status_detail") val statusDetail: String? = null,
+    @SerialName("amount_cents") val amountCents: Int = 0,
+    @SerialName("amount_label") val amountLabel: String = "",
+    val plan: PixPlanRef = PixPlanRef(),
+    val period: PixPeriodRef = PixPeriodRef(),
+    val approved: Boolean = false,
+    val activated: Boolean = false,
+    @SerialName("plan_expires_at") val planExpiresAt: String? = null,
+    @SerialName("card_last4") val cardLast4: String? = null,
+    @SerialName("card_brand") val cardBrand: String? = null,
+    val message: String? = null,
 )
 
 /**

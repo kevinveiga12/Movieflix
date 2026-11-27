@@ -52,6 +52,22 @@ export interface PixCharge {
   reused?: boolean
 }
 
+export interface CardCharge {
+  payment_id: string
+  status: string
+  status_detail?: string | null
+  amount_cents: number
+  amount_label: string
+  plan: { code: string; name: string }
+  period: { code: string; label: string; days?: number }
+  approved: boolean
+  activated: boolean
+  plan_expires_at?: string | null
+  card_last4?: string | null
+  card_brand?: string | null
+  message?: string
+}
+
 export interface PlanPeriod {
   code: '1m' | '3m' | '12m'
   label: string
