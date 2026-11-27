@@ -218,6 +218,13 @@ fun MovieFlixRoot(vm: AppViewModel = viewModel(), initialRoute: String? = null) 
                     r.season,
                     r.episode,
                     onBack = { route = Route.Detail(r.title) },
+                    /*
+                      TROCA DE EPISÓDIO (botões anterior/próximo e avanço
+                      automático). O player só PEDE a troca; quem navega é esta
+                      tela, que já é dona da rota — a troca substitui a rota
+                      atual, sem empilhar telas.
+                    */
+                    onEpisodeChange = { s, e -> route = Route.Player(r.title, s, e) },
                 )
                 Route.EmbedDiag -> Box(Modifier.fillMaxSize()) {
                     // Diagnóstico do embed. Aponta para o provedor atual (MegaEmbed).
