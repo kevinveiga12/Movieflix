@@ -8,7 +8,9 @@ import {
   hideTitle,
   unhideTitle,
 } from '../lib/store.js'
-import { normalizeProfile } from '../lib/profile.js'
+import { normalizeProfile, createConfirmedUser } from '../lib/profile.js'
+import { matchesQuery } from '../lib/user-search.js'
+import { applyTrialMetadata } from '../lib/trial-claims.js'
 import { availabilityStats, loadStatic, loadRaw } from '../lib/static-catalog.js'
 import { verifyTitles, probeTitle, EMBED_BASE } from '../lib/verify-embeds.js'
 import { generateTrialCode, publicCodes, TRIAL_CODE_TTL_DAYS } from '../lib/trial-codes.js'
@@ -381,21 +383,186 @@ router.get('/stats', async (_req, res, next) => {
   }
 })
 
-/** GET /api/admin/users — lista usuários (sem dados sensíveis) */
+/**
+ * GET /api/admin/users?limit=50&q=maria
+ *
+ * Lista usuários (sem dados sensíveis).
+ *
+ * ── BUSCA (q) ────────────────────────────────────────────────────────────────
+ * A lista de clientes cresceu e o painel precisava de filtro. O filtro é feito
+ * AQUI, no servidor, e não só no navegador: assim ele continua funcionando
+ * quando a conta está além da primeira página de resultados.
+ *
+ * A comparação é feita em JS com `fold()` (minúsculas e sem acento) porque:
+ *   • `ilike` do Postgres não ignora acento — "jose" não acharia "José";
+ *   • a coluna de nome varia entre os projetos Supabase (`name` vs
+ *     `full_name`), e nomear a coluna errada devolve 42703 e derruba a lista.
+ * Por isso lemos as páginas de `profiles` e filtramos em memória, sobre o
+ * e-mail E o nome normalizados. Sem `q`, o comportamento é o de antes.
+ */
 router.get('/users', async (req, res, next) => {
   try {
     const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200)
+    const q = fold(req.query.q ?? '').trim()
+
     // `select('*')` em vez de nomear colunas: os dois projetos Supabase do
     // histórico divergem (um tem `name`, o outro `full_name`). Nomear a coluna
     // errada devolve 42703 e derruba a lista inteira. normalizeProfile()
     // resolve o nome para o formato que o frontend espera.
-    const { data, error } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit)
-    if (error) return res.status(500).json({ error: error.message })
-    res.json({ users: (data ?? []).map(normalizeProfile) })
+    if (!q) {
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) return res.status(500).json({ error: error.message })
+      return res.json({ users: (data ?? []).map(normalizeProfile), total: (data ?? []).length, q: null })
+    }
+
+    // Busca: varre as páginas de perfis (até 20 × 1000) e filtra por e-mail/nome.
+    const PAGE = 1000
+    const MAX_PAGES = 20
+    const matches = []
+    let scanned = 0
+    let truncated = false
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const from = page * PAGE
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE - 1)
+      if (error) return res.status(500).json({ error: error.message })
+      const rows = data ?? []
+      scanned += rows.length
+
+      for (const row of rows) {
+        const p = normalizeProfile(row)
+        if (!p) continue
+        // `matchesQuery` (server/lib/user-search.js) compara e-mail E nome sem
+        // acento e aceita vários termos — a mesma função que o teste cobre.
+        if (matchesQuery(p, q)) matches.push(p)
+      }
+
+      if (rows.length < PAGE) break
+      if (page === MAX_PAGES - 1) truncated = true
+    }
+
+    res.json({
+      users: matches.slice(0, limit),
+      total: matches.length,
+      scanned,
+      truncated,
+      q: String(req.query.q ?? '').trim(),
+    })
+  } catch (e) {
+    next(e)
+  }
+})
+
+/**
+ * POST /api/admin/users
+ * body: { email, password, fullName?, plan_code?, period? }
+ *
+ * Cria a conta do cliente PELO ADMINISTRADOR, com o e-mail já confirmado.
+ *
+ * ── Por que no servidor ──────────────────────────────────────────────────────
+ * O projeto está com "Confirm email" ligado e o SMTP padrão do Supabase não
+ * entrega para destinatários arbitrários: uma conta criada pelo navegador
+ * nasceria pendente e o cliente não conseguiria entrar. Aqui usamos a Service
+ * Role (`createConfirmedUser`), a MESMA função do cadastro público — então a
+ * conta criada pelo admin é idêntica a uma conta normal: entra no site, no app
+ * e na TV, e segue o mesmo fluxo de assinatura/plano.
+ *
+ * A senha nunca é gravada nem logada: vai direto para o Supabase Auth.
+ *
+ * `plan_code`/`period` são OPCIONAIS. Quando informados, concedem o plano na
+ * mesma chamada (mesma regra de /users/:id/plan: soma ao fim do plano vigente).
+ * Sem eles, a conta nasce sem plano — exatamente como um cadastro normal, que
+ * hoje não ganha mês grátis automático.
+ */
+router.post('/users', async (req, res, next) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Servidor sem Service Role.' })
+
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    const password = String(req.body?.password ?? '')
+    const fullName = String(req.body?.fullName ?? '').trim()
+
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return res.status(400).json({ error: 'E-mail inválido.' })
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' })
+    }
+    if (fullName.length > 120) {
+      return res.status(400).json({ error: 'Nome muito longo (máximo 120 caracteres).' })
+    }
+
+    const planCode = String(req.body?.plan_code ?? '').toLowerCase()
+    const period = String(req.body?.period ?? '1m').toLowerCase()
+    const wantsPlan = Boolean(planCode)
+    if (wantsPlan) {
+      if (!['basico', 'standard', 'premium'].includes(planCode)) {
+        return res.status(400).json({ error: 'Plano inválido. Use basico, standard ou premium.' })
+      }
+      if (!PLAN_DAYS[period]) {
+        return res.status(400).json({ error: 'Período inválido. Use 1m, 3m ou 12m.' })
+      }
+    }
+
+    const result = await createConfirmedUser({ email, password, fullName })
+    if (result.error) {
+      return res.status(result.status ?? 400).json({ error: result.error })
+    }
+
+    const userId = result.user?.id
+
+    // Marca a conta como "sem mês grátis automático" — a MESMA marca que o
+    // cadastro público grava. Sem ela, `accessState` cairia no cálculo legado
+    // por `created_at` e daria 30 dias de graça por engano.
+    try {
+      await applyTrialMetadata({ userId, email, granted: false, reason: 'no_trial' })
+    } catch (e) {
+      console.warn('[MovieFlix] marca de trial na conta criada pelo admin:', e?.message ?? e)
+    }
+
+    // Plano opcional, na mesma regra de /users/:id/plan.
+    let plan = null
+    if (wantsPlan && userId) {
+      const { data: current } = await supabaseAdmin.auth.admin.getUserById(userId)
+      const meta = { ...(current?.user?.app_metadata ?? {}) }
+      const now = Date.now()
+      const currentEnd = meta.plan_expires_at ? new Date(meta.plan_expires_at).getTime() : 0
+      const base = Number.isFinite(currentEnd) && currentEnd > now ? currentEnd : now
+      const expires = new Date(base + PLAN_DAYS[period] * 24 * 60 * 60 * 1000)
+      meta.plan_code = planCode
+      meta.plan_expires_at = expires.toISOString()
+      delete meta.access_disabled
+      const { error: planErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        app_metadata: meta,
+      })
+      if (planErr) {
+        // A conta já existe e funciona; só o plano falhou. Não desfazemos nada.
+        console.warn('[MovieFlix] plano na conta criada pelo admin:', planErr.message)
+      } else {
+        plan = { plan_code: planCode, plan_expires_at: meta.plan_expires_at, period, days: PLAN_DAYS[period] }
+      }
+    }
+
+    res.status(201).json({
+      ok: true,
+      user: {
+        id: userId,
+        email,
+        name: fullName || null,
+        created_at: result.user?.created_at ?? new Date().toISOString(),
+      },
+      profile: result.profile ?? null,
+      plan,
+      message: 'Conta criada e já confirmada. O cliente pode entrar com o e-mail e a senha informados.',
+    })
   } catch (e) {
     next(e)
   }

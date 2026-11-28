@@ -1215,6 +1215,130 @@ function UsersTab({
 }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+
+  /**
+   * BUSCA DE CLIENTES
+   *
+   * O filtro roda no SERVIDOR (`GET /api/admin/users?q=`), não só no navegador:
+   * a lista carregada no painel é limitada a 100 contas, então filtrar em
+   * memória deixaria de fora quem está além disso. A digitação é agrupada
+   * (debounce de 300 ms) para não disparar uma requisição por tecla.
+   *
+   * Com o campo vazio, a lista é a que o painel já carregou (`users`).
+   */
+  const [search, setSearch] = useState('')
+  const [found, setFound] = useState<AdminUser[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [searchInfo, setSearchInfo] = useState<{ total: number; truncated: boolean } | null>(null)
+
+  useEffect(() => {
+    const q = search.trim()
+    if (!q) {
+      setFound(null)
+      setSearchInfo(null)
+      setSearching(false)
+      return
+    }
+    let alive = true
+    setSearching(true)
+    const timer = setTimeout(async () => {
+      try {
+        const r = (await api(`/users?limit=200&q=${encodeURIComponent(q)}`)) as {
+          users?: AdminUser[]
+          total?: number
+          truncated?: boolean
+        }
+        if (!alive) return
+        setFound(r.users ?? [])
+        setSearchInfo({ total: r.total ?? (r.users ?? []).length, truncated: Boolean(r.truncated) })
+      } catch (e) {
+        if (alive) onError((e as Error).message)
+      } finally {
+        if (alive) setSearching(false)
+      }
+    }, 300)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
+
+  const visible = found ?? users
+
+  /**
+   * CRIAR CONTA PARA O CLIENTE
+   *
+   * O formulário chama `POST /api/admin/users`, que cria a conta com o e-mail
+   * JÁ CONFIRMADO (Service Role) — a mesma função do cadastro público. Por isso
+   * a conta entra normalmente no site, no app e na TV, e segue o mesmo fluxo de
+   * assinatura/plano dos outros usuários.
+   *
+   * O plano é opcional: sem ele, a conta nasce como qualquer cadastro novo
+   * (sem mês grátis automático). Com ele, o plano é concedido na mesma chamada.
+   */
+  const [showCreate, setShowCreate] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPlan, setNewPlan] = useState('')
+  const [newPeriod, setNewPeriod] = useState('1m')
+  const [creating, setCreating] = useState(false)
+  const [createErr, setCreateErr] = useState<string | null>(null)
+  const [created, setCreated] = useState<{
+    email: string
+    password: string
+    name: string | null
+    plan: string | null
+    expires: string | null
+  } | null>(null)
+
+  async function createAccount(e: React.FormEvent) {
+    e.preventDefault()
+    setCreateErr(null)
+    const email = newEmail.trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setCreateErr('E-mail inválido.')
+      return
+    }
+    if (newPassword.length < 6) {
+      setCreateErr('A senha precisa ter pelo menos 6 caracteres.')
+      return
+    }
+    setCreating(true)
+    try {
+      const r = (await api('/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email,
+          password: newPassword,
+          fullName: newName.trim(),
+          ...(newPlan ? { plan_code: newPlan, period: newPeriod } : {}),
+        }),
+      })) as {
+        user?: { email?: string; name?: string | null }
+        plan?: { plan_code?: string; plan_expires_at?: string } | null
+      }
+      setCreated({
+        email: r.user?.email ?? email,
+        password: newPassword,
+        name: r.user?.name ?? (newName.trim() || null),
+        plan: r.plan?.plan_code ?? null,
+        expires: r.plan?.plan_expires_at ?? null,
+      })
+      setNewName('')
+      setNewEmail('')
+      setNewPassword('')
+      setNewPlan('')
+      setNewPeriod('1m')
+      setShowCreate(false)
+      await onChanged('Conta criada. Entregue o e-mail e a senha ao cliente.')
+    } catch (e2) {
+      setCreateErr((e2 as Error).message)
+    } finally {
+      setCreating(false)
+    }
+  }
   // Situação de acesso carregada por usuário (app_metadata).
   const [access, setAccess] = useState<
     Record<string, { disabled: boolean; plan_code: string | null; plan_expires_at: string | null }>
@@ -1321,10 +1445,221 @@ function UsersTab({
           grava a validade em <code>app_metadata</code> — a mesma fonte que o servidor confia.
         </p>
 
-        {users.length === 0 && <p className="muted">Nenhum usuário carregado.</p>}
+        {/* ── Busca de clientes (e-mail ou nome) ─────────────────────────── */}
+        <div className="field" style={{ marginBottom: 14 }}>
+          <label htmlFor="user-search">Buscar cliente</label>
+          <div style={{ position: 'relative' }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: 12,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--muted, #9ca3af)',
+                display: 'flex',
+                pointerEvents: 'none',
+              }}
+            >
+              <SearchIcon size={16} />
+            </span>
+            <input
+              id="user-search"
+              className="input"
+              type="search"
+              style={{ paddingLeft: 36 }}
+              placeholder="Digite o e-mail ou o nome…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <p className="field-hint">
+            {search.trim()
+              ? searching
+                ? 'Buscando…'
+                : `${searchInfo?.total ?? visible.length} cliente(s) encontrado(s) para “${search.trim()}”.`
+              : 'Filtra na hora por e-mail ou nome. Deixe vazio para ver todos.'}
+            {searchInfo?.truncated ? ' (busca limitada às primeiras 20.000 contas)' : ''}
+          </p>
+        </div>
+
+        {/* ── Criar conta para o cliente ─────────────────────────────────── */}
+        <div style={{ marginBottom: 16 }}>
+          <button
+            className={`btn btn--sm ${showCreate ? 'btn--outline' : 'btn--primary'}`}
+            onClick={() => {
+              setShowCreate((v) => !v)
+              setCreateErr(null)
+            }}
+          >
+            <UserIcon size={15} /> {showCreate ? 'Fechar formulário' : 'Criar conta para o cliente'}
+          </button>
+
+          {showCreate && (
+            <form
+              onSubmit={createAccount}
+              style={{
+                marginTop: 12,
+                padding: 14,
+                border: '1px solid rgba(255,255,255,.1)',
+                borderRadius: 12,
+                display: 'grid',
+                gap: 10,
+              }}
+            >
+              {createErr && <div className="alert alert--error">{createErr}</div>}
+
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="new-name">Nome do cliente</label>
+                <input
+                  id="new-name"
+                  className="input"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Nome completo"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="new-email">E-mail (será o login)</label>
+                <input
+                  id="new-email"
+                  className="input"
+                  type="email"
+                  required
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="cliente@email.com"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="new-password">Senha (mínimo 6 caracteres)</label>
+                <input
+                  id="new-password"
+                  className="input"
+                  type="text"
+                  required
+                  minLength={6}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Senha que você vai entregar ao cliente"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="field-hint">
+                  A conta nasce com o e-mail já confirmado — o cliente entra direto, sem esperar
+                  e-mail de confirmação.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <div className="field" style={{ margin: 0, minWidth: 150 }}>
+                  <label htmlFor="new-plan">Plano (opcional)</label>
+                  <select
+                    id="new-plan"
+                    className="input"
+                    value={newPlan}
+                    onChange={(e) => setNewPlan(e.target.value)}
+                  >
+                    <option value="">Sem plano (como cadastro normal)</option>
+                    <option value="basico">Básico</option>
+                    <option value="standard">Médio</option>
+                    <option value="premium">Premium</option>
+                  </select>
+                </div>
+                {newPlan && (
+                  <div className="field" style={{ margin: 0, minWidth: 130 }}>
+                    <label htmlFor="new-period">Duração</label>
+                    <select
+                      id="new-period"
+                      className="input"
+                      value={newPeriod}
+                      onChange={(e) => setNewPeriod(e.target.value)}
+                    >
+                      {PERIODS.map((p) => (
+                        <option key={p.code} value={p.code}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="inline">
+                <button className="btn btn--primary btn--sm" type="submit" disabled={creating}>
+                  <CheckIcon size={15} /> {creating ? 'Criando…' : 'Criar conta'}
+                </button>
+                <button
+                  className="btn btn--outline btn--sm"
+                  type="button"
+                  onClick={() => setShowCreate(false)}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          )}
+
+          {created && (
+            <div className="alert alert--success" style={{ marginTop: 12, alignItems: 'flex-start' }}>
+              <span>
+                Conta criada. Entregue estes dados ao cliente:
+                <br />
+                <strong>E-mail:</strong> {created.email}
+                <br />
+                <strong>Senha:</strong>{' '}
+                <strong style={{ fontFamily: 'ui-monospace, monospace', letterSpacing: '0.06em' }}>
+                  {created.password}
+                </strong>
+                {created.name ? (
+                  <>
+                    <br />
+                    <strong>Nome:</strong> {created.name}
+                  </>
+                ) : null}
+                {created.plan ? (
+                  <>
+                    <br />
+                    <strong>Plano:</strong> {created.plan}
+                    {created.expires
+                      ? ` até ${new Date(created.expires).toLocaleDateString('pt-BR')}`
+                      : ''}
+                  </>
+                ) : null}
+                <br />
+                <span className="muted" style={{ fontSize: '0.8rem' }}>
+                  A senha não fica salva em lugar nenhum — copie agora. Se perder, defina outra
+                  pelo Supabase.
+                </span>
+              </span>
+              <button
+                className="btn btn--ghost btn--sm"
+                type="button"
+                onClick={() => setCreated(null)}
+              >
+                <XIcon size={15} /> Fechar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {visible.length === 0 && (
+          <p className="muted">
+            {search.trim()
+              ? searching
+                ? 'Buscando…'
+                : 'Nenhum cliente bate com essa busca.'
+              : 'Nenhum usuário carregado.'}
+          </p>
+        )}
 
         <div className="episode-list">
-          {users.map((u) => {
+          {visible.map((u) => {
             const a = access[u.id]
             const isOpen = openId === u.id
             return (
