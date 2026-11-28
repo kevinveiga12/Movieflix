@@ -101,7 +101,7 @@ export function canCreateProfile(planCode, profiles, kind) {
 
   if (current >= limit) {
     const code = normalizePlanCode(planCode)
-    const planLabel = code ? `plano ${PLAN_LABELS[code]}` : 'sua conta (sem plano ativo)'
+    const planLabel = code ? `O plano ${PLAN_LABELS[code]}` : 'Sua conta (sem plano ativo)'
     const what = k === 'kids' ? 'perfil infantil' : 'perfil'
     const plural = limit === 1 ? '' : 's'
     return {
@@ -111,8 +111,8 @@ export function canCreateProfile(planCode, profiles, kind) {
       used: current,
       reason:
         limit === 0
-          ? `O ${planLabel} não inclui perfil infantil.`
-          : `O ${planLabel} permite ${limit} ${what}${plural} e você já tem ${current}.`,
+          ? `${planLabel} não inclui perfil infantil.`
+          : `${planLabel} permite ${limit} ${what}${plural} e você já tem ${current}.`,
     }
   }
 
