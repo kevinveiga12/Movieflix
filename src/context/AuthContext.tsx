@@ -22,6 +22,15 @@ interface AuthState {
   updatePassword: (password: string) => Promise<{ error: string | null }>
   updateProfile: (patch: Partial<Pick<Profile, 'name' | 'avatar_url'>>) => Promise<{ error: string | null }>
   refreshProfile: () => Promise<void>
+  /**
+   * Muda quando o PERFIL ATIVO muda (troca na tela de perfis).
+   *
+   * As telas usam este número como `key`: ao trocar de perfil, home, catálogo e
+   * busca são remontados e releem o catálogo já filtrado pelo modo infantil.
+   * Sem isso, os cards carregados antes da troca continuariam na tela.
+   */
+  profileEpoch: number
+  bumpProfileEpoch: () => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -41,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileEpoch, setProfileEpoch] = useState(0)
 
   /**
    * Carrega o perfil.
@@ -272,9 +282,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async refreshProfile() {
         if (session?.user) await loadProfile(session.user.id)
       },
+      profileEpoch,
+      bumpProfileEpoch: () => setProfileEpoch((n) => n + 1),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session, profile, loading],
+    [session, profile, loading, profileEpoch],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -110,7 +110,9 @@ class MovieFlixApi(
             if (!sort.isNullOrBlank()) append("&sort=${enc(sort)}")
             if (!q.isNullOrBlank()) append("&q=${enc(q)}")
         }
-        return json.decodeFromString(get(query))
+        // `auth = true`: o servidor precisa do token para saber se o perfil
+        // ativo é infantil e, nesse caso, devolver só conteúdo infantil.
+        return json.decodeFromString(get(query, auth = true))
     }
 
     suspend fun series(
@@ -128,7 +130,9 @@ class MovieFlixApi(
             if (!sort.isNullOrBlank()) append("&sort=${enc(sort)}")
             if (!q.isNullOrBlank()) append("&q=${enc(q)}")
         }
-        return json.decodeFromString(get(query))
+        // `auth = true`: o servidor precisa do token para saber se o perfil
+        // ativo é infantil e, nesse caso, devolver só conteúdo infantil.
+        return json.decodeFromString(get(query, auth = true))
     }
 
     /**
@@ -139,11 +143,14 @@ class MovieFlixApi(
      * `q`, e não esta função, para não misturar tipos.
      */
     suspend fun search(term: String, limit: Int = 40): CatalogResponse {
+        // `auth = true` nas duas chamadas: a busca também respeita o perfil
+        // infantil — um perfil de criança não pode achar filme adulto digitando
+        // o nome dele.
         val movies = json.decodeFromString<CatalogResponse>(
-            get("/api/catalog/movies?q=${enc(term)}&limit=$limit"),
+            get("/api/catalog/movies?q=${enc(term)}&limit=$limit", auth = true),
         )
         val series = json.decodeFromString<CatalogResponse>(
-            get("/api/catalog/series?q=${enc(term)}&limit=$limit"),
+            get("/api/catalog/series?q=${enc(term)}&limit=$limit", auth = true),
         )
         return CatalogResponse(movies.total + series.total, movies.items + series.items)
     }

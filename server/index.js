@@ -12,6 +12,7 @@ import { adminRouter } from './routes/admin.js'
 import { catalogRouter } from './routes/catalog.js'
 import { tmdbRouter } from './routes/tmdb.js'
 import { accessRouter } from './routes/access.js'
+import { profilesRouter } from './routes/profiles.js'
 import { dbCatalogRouter } from './routes/db-catalog.js'
 import { plansRouter } from './routes/plans.js'
 import { appsRouter, publicAppsRouter } from './routes/apps.js'
@@ -192,6 +193,8 @@ app.use('/api/mercadopago', mercadopagoWebhookRouter)
 app.use('/api', streamRouter)
 
 app.use('/api', accessRouter)
+// Perfis da conta (limites por plano + perfil infantil).
+app.use('/api/profiles', profilesRouter)
 
 // Integração MegaEmbed. O router responde 404 quando MEGAEMBED_ENABLED não é
 // 'true' — com a flag desligada (padrão) nada muda no player em produção.

@@ -1,6 +1,7 @@
 import type { Title, MediaType } from './types'
 import { sessionSeed, sampleWithSeed } from './variety'
 import { splitCategory, hasGenre } from './genres'
+import { isKidsContent } from './profiles'
 
 /**
  * Catálogo estático servido de /filmes/*.json.
@@ -227,8 +228,33 @@ function normalizeTitle(raw: Title): Title {
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * MODO INFANTIL
+ *
+ * O catálogo é carregado uma vez e fica em memória. Quando o perfil ativo é
+ * infantil, TODA leitura passa a devolver só conteúdo infantil — home, filmes,
+ * séries, busca, relacionados e o player. O ponto de bloqueio é aqui, em
+ * `getMovies`/`getSeries`, porque todas as telas leem por essas duas funções:
+ * filtrar em cada tela deixaria buracos (bastava abrir /assistir/<id>).
+ *
+ * O servidor faz a mesma checagem em `/api/catalog/*` e em
+ * `/api/playback/authorize` — esta camada é a resposta imediata na interface,
+ * aquela é a barreira real.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+let kidsOnly = false
+
+/** Liga/desliga o modo infantil. Chamado quando o perfil ativo muda. */
+export function setKidsOnly(value: boolean): void {
+  kidsOnly = value
+}
+
+/** O modo infantil está ativo? */
+export function isKidsOnly(): boolean {
+  return kidsOnly
+}
+
 export async function loadCatalog(): Promise<void> {
-  if (moviesCache && seriesCache) return
   if (loading) return loading
   loading = (async () => {
     const [movies, series, avail, hidden, clean] = await Promise.all([
@@ -273,11 +299,13 @@ export async function loadCatalog(): Promise<void> {
 }
 
 export function getMovies(): Title[] {
-  return moviesCache ?? []
+  const list = moviesCache ?? []
+  return kidsOnly ? list.filter(isKidsContent) : list
 }
 
 export function getSeries(): Title[] {
-  return seriesCache ?? []
+  const list = seriesCache ?? []
+  return kidsOnly ? list.filter(isKidsContent) : list
 }
 
 export function getAll(): Title[] {

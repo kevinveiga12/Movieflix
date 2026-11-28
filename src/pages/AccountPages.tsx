@@ -449,6 +449,16 @@ export function ProfilePage() {
         </div>
       </div>
 
+      <div className="panel">
+        <div className="panel-title">Perfis</div>
+        <p className="panel-sub">
+          Crie perfis para cada pessoa da casa. O perfil infantil só mostra conteúdo infantil.
+        </p>
+        <Link to="/perfis" className="btn btn--outline">
+          Gerenciar perfis
+        </Link>
+      </div>
+
       <TrialSection email={user.email} name={profile?.name} />
 
       <div className="panel">

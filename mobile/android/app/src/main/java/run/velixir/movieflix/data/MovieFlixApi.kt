@@ -70,7 +70,9 @@ class MovieFlixApi(
             append("/api/catalog/movies?limit=$limit&offset=$offset")
             if (!genre.isNullOrBlank()) append("&genre=${enc(genre)}")
         }
-        return json.decodeFromString(get(q))
+        // `auth = true`: o servidor usa o token para saber se o perfil ativo é
+        // infantil e, nesse caso, devolver só conteúdo infantil.
+        return json.decodeFromString(get(q, auth = true))
     }
 
     suspend fun series(limit: Int = 60, offset: Int = 0, genre: String? = null): CatalogResponse {
@@ -78,15 +80,16 @@ class MovieFlixApi(
             append("/api/catalog/series?limit=$limit&offset=$offset")
             if (!genre.isNullOrBlank()) append("&genre=${enc(genre)}")
         }
-        return json.decodeFromString(get(q))
+        return json.decodeFromString(get(q, auth = true))
     }
 
     suspend fun search(term: String, limit: Int = 40): CatalogResponse {
+        // A busca também respeita o perfil infantil.
         val movies = json.decodeFromString<CatalogResponse>(
-            get("/api/catalog/movies?q=${enc(term)}&limit=$limit"),
+            get("/api/catalog/movies?q=${enc(term)}&limit=$limit", auth = true),
         )
         val series = json.decodeFromString<CatalogResponse>(
-            get("/api/catalog/series?q=${enc(term)}&limit=$limit"),
+            get("/api/catalog/series?q=${enc(term)}&limit=$limit", auth = true),
         )
         return CatalogResponse(movies.total + series.total, movies.items + series.items)
     }

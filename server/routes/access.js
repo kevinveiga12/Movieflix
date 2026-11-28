@@ -21,6 +21,8 @@ import {
   MEGAEMBED_ONLY,
 } from '../lib/megaembed.js'
 import { resolvePlaybackChain, recentPlaybackDecisions, breakerStatus } from '../lib/playback-chain.js'
+import { isKidsRequest } from '../lib/profile-context.js'
+import { isKidsContent } from '../lib/profiles.js'
 
 /**
  * Rotas de acesso ao conteúdo.
@@ -105,6 +107,25 @@ router.post('/playback/authorize', strict, async (req, res, next) => {
         reason: 'not_in_catalog',
         message: 'Este título não está no catálogo e não pode ser reproduzido.',
       })
+    }
+
+    /*
+      3.1) PERFIL INFANTIL — só conteúdo infantil.
+
+      A checagem fica AQUI, no servidor, e não só na tela: abrir
+      `/assistir/<id>` direto com o id de um filme adulto tem de ser recusado
+      do mesmo jeito. Vale para o site, o app Android e a TV, porque os três
+      passam por esta rota.
+    */
+    if (await isKidsRequest(req)) {
+      if (!isKidsContent(title)) {
+        recordDenial({ tmdbId, reason: 'kids_blocked', userId: auth.user.id })
+        return res.status(403).json({
+          allowed: false,
+          reason: 'kids_blocked',
+          message: 'Este perfil é infantil e só pode assistir a conteúdo infantil.',
+        })
+      }
     }
 
     // 4) Série: resolve a URL do episódio pedido e valida que ele existe mesmo.

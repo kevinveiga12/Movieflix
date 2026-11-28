@@ -3,6 +3,8 @@ import { readOverrides, applyOverrides } from '../lib/store.js'
 import { loadStatic, availabilityStats } from '../lib/static-catalog.js'
 import { shuffleWithSeed } from '../lib/shuffle.js'
 import { splitCategory, hasGenre } from '../lib/genres.js'
+import { isKidsRequest } from '../lib/profile-context.js'
+import { filterKidsContent } from '../lib/profiles.js'
 
 const router = Router()
 
@@ -29,6 +31,8 @@ router.get('/movies', async (req, res, next) => {
   try {
     const overrides = await readOverrides()
     let list = applyOverrides(await loadBase('movie'), overrides, 'movie')
+    // Perfil infantil: só conteúdo infantil. Sem token, nada muda.
+    if (await isKidsRequest(req)) list = filterKidsContent(list)
     list = applyVariety(filterAndSort(list, req.query), req.query.seed, req.query.sort)
     res.json({ total: list.length, items: paginate(list, req.query) })
   } catch (e) {
@@ -40,6 +44,8 @@ router.get('/series', async (req, res, next) => {
   try {
     const overrides = await readOverrides()
     let list = applyOverrides(await loadBase('tv'), overrides, 'series')
+    // Perfil infantil: só conteúdo infantil. Sem token, nada muda.
+    if (await isKidsRequest(req)) list = filterKidsContent(list)
     list = applyVariety(filterAndSort(list, req.query), req.query.seed, req.query.sort)
     res.json({ total: list.length, items: paginate(list, req.query) })
   } catch (e) {

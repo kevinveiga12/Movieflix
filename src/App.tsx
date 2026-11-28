@@ -3,7 +3,7 @@ import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { detectAppEnv, rememberAppEnv, isAppEnv } from './lib/appEnv'
 import { Navbar } from './components/Navbar'
 import { Footer } from './components/Footer'
-import { AuthProvider } from './context/AuthContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import { HomePage } from './pages/HomePage'
 import { CatalogPage } from './pages/CatalogPage'
 import { SearchPage } from './pages/SearchPage'
@@ -12,6 +12,8 @@ import { LoginPage } from './pages/LoginPage'
 import { SignupPage } from './pages/SignupPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordPages'
 import { FavoritesPage, HistoryPage, ProfilePage } from './pages/AccountPages'
+import ProfilesPage from './pages/ProfilesPage'
+import ProfileGate from './components/ProfileGate'
 import { SettingsPage, DownloadPage } from './pages/SettingsPages'
 import { PlansPage } from './pages/PlansPage'
 import { PixPaymentPage } from './pages/PixPaymentPage'
@@ -38,6 +40,7 @@ function PageFallback() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
+  const { profileEpoch } = useAuth()
   // Dentro do app instalado não existe navbar nem rodapé de site: o app tem a
   // própria navegação (barra inferior nativa) e o conteúdo ocupa a tela toda.
   // É o que impede o usuário de perceber que é um site dentro de um app.
@@ -55,7 +58,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       <>
         <Navbar />
         <main className="app-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {children}
+          <div key={profileEpoch} style={{ display: 'contents' }}>
+            {children}
+          </div>
         </main>
       </>
     )
@@ -64,7 +69,13 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Navbar />
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>{children}</main>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {/* `key` no epoch: trocar de perfil remonta a tela e ela relê o catálogo
+            já filtrado pelo modo infantil. */}
+        <div key={profileEpoch} style={{ display: 'contents' }}>
+          {children}
+        </div>
+      </main>
       <Footer />
     </>
   )
@@ -74,6 +85,8 @@ export default function App() {
   return (
     <AuthProvider>
       <ScrollToTop />
+      {/* Liga o perfil ativo ao modo infantil do catálogo (site inteiro). */}
+      <ProfileGate />
       <Routes>
         {/* Player em tela cheia, sem navbar/footer */}
         <Route
@@ -104,6 +117,7 @@ export default function App() {
                   <Route path="/favoritos" element={<FavoritesPage />} />
                   <Route path="/historico" element={<HistoryPage />} />
                   <Route path="/perfil" element={<ProfilePage />} />
+                  <Route path="/perfis" element={<ProfilesPage />} />
                   <Route path="/configuracoes" element={<SettingsPage />} />
                   <Route path="/planos" element={<PlansPage />} />
                   <Route path="/pagamento/pix" element={<PixPaymentPage />} />
