@@ -71,7 +71,7 @@ test('Básico: primeiro perfil normal é permitido', () => {
 test('Básico: segundo perfil normal é recusado com motivo', () => {
   const r = canCreateProfile('basico', p('adult', 1), 'adult')
   assert.equal(r.allowed, false)
-  assert.match(r.reason, /Básico permite 1 perfil/)
+  assert.match(r.reason, /plano Básico permite 1 perfil/)
 })
 
 test('Básico: perfil infantil é recusado (o plano não inclui)', () => {
